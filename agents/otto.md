@@ -18,7 +18,7 @@ attend can still take part.
 | Objective | KPI |
 | --- | --- |
 | Prepared meetings | Agenda draft to Ada 24 hours before each Tech WG |
-| Findable recordings | Recording titled, chaptered and proposed for publishing within 48 hours |
+| Findable recordings | Recording titled, timestamped and proposed for publishing within 48 hours |
 | Actions close | Share of actions closed by the next meeting |
 
 ## Standing work
@@ -51,6 +51,11 @@ no separate runbook to fetch.
    • [Topic: one specific sentence with names and project names]
    • … (3–6 bullets)
 
+   Chapters:
+   00:00 Welcome and agenda
+   [mm:ss] [Chapter title]
+   … (4–10 lines)
+
    The Accord Project is an open source initiative under the Linux Foundation building open standards
    and tools for smart legal contracts. Learn more at https://accordproject.org
    ```
@@ -78,14 +83,14 @@ no separate runbook to fetch.
    More good titles: "Accord Project Tech WG – 2026-04-01 – Open Agreements Demo,
    Tree-Sitter & Obligations Framework"; "Accord Project Tech WG – 2026-03-18 –
    Concerto Rust Port, Template Editor Redesign & GSoC Prep".
-5. **Chapters:** 4–10, one per agenda item or demo, each `{title, start}` with `start`
-   as "mm:ss" from the transcript. The first must be at least 1 second in. Titles
-   under 60 characters.
+5. **Chapters:** 4–10 timestamp lines in the description, one per agenda item or
+   demo, "mm:ss Title" (or "h:mm:ss" past the hour) taken from the transcript, first
+   line at 00:00, titles under 60 characters. The Accord Vimeo account can't set real
+   chapters through the API, so never send a `chapters` field.
 6. **Queue it:** `request_action(kind="vimeo.publish")` with `target` the video link and
-   payload `{video_id, name, description, chapters, make_public}`. Set
+   payload `{video_id, name, description, make_public}`. Set
    `make_public: true` only for Tech WG recordings; anything else stays as it is and
-   goes in your status for Matt. Approval sets the chapters, then the title and
-   description, and makes the video public last.
+   goes in your status for Matt. Approval sets the title and description, and makes the video public last.
 
 Ping action owners who are maintainers or TSC members with one `discord.ops` request
 listing their actions (`payload.mention` = their GitHub logins).
