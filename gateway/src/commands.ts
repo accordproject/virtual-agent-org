@@ -5,6 +5,7 @@ import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, resume, revoke, stop } from "./controls";
 import type { Role } from "./env";
 import { describePerson, roleFor } from "./people";
+import { gatherStatus, statusPlain } from "./status";
 import type { TgMessage, TgUpdate } from "./telegram";
 
 const PERMS: Record<Role, Set<string>> = {
@@ -52,7 +53,7 @@ async function handleCallback(ctx: Ctx, q: NonNullable<TgUpdate["callback_query"
       break;
     }
     case "k":
-      reply = await askAda(ctx, id, chatId);
+      reply = await askAda(ctx, id, { telegram: chatId });
       break;
     case "x":
       reply = await markDone(ctx, id);
@@ -88,7 +89,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
     if (!can("instruct") && !can("ask")) return;
     const prefix = role === "owner" ? "" : `${describePerson(ctx, "telegram", m.from?.id)} asks. They cannot instruct or approve; answer only.\n\n`;
     try {
-      await messageAgent(ctx, "ada", m.chat.id, prefix + text);
+      await messageAgent(ctx, "ada", { telegram: m.chat.id }, prefix + text);
     } catch (e) {
       await reply(e instanceof AgentUnavailable ? e.message : `Could not reach Ada: ${String(e)}`);
     }
@@ -140,7 +141,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
           await reply("Usage: /ask <agent> <text>");
           return;
         }
-        await messageAgent(ctx, agentArg, m.chat.id, args.slice(1).join(" "));
+        await messageAgent(ctx, agentArg, { telegram: m.chat.id }, args.slice(1).join(" "));
         await ctx.db.audit({ agent: agentArg, event_type: "owner.direct_ask", detail: { by: role } });
         return;
       }
@@ -173,31 +174,5 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
 }
 
 export async function statusText(ctx: Ctx): Promise<string> {
-  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().replace("T", " ").slice(0, 19);
-  const monthStart = new Date().toISOString().slice(0, 8) + "01 00:00:00";
-  const [controls, statuses, tasks, open, spendWeek, spendMonth] = await Promise.all([
-    ctx.db.allAgentStatuses(),
-    ctx.db.latestStatuses(),
-    ctx.db.openTasks(),
-    ctx.db.listDecisions({ status: "open" }),
-    ctx.db.spendByAgent(weekAgo),
-    ctx.db.spendByAgent(monthStart),
-  ]);
-  const usd = (c = 0) => `$${(c / 100).toFixed(2)}`;
-  const out = [`Phase ${ctx.network.current_phase}${ctx.dryRun ? " · DRY RUN" : ""}`];
-  for (const a of Object.values(ctx.network.agents).sort((x, y) => x.phase - y.phase)) {
-    if (a.phase > ctx.network.current_phase) continue;
-    const st = statuses.find((s) => s.agent === a.name);
-    const deployed = !!ctx.deployed.agents[a.name];
-    out.push(
-      `${cap(a.name)} (${a.title}) · ${deployed ? controls[a.name] ?? "active" : "not deployed"}` +
-        ` · tasks ${tasks.filter((t) => t.agent === a.name).length}` +
-        ` · decisions ${open.filter((d) => d.agent === a.name).length}` +
-        ` · 7d ${usd(spendWeek[a.name])}` +
-        (st ? `\n  last report ${st.at}: ${st.doing[0] ?? st.done[0] ?? "—"}` : ""),
-    );
-  }
-  const month = Object.values(spendMonth).reduce((x, y) => x + y, 0);
-  out.push(`Month to date ${usd(month)} of $${ctx.network.monthly_credit_usd} credits`);
-  return out.join("\n");
+  return statusPlain(await gatherStatus(ctx));
 }

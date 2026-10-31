@@ -1,5 +1,6 @@
 import { cap } from "./context";
 import type { Decision } from "./db";
+import type { DiscordButton } from "./discordBot";
 import type { InlineButton } from "./telegram";
 
 const RISK = { low: "low risk", medium: "medium risk", high: "HIGH RISK" } as Record<string, string>;
@@ -17,6 +18,9 @@ export function decisionCard(d: Decision): string {
   const payload = safeJson(d.payload);
   const text = payloadText(payload);
   if (text) lines.push("", "Content:", text);
+  if (Array.isArray(payload.mention) && payload.mention.length) {
+    lines.push("", `Pings: ${payload.mention.map((m) => `@${String(m).replace(/^@/, "")}`).join(", ")}`);
+  }
   if (d.status !== "open") lines.push("", `Status: ${d.status}${d.note ? ` — note: ${d.note}` : ""}`);
   if (d.result) lines.push(`Result: ${d.result}`);
   return lines.join("\n");
@@ -56,4 +60,17 @@ export function safeJson(s: string | null | undefined): Record<string, unknown> 
 
 export function lines(items: string[]): string {
   return items.length ? items.join("; ") : "—";
+}
+
+/** Discord buttons; custom_id carries the action and decision id, as on Telegram. */
+export function discordButtons(d: Decision): DiscordButton[] {
+  if (d.status === "open") {
+    return [
+      { label: "Approve", custom_id: `a:${d.id}`, style: 3 },
+      { label: "Reject", custom_id: `r:${d.id}`, style: 4 },
+      { label: "Ask Ada", custom_id: `k:${d.id}`, style: 2 },
+    ];
+  }
+  if (d.status === "approved") return [{ label: "Mark done", custom_id: `x:${d.id}`, style: 1 }];
+  return [];
 }

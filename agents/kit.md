@@ -36,4 +36,6 @@ contributors, with every lesson tied to a measurable change.
 ## You must queue
 
 Security advisories, policy changes, and any public statement about a vulnerability.
-Never discuss an undisclosed vulnerability in a public issue.
+Never discuss an undisclosed vulnerability in a public issue. To alert maintainers
+privately, request `discord.ops` naming them in `payload.mention`, and keep exploit
+detail out of the message: say where to look, not how to attack it.

@@ -1,17 +1,19 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DeployedConfig, NetworkConfig } from "../src/config";
 import type { Ctx } from "../src/context";
 import { Db } from "../src/db";
 import type { Env } from "../src/env";
+import type { DiscordBot } from "../src/discordBot";
 import type { ManagedClient } from "../src/managed";
 import type { Telegram } from "../src/telegram";
 
 /** Enough of the D1 API, backed by in-memory SQLite, to run the real queries. */
 export function memoryD1(): D1Database {
   const sqlite = new Database(":memory:");
-  sqlite.exec(readFileSync(fileURLToPath(new URL("../migrations/0001_init.sql", import.meta.url).href), "utf8"));
+  const dir = fileURLToPath(new URL("../migrations/", import.meta.url).href);
+  for (const f of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) sqlite.exec(readFileSync(dir + f, "utf8"));
   const make = (sql: string, args: unknown[] = []): any => ({
     bind: (...a: unknown[]) => make(sql, a),
     first: async () => sqlite.prepare(sql).get(...(args as any[])) ?? null,
@@ -35,7 +37,9 @@ export const NETWORK: NetworkConfig = {
     "github.comment": { risk: "low", executor: "github" },
     "vimeo.publish": { risk: "medium", executor: "manual" },
     "discord.announce": { risk: "medium", executor: "discord" },
+    "discord.ops": { risk: "low", executor: "discord_ops" },
   },
+  discord_approval_max_risk: "medium",
   people: [
     { name: "Matt Roberts", roles: ["owner"], github: "mttrbrts", telegram: "555" },
     { name: "Jane Doe", roles: ["tsc_member"], github: "janedoe", telegram: "88", discord: "123456789012345678" },
@@ -44,7 +48,7 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment"] },
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "discord.ops"] },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
@@ -62,13 +66,30 @@ export const DEPLOYED: DeployedConfig = {
 export interface Fakes {
   sent: { chatId: number; text: string; opts?: unknown }[];
   discord: string[];
+  ops: { text: string; ids: string[] }[];
+  dms: { user: string; content: string; buttons?: unknown[] }[];
+  dcEdits: { channelId: string; messageId: string; content: string; buttons?: unknown[] }[];
+  originals: { token: string; content: string }[];
   calls: { method: string; args: unknown[] }[];
   events: Record<string, any[]>;
   sessions: Record<string, any>;
 }
 
 export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fakes } {
-  const fakes: Fakes = { sent: [], discord: [], calls: [], events: {}, sessions: {} };
+  const fakes: Fakes = { sent: [], discord: [], ops: [], dms: [], dcEdits: [], originals: [], calls: [], events: {}, sessions: {} };
+  let dmId = 0;
+  const dc = {
+    dm: async (user: string, p: { content: string; buttons?: unknown[] }) => {
+      fakes.dms.push({ user, ...p });
+      return { channelId: `dm-${user}`, messageId: `m${++dmId}` };
+    },
+    edit: async (channelId: string, messageId: string, p: { content: string; buttons?: unknown[] }) => {
+      fakes.dcEdits.push({ channelId, messageId, ...p });
+    },
+    editOriginal: async (token: string, content: string) => {
+      fakes.originals.push({ token, content });
+    },
+  } as unknown as DiscordBot;
   let msgId = 100;
   let sesn = 0;
   const tg = {
@@ -114,10 +135,19 @@ export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fa
     github: async () => {
       throw new Error("no github in tests");
     },
+    dc,
+    ownerDiscordId: "111111111111111111",
     discord: {
       configured: true,
       post: async (text: string) => {
         fakes.discord.push(text);
+        return 1;
+      },
+    },
+    discordOps: {
+      configured: true,
+      post: async (text: string, ids: string[]) => {
+        fakes.ops.push({ text, ids });
         return 1;
       },
     },

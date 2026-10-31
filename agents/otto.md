@@ -32,6 +32,9 @@ pattern ("Accord Project Tech WG – YYYY-MM-DD – Topic, Topic, Topic"), chapt
 200-word summary and a list of actions with owners. Queue publishing with
 `request_action(kind="vimeo.publish")`, with all text in the payload.
 
+Ping action owners who are maintainers or TSC members with one `discord.ops` request
+listing their actions (`payload.mention` = their GitHub logins).
+
 Then queue a Discord announcement with `request_action(kind="discord.announce")`:
 the meeting title, three lines on what was decided, the recording link and the
 actions with owners, under 1,200 characters, as `payload.text`. No @mentions;

@@ -16,8 +16,11 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY?: string; // PKCS#8 PEM
   GITHUB_INSTALLATION_ID?: string;
 
-  // Discord channel webhook for approved discord.announce decisions (optional)
-  DISCORD_ANNOUNCE_WEBHOOK_URL?: string;
+  // Discord bot (decision 15B). All optional: without them the /discord endpoint is off.
+  DISCORD_APP_ID?: string;
+  DISCORD_PUBLIC_KEY?: string; // hex, from the Developer Portal's General Information page
+  DISCORD_BOT_TOKEN?: string;
+  OWNER_DISCORD_ID?: string; // the only Discord account with owner rights; never from people.yaml
 
   // "true" until the Phase 0 gate: approved actions are logged, not executed
   DRY_RUN?: string;

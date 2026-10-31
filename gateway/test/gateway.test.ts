@@ -195,10 +195,10 @@ describe("fetch binding (Workers rejects fetch called with another `this`)", () 
     try {
       const { Telegram } = await import("../src/telegram");
       const { ManagedClient } = await import("../src/managed");
-      const { postToDiscord } = await import("../src/discord");
+      const { DiscordBot } = await import("../src/discordBot");
       await expect(new Telegram("t").send(1, "hi")).resolves.toBe(1);
       await expect(new ManagedClient("k").retrieveSession("s")).resolves.toBeDefined();
-      await expect(postToDiscord("https://discord.com/api/webhooks/1/a", "hi")).resolves.toBe(1);
+      await expect(new DiscordBot("t", "a").post("123456", "hi")).resolves.toBe(1);
     } finally {
       globalThis.fetch = real;
     }
@@ -212,7 +212,7 @@ describe("discord announcements", () => {
       payload: { text },
     });
 
-  it("posts the approved text to the webhook", async () => {
+  it("posts the approved text to the announcements channel", async () => {
     const { ctx, fakes } = makeTestCtx({ dryRun: false });
     await queueAnnounce(ctx);
     expect(await approve(ctx, "D-1")).toBe("D-1: Posted to Discord");
@@ -220,7 +220,7 @@ describe("discord announcements", () => {
     expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
   });
 
-  it("falls back to manual posting when no webhook is set", async () => {
+  it("falls back to manual posting when no channel is set", async () => {
     const { ctx, fakes } = makeTestCtx({ dryRun: false });
     ctx.discord = { configured: false, post: async () => 0 };
     await queueAnnounce(ctx);
@@ -229,24 +229,23 @@ describe("discord announcements", () => {
     expect((await ctx.db.getDecision("D-1"))?.status).toBe("approved");
   });
 
-  it("only labels, never pings, and splits long posts", async () => {
-    const { postToDiscord, withLabel, AGENT_LABEL } = await import("../src/discord");
+  it("the bot posts to the channel, only labels, never pings, and splits long posts", async () => {
+    const { DiscordBot } = await import("../src/discordBot");
+    const { withLabel, AGENT_LABEL } = await import("../src/discord");
     const bodies: any[] = [];
-    const urls: string[] = [];
+    const calls: { url: string; auth: string }[] = [];
     const fake = (async (url: string, init: RequestInit) => {
-      urls.push(url);
+      calls.push({ url, auth: (init.headers as any).authorization });
       bodies.push(JSON.parse(String(init.body)));
       return new Response("{}");
     }) as unknown as typeof fetch;
-    const hook = "https://discord.com/api/webhooks/123/abc-DEF_1";
     const long = Array.from({ length: 120 }, (_, i) => `line ${i} @everyone`.padEnd(40, ".")).join("\n");
-    const n = await postToDiscord(hook, long, fake);
+    const n = await new DiscordBot("tok", "app", fake).post("987654321", long);
     expect(n).toBeGreaterThan(1);
-    expect(bodies.every((b) => b.content.length <= 2000 && b.allowed_mentions.parse.length === 0)).toBe(true);
-    expect(urls.every((u) => u === `${hook}?wait=true`)).toBe(true);
+    expect(bodies.every((b) => b.content.length <= 2000 && b.allowed_mentions.parse.length === 0 && b.allowed_mentions.users.length === 0)).toBe(true);
+    expect(calls.every((c) => c.url === "https://discord.com/api/v10/channels/987654321/messages" && c.auth === "Bot tok")).toBe(true);
     expect(bodies.at(-1).content).toContain(AGENT_LABEL);
     expect(withLabel(`Hi\n\n${AGENT_LABEL}`).match(new RegExp(AGENT_LABEL, "g"))).toHaveLength(1);
-    await expect(postToDiscord("https://evil.example/hook", "x", fake)).rejects.toThrow(/not a Discord webhook/);
   });
 });
 
@@ -277,5 +276,301 @@ describe("people", () => {
     await handleUpdate(ctx, { update_id: 10, message: { message_id: 10, from: { id: 88 }, chat: { id: 88, type: "private" }, text: "How is triage going?" } });
     const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
     expect(create.text).toMatch(/^Jane Doe \(TSC member\) asks/);
+  });
+});
+
+describe("shared memory upsert", () => {
+  it("updates the existing memory when the path is already taken", async () => {
+    const { ManagedClient } = await import("../src/managed");
+    const calls: { method: string; url: string; body: any; beta: string }[] = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      calls.push({ method: String(init.method), url, body, beta: (init.headers as any)["anthropic-beta"] });
+      if (calls.length === 1) {
+        return new Response(
+          JSON.stringify({
+            type: "error",
+            error: { type: "memory_path_conflict_error", conflicting_path: "/context/accord.md", conflicting_memory_id: "mem_1" },
+          }),
+          { status: 409 },
+        );
+      }
+      return new Response(JSON.stringify({ id: "mem_1" }));
+    }) as unknown as typeof fetch;
+    const r = await new ManagedClient("k", fake).upsertMemory("memstore_9", "/context/accord.md", "new text");
+    expect(r).toEqual({ id: "mem_1", updated: true });
+    expect(calls[1].url).toBe("https://api.anthropic.com/v1/memory_stores/memstore_9/memories/mem_1");
+    expect(calls[1].body).toEqual({ content: "new text" });
+    expect(calls.every((c) => c.beta === "agent-memory-2026-07-22")).toBe(true);
+  });
+
+  it("does not swallow other errors", async () => {
+    const { ManagedClient } = await import("../src/managed");
+    const fake = (async () => new Response('{"error":{"type":"permission_error"}}', { status: 403 })) as unknown as typeof fetch;
+    await expect(new ManagedClient("k", fake).upsertMemory("s", "/p", "x")).rejects.toThrow(/403/);
+  });
+});
+
+describe("discord bot (decision 15B)", () => {
+  const OWNER = "111111111111111111";
+  const JANE = "123456789012345678";
+  const run = async (ctx: any, i: any) => {
+    const pending: Promise<unknown>[] = [];
+    const { handleInteraction } = await import("../src/discordInteractions");
+    const res: any = await handleInteraction(ctx, { token: "tok", ...i }, (p) => pending.push(p));
+    await Promise.all(pending);
+    return res;
+  };
+  const cmd = (user: string, name: string, options: Record<string, string> = {}) => ({
+    type: 2,
+    member: { user: { id: user } },
+    data: { name, options: Object.entries(options).map(([name, value]) => ({ name, value })) },
+  });
+  const click = (user: string, custom_id: string) => ({ type: 3, user: { id: user }, data: { custom_id } });
+  const queue = (ctx: any, kind: string, target: string, agent = "mira") =>
+    handleTool(ctx, agent, "s", "request_action", { kind, target, summary: "s", rationale: "r", risk: "low", payload: { text: "hi" } });
+
+  it("verifies Discord's Ed25519 signature", async () => {
+    const { verifyDiscord } = await import("../src/discordBot");
+    const kp = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const pub = Buffer.from(await crypto.subtle.exportKey("raw", kp.publicKey)).toString("hex");
+    const body = '{"type":1}';
+    const sig = Buffer.from(await crypto.subtle.sign("Ed25519", kp.privateKey, new TextEncoder().encode("1700000000" + body))).toString("hex");
+    const h = (s: string) => new Headers({ "x-signature-ed25519": s, "x-signature-timestamp": "1700000000" });
+    expect(await verifyDiscord(pub, h(sig), body)).toBe(true);
+    expect(await verifyDiscord(pub, h(sig), body + " ")).toBe(false);
+    expect(await verifyDiscord(pub, h("00".repeat(64)), body)).toBe(false);
+  });
+
+  it("answers pings and turns away people who aren't listed", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    expect(await run(ctx, { type: 1 })).toEqual({ type: 1 });
+    const res = await run(ctx, cmd("999", "ada", { message: "hi" }));
+    expect(res.data.content).toMatch(/not set up/);
+    expect(fakes.calls.some((c) => c.method === "createSession")).toBe(false);
+  });
+
+  it("lets the owner instruct Ada and sends her replies to Discord DMs", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const res = await run(ctx, cmd(OWNER, "ada", { message: "Triage the sandbox" }));
+    expect(res.data.content).toMatch(/Sent to Ada/);
+    expect(res.data.flags).toBe(64);
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.text).toBe("Triage the sandbox");
+    const sid = Object.keys(fakes.sessions)[0];
+    fakes.sessions[sid] = { id: sid, status: "idle", agent: "agent_ada", stop_reason: { type: "end_turn" } };
+    fakes.events[sid] = [{ id: "e1", type: "agent.message", content: [{ type: "text", text: "Assigned T-1 to Mira." }] }];
+    await processSession(ctx, sid);
+    expect(fakes.dms).toEqual([{ user: OWNER, content: "Ada: Assigned T-1 to Mira." }]);
+    expect(fakes.sent).toHaveLength(0); // nothing leaks to Telegram
+  });
+
+  it("labels members' messages to Ada as ask-only", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await run(ctx, cmd(JANE, "ada", { message: "How's triage?" }));
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.text).toMatch(/^Jane Doe \(TSC member\) asks on Discord\. They cannot instruct or approve/);
+  });
+
+  it("owner rights on Discord come only from the secret", async () => {
+    const { roleFor } = await import("../src/people");
+    const { ctx } = makeTestCtx();
+    expect(roleFor(ctx, "discord", OWNER)).toBe("owner");
+    ctx.ownerDiscordId = undefined;
+    expect(roleFor(ctx, "discord", OWNER)).toBeNull();
+    expect(roleFor(ctx, "discord", JANE)).toBe("member");
+  });
+
+  it("DMs medium-risk cards, approves from a button, and updates both apps", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await queue(ctx, "github.merge", "accordproject/virtual-agent-org-sandbox#3");
+    expect(fakes.sent).toHaveLength(1); // Telegram card
+    expect(fakes.dms).toHaveLength(1); // Discord card
+    expect(fakes.dms[0].buttons).toHaveLength(3);
+    const res = await run(ctx, click(OWNER, "a:D-1"));
+    expect(res).toEqual({ type: 6 });
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
+    expect(fakes.dcEdits.at(-1)?.content).toContain("Result: DRY RUN");
+    expect(fakes.dcEdits.at(-1)?.buttons).toEqual([]);
+  });
+
+  it("keeps high-risk decisions and tool calls in Telegram", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const { postDecision } = await import("../src/agents");
+    const high = await ctx.db.createDecision({ agent: "mira", kind: "github.merge", target: "x", summary: "s", rationale: "r", risk: "high" });
+    const tool = await ctx.db.createDecision({
+      agent: "mira", kind: "tool.confirm", target: "bash", summary: "s", rationale: "r", risk: "medium", session_id: "s1", tool_use_id: "t1",
+    });
+    await postDecision(ctx, high);
+    await postDecision(ctx, tool);
+    expect(fakes.sent).toHaveLength(2); // both reach Telegram
+    expect(fakes.dms).toHaveLength(0); // neither reaches Discord
+    for (const d of [high, tool]) {
+      const res = await run(ctx, click(OWNER, `a:${d.id}`));
+      expect(res.data.content).toMatch(/approve it in Telegram/);
+      expect((await ctx.db.getDecision(d.id))?.status).toBe("open");
+    }
+  });
+
+  it("refuses button clicks from anyone but the owner", async () => {
+    const { ctx } = makeTestCtx();
+    await queue(ctx, "github.merge", "accordproject/virtual-agent-org-sandbox#3");
+    const res = await run(ctx, click(JANE, "a:D-1"));
+    expect(res.data.content).toMatch(/Only the owner/);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("open");
+  });
+
+  it("rejects through a form with an optional note", async () => {
+    const { ctx } = makeTestCtx();
+    await queue(ctx, "github.merge", "accordproject/virtual-agent-org-sandbox#3");
+    const modal = await run(ctx, click(OWNER, "r:D-1"));
+    expect(modal.type).toBe(9);
+    expect(modal.data.custom_id).toBe("rn:D-1");
+    await run(ctx, { type: 5, user: { id: OWNER }, data: { custom_id: "rn:D-1", components: [{ components: [{ custom_id: "note", value: "Needs tests" }] }] } });
+    const d = await ctx.db.getDecision("D-1");
+    expect(d?.status).toBe("rejected");
+    expect(d?.note).toBe("Needs tests");
+  });
+
+  it("lets the owner stop agents but not resume or revoke from Discord", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    expect((await run(ctx, cmd(JANE, "stop", { agent: "mira" }))).data.content).toMatch(/Only the owner/);
+    const res = await run(ctx, cmd(OWNER, "stop", { agent: "mira" }));
+    expect(res.type).toBe(5);
+    expect(await ctx.db.agentStatus("mira")).toBe("stopped");
+    expect(fakes.originals[0].content).toMatch(/Mira stopped/);
+    expect((await run(ctx, cmd(OWNER, "revoke", { agent: "mira" }))).data.content).toMatch(/Telegram-only/);
+  });
+
+  it("registers commands that list only active agents", async () => {
+    const { commandDefinitions } = await import("../src/discordInteractions");
+    const defs = commandDefinitions(["ada", "mira"]);
+    expect(defs.map((d) => d.name)).toEqual(["ada", "ask", "status", "queue", "pause", "stop"]);
+    const ask = defs.find((d) => d.name === "ask") as any;
+    expect(ask.options[0].choices.map((c: any) => c.value)).toEqual(["ada", "mira"]);
+  });
+});
+
+describe("sessions that are waiting", () => {
+  it("starts a fresh session when the last one is paused on a tool call", async () => {
+    const { ManagedAgentsError } = await import("../src/managed");
+    const { messageAgent } = await import("../src/agents");
+    const { ctx, fakes } = makeTestCtx();
+    const first = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "hello");
+    (ctx.managed as any).sendMessage = async () => {
+      throw new ManagedAgentsError(400, '{"error":{"message":"Invalid user.message event at events[0]: waiting on responses to events [sevt_1]"}}', "/sessions/x/events");
+    };
+    const second = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "are you there?");
+    expect(second).not.toBe(first);
+    expect(fakes.calls.filter((c) => c.method === "createSession")).toHaveLength(2);
+    // and the next message continues the new session, not the paused one
+    (ctx.managed as any).sendMessage = async (id: string) => fakes.calls.push({ method: "sendMessage", args: [id] });
+    await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "thanks");
+    expect(fakes.calls.at(-1)).toEqual({ method: "sendMessage", args: [second] });
+  });
+
+  it("does not hide other errors when continuing a session", async () => {
+    const { ManagedAgentsError } = await import("../src/managed");
+    const { messageAgent } = await import("../src/agents");
+    const { ctx } = makeTestCtx();
+    await messageAgent(ctx, "ada", { telegram: 42 }, "hello");
+    (ctx.managed as any).sendMessage = async () => {
+      throw new ManagedAgentsError(500, "boom", "/sessions/x/events");
+    };
+    await expect(messageAgent(ctx, "ada", { telegram: 42 }, "again")).rejects.toThrow(/500/);
+  });
+
+  it("answers a tool call even when the gateway fails unexpectedly", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    ctx.tg = { ...ctx.tg, send: async () => { throw new Error("Telegram down"); } } as any;
+    fakes.sessions.s3 = { id: "s3", status: "idle", agent: "agent_ada", stop_reason: { type: "requires_action" } };
+    fakes.events.s3 = [{ id: "e1", type: "agent.custom_tool_use", name: "send_to_matt", input: { text: "check-in" } }];
+    await processSession(ctx, "s3");
+    const r = fakes.calls.find((c) => c.method === "sendToolResult")!;
+    expect(r.args[1]).toBe("e1");
+    expect(r.args[2]).toMatch(/^Error: the gateway could not run send_to_matt: Telegram down/);
+  });
+});
+
+describe("#agent-ops pings", () => {
+  const ping = (ctx: any, mention: unknown, text = "PR #3 has waited 4 days for review") =>
+    handleTool(ctx, "mira", "s", "request_action", {
+      kind: "discord.ops", target: "discord:#agent-ops", summary: "Nudge reviewers", rationale: "r", risk: "low",
+      payload: { text, mention },
+    });
+
+  it("shows who will be pinged on the card, and pings only them once approved", async () => {
+    const { ctx, fakes } = makeTestCtx({ dryRun: false });
+    await ping(ctx, ["@alikhan", "Jane Doe"]);
+    expect(fakes.sent[0].text).toContain("Pings: @alikhan, @Jane Doe");
+    expect(await approve(ctx, "D-1")).toBe("D-1: Posted to #agent-ops pinging Ali Khan, Jane Doe");
+    expect(fakes.ops).toEqual([{ text: "PR #3 has waited 4 days for review", ids: ["223456789012345678", "123456789012345678"] }]);
+  });
+
+  it("refuses to ping anyone without a Discord id in people.yaml", async () => {
+    const { ctx, fakes } = makeTestCtx({ dryRun: false });
+    await ping(ctx, ["alikhan", "stranger"]);
+    expect(await approve(ctx, "D-1")).toMatch(/Can't ping stranger/);
+    expect(fakes.ops).toHaveLength(0);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("failed");
+  });
+
+  it("is low risk, so it can be approved from Discord", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ping(ctx, ["janedoe"]);
+    expect(fakes.dms).toHaveLength(1);
+  });
+
+  it("puts the pings first and lets nothing else ping", async () => {
+    const { composePost } = await import("../src/discord");
+    const p = composePost("@everyone see <@999> please", ["123456789012345678", "123456789012345678", "x"]);
+    expect(p.chunks[0].startsWith("<@123456789012345678>\n@everyone")).toBe(true);
+    expect(p.allowed_mentions).toEqual({ parse: [], users: ["123456789012345678"] });
+  });
+});
+
+describe("status formatting", () => {
+  const sample = {
+    phase: 1,
+    dryRun: false,
+    monthCents: 312,
+    creditUsd: 200,
+    agents: [
+      { name: "ada", title: "Chief of Staff", state: "active", tasks: 1, decisions: 0, weekCents: 142, last: { at: "2026-10-31 20:15:03", line: "Assigned T-4 to Mira" } },
+      { name: "mira", title: "Maintainer Desk", state: "paused", tasks: 2, decisions: 1, weekCents: 170 },
+    ],
+  };
+
+  it("renders Discord markdown with a block per agent", async () => {
+    const { statusMarkdown } = await import("../src/status");
+    const md = statusMarkdown(sample);
+    expect(md.split("\n")[0]).toBe("### Agent network · Phase 1");
+    expect(md).toContain("🟢 **Ada** · Chief of Staff");
+    expect(md).toContain("⏸️ **Mira** · Maintainer Desk · *paused*");
+    expect(md).toContain("-# 2 open tasks · 1 decision waiting · $1.70 this week");
+    expect(md).toContain("-# Last report 10-31 20:15: Assigned T-4 to Mira");
+    expect(md).toContain("$3.12 of $200 credits this month (2%)");
+  });
+
+  it("keeps the Telegram text as it was", async () => {
+    const { statusPlain } = await import("../src/status");
+    expect(statusPlain(sample).split("\n")[1]).toBe("Ada (Chief of Staff) · active · tasks 1 · decisions 0 · 7d $1.42");
+  });
+
+  it("stops agent-written text from pinging or breaking the layout", async () => {
+    const { discordSafe } = await import("../src/status");
+    expect(discordSafe("ping @everyone **now**\n# big")).toBe("ping @​everyone \\*\\*now\\*\\* \\# big");
+    expect(discordSafe("x".repeat(200)).length).toBe(140);
+  });
+
+  it("renders the queue with risk markers", async () => {
+    const { queueMarkdown } = await import("../src/status");
+    const { ctx } = makeTestCtx();
+    await handleTool(ctx, "mira", "s", "request_action", {
+      kind: "github.merge", target: "accordproject/virtual-agent-org-sandbox#3", summary: "Merge docs fix", rationale: "r", risk: "low",
+    });
+    const md = queueMarkdown(await ctx.db.listDecisions({ status: "open" }), "-# 1 card sent to your DMs.");
+    expect(md).toBe("### Decision queue · 1 waiting\n\n🟡 **D-1** · Mira · `github.merge`\n-# Merge docs fix\n\n-# 1 card sent to your DMs.");
+    expect(queueMarkdown([])).toBe("### Decision queue\nNothing waiting.");
   });
 });

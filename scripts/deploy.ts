@@ -78,7 +78,8 @@ function rosterSection(): string {
     "",
     "Who's who in the project. Maintainers review and merge: request their review (GitHub's reviewer request,",
     "not an @mention) on PRs in repos they maintain, or from any listed maintainer when a repo has none.",
-    "Don't @mention the people below in public text; name them in a status report or request_action payload instead.",
+    "Don't @mention the people below in public text. When one of them needs to know something that shouldn't be public,",
+    "request discord.ops with payload {text, mention: [their GitHub logins]}: it posts to the private #agent-ops channel and pings them.",
     "",
     "| Name | GitHub | Roles | Maintains |",
     "| --- | --- | --- | --- |",
@@ -133,11 +134,12 @@ async function ensureSharedMemory() {
     );
     if (store) state.shared_memory_store_id = store.id;
   }
-  // VERIFY: writing an existing path may need the update endpoint instead.
+  // Creates the file the first time and replaces its content on later deploys.
   if (state.shared_memory_store_id) {
-    await step("write /context/accord.md", {}, () =>
-      client.writeMemory(state.shared_memory_store_id!, "/context/accord.md", readText("context/accord.md")),
-    ).catch((e) => console.warn(`  shared context write skipped: ${e}`));
+    const r = await step("write /context/accord.md", {}, () =>
+      client.upsertMemory(state.shared_memory_store_id!, "/context/accord.md", readText("context/accord.md")),
+    );
+    if (r) console.log(`  ${r.updated ? "updated" : "created"} ${r.id}`);
   }
 }
 

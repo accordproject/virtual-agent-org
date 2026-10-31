@@ -44,7 +44,8 @@ export interface ModelsYaml {
   agents: Record<string, { default: string; tasks?: Record<string, string> }>;
 }
 export interface PermissionsYaml {
-  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "manual" }>;
+  discord_approval_max_risk?: "none" | "low" | "medium";
+  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "discord_ops" | "manual" }>;
   agents: Record<
     string,
     { mcp_servers: Record<string, { mode: string }> | []; builtin_tools: string[]; requestable: string[] }
@@ -63,6 +64,9 @@ export interface PeopleYaml {
     telegram?: string | number;
   }[];
 }
+export interface DiscordYaml {
+  channels?: { announcements?: string | number; agent_ops?: string | number };
+}
 export interface McpYaml {
   servers: Record<string, { url: string; token_env: string }>;
   modes: Record<string, "always_allow" | "always_ask" | "auto">;
@@ -76,6 +80,7 @@ export function loadAll() {
     schedules: readYaml<SchedulesYaml>("config/schedules.yaml"),
     mcp: readYaml<McpYaml>("config/mcp_servers.yaml"),
     people: readYaml<PeopleYaml>("config/people.yaml"),
+    discord: readYaml<DiscordYaml>("config/discord.yaml") ?? {},
     specs: loadSpecs(),
   };
 }

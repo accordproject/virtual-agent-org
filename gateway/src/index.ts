@@ -1,4 +1,6 @@
 import { handleUpdate } from "./commands";
+import { verifyDiscord } from "./discordBot";
+import { handleInteraction, type Interaction } from "./discordInteractions";
 import { makeCtx } from "./context";
 import type { Env } from "./env";
 import { processSession, sweep } from "./sessions";
@@ -28,6 +30,17 @@ export default {
         handleUpdate(ctx, update).catch((e) => ctx.db.audit({ event_type: "gateway.telegram_error", detail: String(e) })),
       );
       return new Response("ok");
+    }
+
+    if (req.method === "POST" && url.pathname === "/discord") {
+      if (!env.DISCORD_PUBLIC_KEY) return new Response("not found", { status: 404 });
+      const raw = await req.text();
+      if (!(await verifyDiscord(env.DISCORD_PUBLIC_KEY, req.headers, raw))) {
+        return new Response("bad signature", { status: 401 });
+      }
+      const ctx = makeCtx(env);
+      const body = await handleInteraction(ctx, JSON.parse(raw) as Interaction, (p) => exec.waitUntil(p));
+      return Response.json(body);
     }
 
     if (req.method === "POST" && url.pathname === "/anthropic") {

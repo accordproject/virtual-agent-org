@@ -34,7 +34,7 @@ export const COMMON_TOOLS: CustomToolDef[] = [
         payload: {
           type: "object",
           description:
-            "Everything needed to execute: e.g. {merge_method:'squash'} or the full text to publish.",
+            "Everything needed to execute: e.g. {merge_method:'squash'} or the full text to publish. For discord.ops: {text, mention: [GitHub logins]}.",
         },
       },
       required: ["kind", "target", "summary", "rationale", "risk"],

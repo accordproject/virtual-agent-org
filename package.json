@@ -9,6 +9,7 @@
     "deploy:agents": "tsx scripts/deploy.ts",
     "deploy:agents:dry": "tsx scripts/deploy.ts --dry-run",
     "deploy:agents:rotate": "tsx scripts/deploy.ts --rotate-credentials",
+    "discord:commands": "tsx scripts/discord-commands.ts",
     "gateway:deploy": "npm run compile && npm --prefix gateway run deploy",
     "test": "npm run check && npm --prefix gateway run typecheck && npm --prefix gateway test"
   },

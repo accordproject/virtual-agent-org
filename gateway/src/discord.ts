@@ -1,6 +1,5 @@
-// Posts approved announcements to Discord through a channel webhook.
-// The webhook URL comes only from the DISCORD_ANNOUNCE_WEBHOOK_URL secret,
-// never from an agent's payload.
+// How agent posts look on Discord. The app's bot posts them (decision 17A);
+// see DiscordBot.post. Channels come from config/discord.yaml, never from an agent.
 
 import { splitText } from "./telegram";
 
@@ -13,26 +12,14 @@ export function withLabel(text: string): string {
   return t.includes(AGENT_LABEL) ? t : `${t}\n\n-# ${AGENT_LABEL}`;
 }
 
-export function isDiscordWebhook(url: string): boolean {
-  return /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(url);
-}
-
-/** Posts text, split into Discord-sized messages. Returns how many were sent. */
-export async function postToDiscord(
-  webhookUrl: string,
-  text: string,
-  fetchImpl: typeof fetch = (input, init) => fetch(input, init),
-): Promise<number> {
-  if (!isDiscordWebhook(webhookUrl)) throw new Error("DISCORD_ANNOUNCE_WEBHOOK_URL is not a Discord webhook URL");
-  const chunks = splitText(withLabel(text), DISCORD_LIMIT);
-  for (const content of chunks) {
-    const res = await fetchImpl(`${webhookUrl}?wait=true`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      // No @everyone, @here, role or user pings from agent-drafted text.
-      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
-    });
-    if (!res.ok) throw new Error(`Discord webhook ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  return chunks.length;
+/**
+ * Splits a post into Discord-sized messages. `mentionIds` are the only people
+ * who can be pinged: they lead the first message, and nothing in the agent's
+ * text can ping anyone else (no @everyone, @here, roles or other users).
+ */
+export function composePost(text: string, mentionIds: string[] = []) {
+  const ids = [...new Set(mentionIds)].filter((id) => /^\d{5,20}$/.test(id)).slice(0, 25);
+  const pings = ids.map((id) => `<@${id}>`).join(" ");
+  const chunks = splitText(withLabel(pings ? `${pings}\n${text}` : text), DISCORD_LIMIT);
+  return { chunks, allowed_mentions: { parse: [] as string[], users: ids } };
 }

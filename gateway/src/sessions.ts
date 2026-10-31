@@ -2,7 +2,7 @@
 // audits every event, answers custom tool calls, turns paused tool calls into
 // decisions, and forwards agent replies to Telegram.
 
-import { postDecision } from "./agents";
+import { postDecision, replyToOrigin } from "./agents";
 import { agentByManagedId } from "./config";
 import { cap, type Ctx } from "./context";
 import { costCents, messageText, sessionAgentId, type SessionEvent } from "./managed";
@@ -25,7 +25,7 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   for (const e of events) {
     if (!(await ctx.db.claimEvent(e.id))) continue;
     try {
-      await handleEvent(ctx, agent, sessionId, row?.chat_id ?? null, e);
+      await handleEvent(ctx, agent, sessionId, { chat_id: row?.chat_id ?? null, discord_user: row?.discord_user ?? null }, e);
     } catch (err) {
       // Let the sweeper retry this event later.
       await ctx.db.releaseEvent(e.id);
@@ -44,7 +44,13 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   }
 }
 
-async function handleEvent(ctx: Ctx, agent: string, sessionId: string, chatId: number | null, e: SessionEvent) {
+async function handleEvent(
+  ctx: Ctx,
+  agent: string,
+  sessionId: string,
+  origin: { chat_id: number | null; discord_user: string | null },
+  e: SessionEvent,
+) {
   switch (e.type) {
     case "agent.custom_tool_use": {
       await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: e.type, tool: e.name, detail: e.input });
@@ -52,8 +58,15 @@ async function handleEvent(ctx: Ctx, agent: string, sessionId: string, chatId: n
       try {
         result = await handleTool(ctx, agent, sessionId, e.name ?? "", (e.input ?? {}) as Record<string, unknown>);
       } catch (err) {
-        if (!(err instanceof ToolError)) throw err;
-        result = `Error: ${err.message}`;
+        // Always answer: an unanswered tool call leaves the session paused and
+        // unable to take new messages. Unexpected failures go to the audit log.
+        if (!(err instanceof ToolError)) {
+          await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_error", tool: e.name, detail: String(err) });
+        }
+        result =
+          err instanceof ToolError
+            ? `Error: ${err.message}`
+            : `Error: the gateway could not run ${e.name}: ${err instanceof Error ? err.message : String(err)}. Do not retry blindly; report it in your status.`;
       }
       await ctx.managed.sendToolResult(sessionId, e.id, result);
       return;
@@ -90,7 +103,7 @@ async function handleEvent(ctx: Ctx, agent: string, sessionId: string, chatId: n
     case "agent.message": {
       const text = messageText(e);
       await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: e.type, detail: text.slice(0, 500) });
-      if (chatId && text) await ctx.tg.send(chatId, `${cap(agent)}: ${text}`);
+      if (text) await replyToOrigin(ctx, origin, `${cap(agent)}: ${text}`);
       return;
     }
 

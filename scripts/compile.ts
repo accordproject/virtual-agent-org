@@ -22,11 +22,20 @@ export function fullRepo(repo: string, org: string): string {
 }
 
 export function validate(cfg = loadAll()): string[] {
-  const { network, models, permissions, schedules, mcp, specs, people } = cfg;
+  const { network, models, permissions, schedules, mcp, specs, people, discord } = cfg;
   const errs: string[] = [];
 
+  for (const [name, id] of Object.entries(discord.channels ?? {})) {
+    if (id === undefined || id === null || id === "") continue;
+    if (typeof id === "number") errs.push(`discord channel ${name}: quote the id, it is too long to be a number`);
+    else if (!/^\d{5,20}$/.test(id)) errs.push(`discord channel ${name}: "${id}" should be digits only`);
+  }
+
+  const maxRisk = permissions.discord_approval_max_risk ?? "none";
+  if (!["none", "low", "medium"].includes(maxRisk)) errs.push(`discord_approval_max_risk must be none, low or medium, not "${maxRisk}"`);
+
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
-    if (!["github", "discord", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
+    if (!["github", "discord", "discord_ops", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
   }
 
   const seenIds = new Set<string>();
@@ -103,7 +112,7 @@ export function validate(cfg = loadAll()): string[] {
 }
 
 export function compile(cfg = loadAll()) {
-  const { network, permissions, specs, people } = cfg;
+  const { network, permissions, specs, people, discord } = cfg;
   const clean = (v: string | number | undefined) => (v === undefined || v === "" ? undefined : String(v));
   return {
     current_phase: network.network.current_phase,
@@ -112,6 +121,10 @@ export function compile(cfg = loadAll()) {
     sandbox_repo: network.github.sandbox_repo,
     repos: network.github.repos ?? [],
     action_kinds: permissions.action_kinds,
+    discord_approval_max_risk: permissions.discord_approval_max_risk ?? "none",
+    discord_channels: Object.fromEntries(
+      Object.entries(discord.channels ?? {}).filter(([, id]) => id !== undefined && id !== null && id !== "").map(([k, id]) => [k, String(id)]),
+    ),
     people: (people.people ?? []).map((p) => ({
       name: p.name,
       roles: rolesOf(p.role),

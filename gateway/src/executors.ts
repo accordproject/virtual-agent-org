@@ -4,6 +4,7 @@ import type { Ctx } from "./context";
 import type { Decision } from "./db";
 import { payloadText, safeJson } from "./format";
 import { parseTarget, type RepoRef } from "./github";
+import { resolveMentions } from "./people";
 
 export interface ExecResult {
   ok: boolean;
@@ -39,11 +40,28 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
     const text = payloadText(safeJson(d.payload));
     if (!text) return { ok: false, result: "No announcement text in payload" };
     if (!ctx.discord.configured) {
-      return { ok: true, manual: true, result: "No Discord webhook is set. Copy the content above, post it, then tap Mark done." };
+      return { ok: true, manual: true, result: "No announcements channel is set in config/discord.yaml. Copy the content above, post it, then tap Mark done." };
     }
     if (ctx.dryRun) return { ok: true, result: `DRY RUN: would post ${text.length} characters to Discord` };
     const n = await ctx.discord.post(text);
     return { ok: true, result: `Posted to Discord${n > 1 ? ` (${n} messages)` : ""}` };
+  }
+
+  if (kind.executor === "discord_ops") {
+    const payload = safeJson(d.payload);
+    const text = payloadText(payload);
+    if (!text) return { ok: false, result: "No message text in payload" };
+    const m = resolveMentions(ctx, payload.mention);
+    if (m.missing.length) {
+      return { ok: false, result: `Can't ping ${m.missing.join(", ")}: not in people.yaml with a Discord id` };
+    }
+    if (!ctx.discordOps.configured) {
+      return { ok: true, manual: true, result: "No agent_ops channel is set in config/discord.yaml. Copy the content above, post it, then tap Mark done." };
+    }
+    const who = m.names.length ? ` pinging ${m.names.join(", ")}` : "";
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would post to #agent-ops${who}` };
+    await ctx.discordOps.post(text, m.ids);
+    return { ok: true, result: `Posted to #agent-ops${who}` };
   }
 
   const ref = parseTarget(d.target);

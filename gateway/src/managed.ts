@@ -181,6 +181,33 @@ export class ManagedClient {
   writeMemory(storeId: string, path: string, content: string): Promise<{ id: string }> {
     return this.req("POST", `/memory_stores/${storeId}/memories`, { path, content }, MEMORY_BETA);
   }
+
+  updateMemory(storeId: string, memoryId: string, content: string): Promise<{ id: string }> {
+    return this.req("POST", `/memory_stores/${storeId}/memories/${memoryId}`, { content }, MEMORY_BETA);
+  }
+
+  /** Creates the memory at `path`, or replaces its content if the path already exists. */
+  async upsertMemory(storeId: string, path: string, content: string): Promise<{ id: string; updated: boolean }> {
+    try {
+      const m = await this.writeMemory(storeId, path, content);
+      return { id: m.id, updated: false };
+    } catch (e) {
+      const existing = e instanceof ManagedAgentsError && e.status === 409 ? conflictingMemoryId(e.body) : undefined;
+      if (!existing) throw e;
+      const m = await this.updateMemory(storeId, existing, content);
+      return { id: m.id, updated: true };
+    }
+  }
+}
+
+/** From a memory_path_conflict_error body: the id of the memory already at that path. */
+export function conflictingMemoryId(body: string): string | undefined {
+  try {
+    const err = (JSON.parse(body) as { error?: { type?: string; conflicting_memory_id?: string } }).error;
+    return err?.type === "memory_path_conflict_error" ? err.conflicting_memory_id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function userMessage(text: string) {

@@ -32,7 +32,10 @@ gets merged quickly.
    review is complete and no unresolved threads remain. Rationale cites the checks.
 4. **Propose closures** for PRs that will not be merged or have been stale 60+ days
    after a nudge, with a kind explanation drafted in the payload.
-5. **Flag** security-sensitive changes (auth, crypto, dependency additions, CI
+5. **Nudge** reviewers privately: when a PR has waited 3 or more days for a maintainer's
+   review, request `discord.ops` naming them in `payload.mention`, with the PR link and
+   what's blocking. At most one nudge per PR per week.
+6. **Flag** security-sensitive changes (auth, crypto, dependency additions, CI
    config) as `risk=high` and say why.
 
 ## You may do directly

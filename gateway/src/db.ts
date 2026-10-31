@@ -19,6 +19,8 @@ export interface Decision {
   session_id: string | null;
   tool_use_id: string | null;
   tg_message_id: number | null;
+  discord_channel_id: string | null;
+  discord_message_id: string | null;
   created_at: string;
   decided_at: string | null;
   executed_at: string | null;
@@ -39,8 +41,9 @@ export interface Task {
 export interface SessionRow {
   id: string;
   agent: string;
-  origin: "telegram" | "task" | "deployment";
+  origin: "telegram" | "discord" | "task" | "deployment";
   chat_id: number | null;
+  discord_user: string | null;
   task_id: string | null;
   status: string;
   cost_cents: number;
@@ -87,10 +90,10 @@ export class Db {
   async upsertSession(s: Partial<SessionRow> & { id: string; agent: string; origin: SessionRow["origin"] }) {
     await this.db
       .prepare(
-        "INSERT INTO sessions (id, agent, origin, chat_id, task_id, status) VALUES (?, ?, ?, ?, ?, ?) " +
+        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status) VALUES (?, ?, ?, ?, ?, ?, ?) " +
           "ON CONFLICT(id) DO NOTHING",
       )
-      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.task_id ?? null, s.status ?? "running")
+      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running")
       .run();
   }
 
@@ -117,9 +120,20 @@ export class Db {
     return this.db
       .prepare(
         "SELECT * FROM sessions WHERE agent = ? AND origin = 'telegram' AND chat_id = ? " +
-          "AND status NOT IN ('terminated') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC LIMIT 1",
+          "AND status NOT IN ('terminated') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC, rowid DESC LIMIT 1",
       )
       .bind(agent, chatId, `-${maxAgeHours} hours`)
+      .first<SessionRow>();
+  }
+
+  /** The latest Discord conversation with an agent, if it is recent enough to continue. */
+  recentDiscordSession(agent: string, discordUser: string, maxAgeHours = 6) {
+    return this.db
+      .prepare(
+        "SELECT * FROM sessions WHERE agent = ? AND origin = 'discord' AND discord_user = ? " +
+          "AND status NOT IN ('terminated') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+      )
+      .bind(agent, discordUser, `-${maxAgeHours} hours`)
       .first<SessionRow>();
   }
 
@@ -215,6 +229,13 @@ export class Db {
     await this.db
       .prepare("UPDATE decisions SET status = ?, result = ?, executed_at = datetime('now') WHERE id = ?")
       .bind(ok ? "executed" : "failed", result, id.toUpperCase())
+      .run();
+  }
+
+  async setDiscordMessage(id: string, channelId: string, messageId: string) {
+    await this.db
+      .prepare("UPDATE decisions SET discord_channel_id = ?, discord_message_id = ? WHERE id = ?")
+      .bind(channelId, messageId, id)
       .run();
   }
 

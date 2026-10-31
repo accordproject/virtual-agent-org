@@ -37,6 +37,10 @@
       "risk": "medium",
       "executor": "discord"
     },
+    "discord.ops": {
+      "risk": "low",
+      "executor": "discord_ops"
+    },
     "message.person": {
       "risk": "medium",
       "executor": "manual"
@@ -53,6 +57,11 @@
       "risk": "high",
       "executor": "manual"
     }
+  },
+  "discord_approval_max_risk": "medium",
+  "discord_channels": {
+    "announcements": "874841542311960608",
+    "agent_ops": "1566187048765751348"
   },
   "people": [
     {
@@ -173,7 +182,8 @@
       "phase": 1,
       "requestable": [
         "spec.change",
-        "other"
+        "other",
+        "discord.ops"
       ]
     },
     "mira": {
@@ -184,7 +194,8 @@
         "github.merge",
         "github.close",
         "github.comment",
-        "github.release"
+        "github.release",
+        "discord.ops"
       ]
     },
     "vera": {
@@ -201,7 +212,8 @@
         "vimeo.publish",
         "discord.announce",
         "github.comment",
-        "message.person"
+        "message.person",
+        "discord.ops"
       ]
     },
     "rosa": {
@@ -236,7 +248,8 @@
       "phase": 3,
       "requestable": [
         "github.comment",
-        "other"
+        "other",
+        "discord.ops"
       ]
     },
     "felix": {

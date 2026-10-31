@@ -5,7 +5,7 @@ import deployed from "./generated/deployed.json";
 
 export interface ActionKind {
   risk: "low" | "medium" | "high";
-  executor: "github" | "discord" | "manual";
+  executor: "github" | "discord" | "discord_ops" | "manual";
 }
 
 export interface Person {
@@ -35,6 +35,10 @@ export interface NetworkConfig {
   action_kinds: Record<string, ActionKind>;
   agents: Record<string, AgentConfig>;
   people?: Person[];
+  /** Channel ids the bot posts to (config/discord.yaml, decision 17A). */
+  discord_channels?: { announcements?: string; agent_ops?: string };
+  /** Highest risk the owner may approve from Discord (decision 15B). Absent = Telegram only. */
+  discord_approval_max_risk?: "none" | "low" | "medium";
 }
 
 export interface DeployedAgent {

@@ -1,6 +1,6 @@
 // Owner controls: approve, reject, pause, resume, stop, revoke.
 
-import { messageAgent, refreshDecisionCard } from "./agents";
+import { messageAgent, refreshDecisionCard, type ReplyTo } from "./agents";
 import { cap, type Ctx } from "./context";
 import { executeDecision } from "./executors";
 
@@ -60,13 +60,13 @@ export async function markDone(ctx: Ctx, id: string): Promise<string> {
   return `${id} marked done.`;
 }
 
-export async function askAda(ctx: Ctx, id: string, chatId: number): Promise<string> {
+export async function askAda(ctx: Ctx, id: string, to: ReplyTo): Promise<string> {
   const d = await ctx.db.getDecision(id);
   if (!d) return `${id} not found.`;
   await messageAgent(
     ctx,
     "ada",
-    chatId,
+    to,
     `Matt asks about ${id} (${d.agent}, ${d.kind}): "${d.summary}". Explain what it does, the evidence, the risks and your recommendation in a few lines.`,
   );
   return `Asked Ada about ${id}.`;
