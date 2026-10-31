@@ -3,6 +3,8 @@
 //
 //   ANTHROPIC_API_KEY=... npx tsx scripts/deploy.ts --dry-run   # print what would change
 //   ANTHROPIC_API_KEY=... npx tsx scripts/deploy.ts             # apply
+//   ANTHROPIC_API_KEY=... npx tsx scripts/deploy.ts --rotate-credentials
+//       # replace each agent's vault with one holding the tokens now in the environment
 //
 // Only agents whose phase <= network.current_phase are created or updated.
 // Idempotent: existing resources are updated in place (agents get a new version).
@@ -16,6 +18,7 @@ import { compile, validate } from "./compile";
 import { ROOT, loadAll, readText } from "./lib";
 
 const DRY = process.argv.includes("--dry-run");
+const ROTATE = process.argv.includes("--rotate-credentials");
 const STATE_PATH = join(ROOT, "gateway/src/generated/deployed.json");
 
 interface State extends DeployedConfig {
@@ -143,6 +146,20 @@ async function ensureAgent(agent: string) {
   let vault = existing?.vault_ids?.[0];
   const servers = Array.isArray(cfg.permissions.agents[agent].mcp_servers) ? {} : cfg.permissions.agents[agent].mcp_servers;
   const needsVault = Object.keys(servers).some((s) => cfg.mcp.servers[s].url);
+
+  // --rotate-credentials: replace the agent's vault with a new one holding the
+  // tokens now in the environment. Refuses if a token is missing, so an agent is
+  // never left without a credential it had.
+  if (vault && ROTATE) {
+    const missing = Object.keys(servers)
+      .filter((s) => cfg.mcp.servers[s].url)
+      .map((s) => cfg.mcp.servers[s].token_env.replace("<AGENT>", agent.toUpperCase()))
+      .filter((env) => !process.env[env]);
+    if (missing.length) throw new Error(`Cannot rotate ${agent}: set ${missing.join(", ")} first`);
+    const old = vault;
+    await step(`archive ${agent}'s old vault ${old}`, { vault: old }, () => client.archiveVault(old));
+    vault = undefined;
+  }
   if (!vault && needsVault) {
     const v = await step(`create vault for ${agent}`, {}, () => client.createVault(`${agent}-vault`, { role: agent }));
     vault = v?.id;

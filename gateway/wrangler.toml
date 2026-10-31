@@ -2,15 +2,15 @@ name = "virtual-agent-org-gateway"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 # Deployed to the Accord Project Cloudflare account. Set account_id after `wrangler login`:
-# account_id = "<accordproject account id>"
+# account_id = "fe0bfc8fb9ecfbc441c6663f8eca680c"
 
 [vars]
 DRY_RUN = "true"   # set to "false" only after the Phase 0 gate passes
 
 [[d1_databases]]
 binding = "DB"
-database_name = "virtual-agent-org"
-database_id = "<from: wrangler d1 create virtual-agent-org>"
+database_name = "virtual-agent-org1"
+database_id = "b2991630-bd5e-419f-94e0-9c0ffb451d05"
 migrations_dir = "migrations"
 
 [triggers]

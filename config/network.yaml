@@ -13,7 +13,7 @@ network:
 github:
   org: accordproject
   # Phase 0 runs only against the sandbox repo. Add real repos in Phase 1.
-  sandbox_repo: mttrbrts/virtual-agent-org-sandbox
+  sandbox_repo: accordproject/virtual-agent-org-sandbox
   repos: []          # e.g. [accordproject/concerto, accordproject/template-engine]
 
 telegram:

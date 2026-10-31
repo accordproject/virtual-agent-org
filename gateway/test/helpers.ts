@@ -28,7 +28,7 @@ export const NETWORK: NetworkConfig = {
   current_phase: 1,
   timezone: "Europe/London",
   monthly_credit_usd: 200,
-  sandbox_repo: "mttrbrts/virtual-agent-org-sandbox",
+  sandbox_repo: "accordproject/virtual-agent-org-sandbox",
   repos: [],
   action_kinds: {
     "github.merge": { risk: "medium", executor: "github" },

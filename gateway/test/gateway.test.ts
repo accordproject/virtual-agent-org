@@ -37,7 +37,7 @@ describe("request_action", () => {
   it("queues, raises risk to the kind's floor, sends a card, and never blocks", async () => {
     const { ctx, fakes } = makeTestCtx();
     const out = await handleTool(ctx, "mira", "sesn_x", "request_action", {
-      kind: "github.merge", target: "mttrbrts/virtual-agent-org-sandbox#3", summary: "Merge docs fix", rationale: "CI green", risk: "low",
+      kind: "github.merge", target: "accordproject/virtual-agent-org-sandbox#3", summary: "Merge docs fix", rationale: "CI green", risk: "low",
     });
     expect(out).toMatch(/^Queued as D-1\./);
     const d = await ctx.db.getDecision("D-1");
@@ -71,7 +71,7 @@ describe("tool ownership and controls", () => {
     const { ctx, fakes } = makeTestCtx();
     await ctx.db.upsertSession({ id: "sesn_live", agent: "mira", origin: "deployment" });
     await handleTool(ctx, "mira", "sesn_live", "request_action", {
-      kind: "github.comment", target: "mttrbrts/virtual-agent-org-sandbox#1", summary: "s", rationale: "r", risk: "low",
+      kind: "github.comment", target: "accordproject/virtual-agent-org-sandbox#1", summary: "s", rationale: "r", risk: "low",
     });
     const msg = await stop(ctx, "mira");
     expect(msg).toContain("1 session(s) interrupted, 1 open decision(s) rejected");
@@ -90,7 +90,7 @@ describe("approvals", () => {
 
   it("executes GitHub actions in dry run only for in-scope repos", async () => {
     const { ctx } = makeTestCtx();
-    await queue(ctx, "github.merge", "mttrbrts/virtual-agent-org-sandbox#3");
+    await queue(ctx, "github.merge", "accordproject/virtual-agent-org-sandbox#3");
     expect(await approve(ctx, "D-1")).toContain("DRY RUN");
     expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
 
