@@ -3,7 +3,8 @@
 
 import { AgentUnavailable, postDecision, startSession } from "./agents";
 import { cap, type Ctx } from "./context";
-import { ADA_TOOLS, COMMON_TOOLS, VERA_TOOLS } from "./toolDefs";
+import { ADA_TOOLS, COMMON_TOOLS, OTTO_TOOLS, VERA_TOOLS } from "./toolDefs";
+import { isTechWg } from "./vimeo";
 
 const RISK_ORDER = ["low", "medium", "high"];
 const maxRisk = (a: string, b: string) => (RISK_ORDER.indexOf(a) >= RISK_ORDER.indexOf(b) ? a : b);
@@ -12,6 +13,7 @@ const OWNERS: Record<string, string | undefined> = {
   ...Object.fromEntries(COMMON_TOOLS.map((t) => [t.name, undefined])),
   ...Object.fromEntries(ADA_TOOLS.map((t) => [t.name, "ada"])),
   ...Object.fromEntries(VERA_TOOLS.map((t) => [t.name, "vera"])),
+  ...Object.fromEntries(OTTO_TOOLS.map((t) => [t.name, "otto"])),
 };
 
 export class ToolError extends Error {}
@@ -105,6 +107,35 @@ export async function handleTool(ctx: Ctx, agent: string, sessionId: string, nam
       const text = s(input.text, "text");
       await ctx.tg.send(ctx.ownerChatId, text);
       return "Sent.";
+    }
+
+    case "vimeo_recordings": {
+      const limit = typeof input.limit === "number" ? input.limit : 15;
+      const videos = await ctx.vimeo().recent(limit);
+      return JSON.stringify(
+        videos.map((v) => ({
+          ...v,
+          description: v.description ? v.description.slice(0, 300) : null,
+          tech_wg: isTechWg(v.name),
+          processed: !!v.description,
+        })),
+      );
+    }
+
+    case "vimeo_transcript": {
+      const id = s(input.video_id, "video_id");
+      const offset = typeof input.offset === "number" && input.offset > 0 ? Math.floor(input.offset) : 0;
+      const text = await ctx.vimeo().transcript(id);
+      const PAGE = 60_000;
+      let end = Math.min(offset + PAGE, text.length);
+      if (end < text.length) end = text.lastIndexOf("\n", end) > offset ? text.lastIndexOf("\n", end) : end;
+      return JSON.stringify({
+        video_id: id,
+        total_chars: text.length,
+        offset,
+        next_offset: end < text.length ? end + 1 : null,
+        text: text.slice(offset, end),
+      });
     }
 
     case "write_scorecard": {

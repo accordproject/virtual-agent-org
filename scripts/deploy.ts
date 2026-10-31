@@ -59,8 +59,9 @@ function systemPrompt(agent: string): string {
   const parts = [readText("agents/_protocol.md"), spec.body];
   if (agent === "ada") parts.push(readText("evaluation/rubric.md"));
   parts.push(
-    "## Shared context\n\nThe shared memory store mounted read-only in your sandbox holds Accord Project context " +
-      "(/context/accord.md). Read it before your first task in a session.",
+    "## Shared context\n\nTwo memory stores are mounted in your sandbox. Your own, `" + agent + "-memory`, is " +
+      "read-write and holds your notes (see Memory between sessions). The shared one, `virtual-agent-org-shared`, " +
+      "is read-only and holds Accord Project context (/context/accord.md). Read both before your first task in a session.",
   );
   parts.push(rosterSection());
   parts.push(`## Your configuration\n\nAgent: ${agent}. Requestable actions: ${cfg.permissions.agents[agent].requestable.join(", ") || "none"}.`);

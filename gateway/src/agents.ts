@@ -56,17 +56,20 @@ export async function startSession(
 /** Sends a message to an agent, continuing a recent conversation in the same app if there is one. */
 export async function messageAgent(ctx: Ctx, agent: string, to: ReplyTo, text: string): Promise<string> {
   await assertAvailable(ctx, agent);
-  const recent =
+  const found =
     "telegram" in to ? await ctx.db.recentChatSession(agent, to.telegram) : await ctx.db.recentDiscordSession(agent, to.discord);
+  // Don't continue a conversation that has used most of its budget: start fresh instead.
+  const budget = ctx.deployed.agents[agent]?.session_budget_cents ?? 0;
+  const recent = found && !(budget && found.cost_cents >= budget * 0.8) ? found : null;
   if (recent) {
     try {
       await ctx.managed.sendMessage(recent.id, text);
       await ctx.db.updateSession(recent.id, "running", recent.cost_cents);
       return recent.id;
     } catch (e) {
-      // The last conversation is paused on a tool call or approval: start a fresh one.
+      // The last conversation is paused or out of budget: start a fresh one.
       if (!isWaitingSession(e)) throw e;
-      await ctx.db.audit({ agent, session_id: recent.id, event_type: "gateway.session_waiting", detail: "started a new session instead" });
+      await ctx.db.audit({ agent, session_id: recent.id, event_type: "gateway.session_waiting", detail: `started a new session instead: ${(e as ManagedAgentsError).body.slice(0, 120)}` });
     }
   }
   return "telegram" in to
@@ -74,9 +77,12 @@ export async function messageAgent(ctx: Ctx, agent: string, to: ReplyTo, text: s
     : startSession(ctx, agent, text, "discord", { discordUser: to.discord });
 }
 
-/** Managed Agents refuses new messages while a session waits on tool results or confirmations. */
+/**
+ * Managed Agents refuses new messages while a session waits on tool results or
+ * confirmations, or once it has spent its budget.
+ */
 export function isWaitingSession(e: unknown): boolean {
-  return e instanceof ManagedAgentsError && e.status === 400 && /waiting on responses/i.test(e.body);
+  return e instanceof ManagedAgentsError && e.status === 400 && /waiting on responses|session budget reached/i.test(e.body);
 }
 
 const RISK_ORDER = ["none", "low", "medium", "high"];

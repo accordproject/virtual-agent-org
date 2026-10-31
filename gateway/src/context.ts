@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { GitHub } from "./github";
 import { ManagedClient } from "./managed";
 import { Telegram } from "./telegram";
+import { Vimeo } from "./vimeo";
 
 export interface Ctx {
   env: Env;
@@ -22,6 +23,8 @@ export interface Ctx {
   discord: { configured: boolean; post: (text: string) => Promise<number> };
   /** Private #agent-ops channel; `post` pings only the given Discord user ids. */
   discordOps: { configured: boolean; post: (text: string, mentionIds: string[]) => Promise<number> };
+  /** Vimeo client; throws if the token isn't set. */
+  vimeo: () => Vimeo;
   dryRun: boolean;
 }
 
@@ -51,6 +54,10 @@ export function makeCtx(env: Env, overrides: Partial<Ctx> = {}): Ctx {
     discordOps: {
       configured: !!dc && !!channels.agent_ops,
       post: (text, ids) => dc!.post(channels.agent_ops!, text, ids),
+    },
+    vimeo: () => {
+      if (!env.VIMEO_ACCESS_TOKEN) throw new Error("VIMEO_ACCESS_TOKEN is not set in the gateway");
+      return new Vimeo(env.VIMEO_ACCESS_TOKEN);
     },
     dryRun: env.DRY_RUN !== "false",
     ...overrides,

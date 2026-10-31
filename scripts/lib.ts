@@ -45,7 +45,7 @@ export interface ModelsYaml {
 }
 export interface PermissionsYaml {
   discord_approval_max_risk?: "none" | "low" | "medium";
-  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "discord_ops" | "manual" }>;
+  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "discord_ops" | "vimeo" | "manual" }>;
   agents: Record<
     string,
     { mcp_servers: Record<string, { mode: string }> | []; builtin_tools: string[]; requestable: string[] }

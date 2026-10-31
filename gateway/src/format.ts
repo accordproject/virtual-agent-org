@@ -17,7 +17,12 @@ export function decisionCard(d: Decision): string {
   ];
   const payload = safeJson(d.payload);
   const text = payloadText(payload);
+  if (typeof payload.name === "string" && payload.name) lines.push("", `Title: ${payload.name}`);
   if (text) lines.push("", "Content:", text);
+  if (Array.isArray(payload.chapters) && payload.chapters.length) {
+    lines.push("", "Chapters:", ...payload.chapters.slice(0, 15).map((c: any) => `${c.start}  ${c.title}`));
+  }
+  if (payload.make_public === true) lines.push("", "⚠ Makes the video PUBLIC on Vimeo");
   if (Array.isArray(payload.mention) && payload.mention.length) {
     lines.push("", `Pings: ${payload.mention.map((m) => `@${String(m).replace(/^@/, "")}`).join(", ")}`);
   }
@@ -42,7 +47,7 @@ export function decisionButtons(d: Decision): InlineButton[][] {
 
 /** Text the owner needs to copy for a manual action, if the payload carries any. */
 export function payloadText(payload: Record<string, unknown>): string {
-  for (const k of ["text", "body", "content", "post", "message"]) {
+  for (const k of ["text", "body", "content", "post", "message", "description"]) {
     const v = payload[k];
     if (typeof v === "string" && v.trim()) return v.trim();
   }

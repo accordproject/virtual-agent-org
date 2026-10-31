@@ -35,9 +35,10 @@ export const NETWORK: NetworkConfig = {
   action_kinds: {
     "github.merge": { risk: "medium", executor: "github" },
     "github.comment": { risk: "low", executor: "github" },
-    "vimeo.publish": { risk: "medium", executor: "manual" },
     "discord.announce": { risk: "medium", executor: "discord" },
     "discord.ops": { risk: "low", executor: "discord_ops" },
+    "vimeo.publish": { risk: "medium", executor: "vimeo" },
+    "linkedin.post": { risk: "medium", executor: "manual" },
   },
   discord_approval_max_risk: "medium",
   people: [
@@ -48,7 +49,7 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "discord.ops"] },
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "discord.ops", "linkedin.post"] },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
@@ -150,6 +151,9 @@ export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fa
         fakes.ops.push({ text, ids });
         return 1;
       },
+    },
+    vimeo: () => {
+      throw new Error("no vimeo in tests");
     },
     dryRun: true,
     ...overrides,

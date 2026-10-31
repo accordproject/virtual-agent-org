@@ -5,7 +5,7 @@ import deployed from "./generated/deployed.json";
 
 export interface ActionKind {
   risk: "low" | "medium" | "high";
-  executor: "github" | "discord" | "discord_ops" | "manual";
+  executor: "github" | "discord" | "discord_ops" | "vimeo" | "manual";
 }
 
 export interface Person {

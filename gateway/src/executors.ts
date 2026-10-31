@@ -5,6 +5,7 @@ import type { Decision } from "./db";
 import { payloadText, safeJson } from "./format";
 import { parseTarget, type RepoRef } from "./github";
 import { resolveMentions } from "./people";
+import { toSeconds, type Chapter } from "./vimeo";
 
 export interface ExecResult {
   ok: boolean;
@@ -64,6 +65,8 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
     return { ok: true, result: `Posted to #agent-ops${who}` };
   }
 
+  if (kind.executor === "vimeo") return publishVimeo(ctx, safeJson(d.payload));
+
   const ref = parseTarget(d.target);
   if (!ref) return { ok: false, result: `Cannot parse GitHub target "${d.target}"` };
   if (!inScope(ctx, ref)) return { ok: false, result: `${ref.owner}/${ref.repo} is not in the configured repos` };
@@ -111,4 +114,45 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
     default:
       return { ok: false, result: `No executor for ${d.kind}` };
   }
+}
+
+/**
+ * Approved vimeo.publish: chapters first (best effort), then title and
+ * description, and only then, if asked, make the video public. A failure
+ * before the last step leaves the video as private as it was.
+ */
+async function publishVimeo(ctx: Ctx, p: Record<string, unknown>): Promise<ExecResult> {
+  const id = String(p.video_id ?? "");
+  const name = typeof p.name === "string" ? p.name.trim() : "";
+  const description = typeof p.description === "string" ? p.description.trim() : "";
+  const makePublic = p.make_public === true;
+  const chapters = Array.isArray(p.chapters) ? (p.chapters as Chapter[]) : [];
+  if (!id || !name || !description) return { ok: false, result: "Payload needs video_id, name and description" };
+  if (name.length > 128) return { ok: false, result: "Title is longer than 128 characters" };
+
+  const vimeo = ctx.vimeo();
+  const video = await vimeo.ownVideo(id); // refuses videos the account doesn't own
+  if (ctx.dryRun) {
+    return { ok: true, result: `DRY RUN: would update "${video.name}"${chapters.length ? ` with ${chapters.length} chapters` : ""}${makePublic ? " and make it public" : ""}` };
+  }
+
+  const notes: string[] = [];
+  let added = 0;
+  for (const c of chapters) {
+    try {
+      const secs = toSeconds(c.start);
+      if (secs < 1 || (video.duration && secs >= video.duration)) throw new Error(`time ${c.start} is outside the video`);
+      await vimeo.addChapter(id, String(c.title).slice(0, 100), secs);
+      added++;
+    } catch (e) {
+      notes.push(`chapter "${c.title}" skipped: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  await vimeo.edit(id, { name, description });
+  if (makePublic) await vimeo.edit(id, { privacy: { view: "anybody" } });
+
+  const done = [`Updated title and description`, chapters.length ? `${added} of ${chapters.length} chapters added` : "", makePublic ? "now PUBLIC" : `still ${video.privacy}`]
+    .filter(Boolean)
+    .join("; ");
+  return { ok: true, result: `${done}: ${video.link}${notes.length ? `\nNotes: ${notes.slice(0, 3).join("; ")}` : ""}` };
 }

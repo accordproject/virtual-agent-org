@@ -35,7 +35,7 @@ export function validate(cfg = loadAll()): string[] {
   if (!["none", "low", "medium"].includes(maxRisk)) errs.push(`discord_approval_max_risk must be none, low or medium, not "${maxRisk}"`);
 
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
-    if (!["github", "discord", "discord_ops", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
+    if (!["github", "discord", "discord_ops", "vimeo", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
   }
 
   const seenIds = new Set<string>();

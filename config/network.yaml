@@ -14,7 +14,7 @@ github:
   org: accordproject
   # Phase 0 runs only against the sandbox repo. Add real repos in Phase 1.
   sandbox_repo: accordproject/virtual-agent-org-sandbox
-  repos: []          # e.g. [accordproject/concerto, accordproject/template-engine]
+  repos: [accordproject/concerto, accordproject/template-engine, accordproject/template-playground]          # e.g. [accordproject/concerto, accordproject/template-engine]
 
 telegram:
   # Numeric Telegram user IDs. Set the real values as Worker secrets, not here;

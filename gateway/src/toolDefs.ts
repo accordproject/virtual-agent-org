@@ -160,8 +160,36 @@ export const VERA_TOOLS: CustomToolDef[] = [
   },
 ];
 
+export const OTTO_TOOLS: CustomToolDef[] = [
+  {
+    type: "custom",
+    name: "vimeo_recordings",
+    description:
+      "Recent videos on the Accord Project Vimeo account, newest first: id, title, current description, date, length, link, who can view it, and whether it looks like a Tech WG recording.",
+    input_schema: {
+      type: "object",
+      properties: { limit: { type: "integer", minimum: 1, maximum: 50, description: "How many, default 15" } },
+    },
+  },
+  {
+    type: "custom",
+    name: "vimeo_transcript",
+    description:
+      "A recording's transcript as \"[mm:ss] text\" lines, in pages of about 60,000 characters. Call again with next_offset until it is null.",
+    input_schema: {
+      type: "object",
+      properties: {
+        video_id: { type: "string", description: "Numeric Vimeo video id" },
+        offset: { type: "integer", minimum: 0, description: "Character offset; start at 0" },
+      },
+      required: ["video_id"],
+    },
+  },
+];
+
 export function toolsForAgent(agent: string): CustomToolDef[] {
   if (agent === "ada") return [...COMMON_TOOLS, ...ADA_TOOLS];
   if (agent === "vera") return [...COMMON_TOOLS, ...VERA_TOOLS];
+  if (agent === "otto") return [...COMMON_TOOLS, ...OTTO_TOOLS];
   return [...COMMON_TOOLS];
 }

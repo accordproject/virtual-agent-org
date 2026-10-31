@@ -16,6 +16,10 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY?: string; // PKCS#8 PEM
   GITHUB_INSTALLATION_ID?: string;
 
+  // Vimeo personal access token for the Accord Project account (decision 18A):
+  // scopes public, private, edit. Held only by the gateway.
+  VIMEO_ACCESS_TOKEN?: string;
+
   // Discord bot (decision 15B). All optional: without them the /discord endpoint is off.
   DISCORD_APP_ID?: string;
   DISCORD_PUBLIC_KEY?: string; // hex, from the Developer Portal's General Information page

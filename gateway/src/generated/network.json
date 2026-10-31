@@ -3,7 +3,11 @@
   "timezone": "Europe/London",
   "monthly_credit_usd": 200,
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
-  "repos": [],
+  "repos": [
+    "accordproject/concerto",
+    "accordproject/template-engine",
+    "accordproject/template-playground"
+  ],
   "action_kinds": {
     "github.merge": {
       "risk": "medium",
@@ -23,7 +27,7 @@
     },
     "vimeo.publish": {
       "risk": "medium",
-      "executor": "manual"
+      "executor": "vimeo"
     },
     "wordpress.publish": {
       "risk": "medium",

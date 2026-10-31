@@ -18,7 +18,7 @@ action_kinds:
   github.close:        { risk: low,    executor: github }
   github.comment:      { risk: low,    executor: github }   # public comment as the project bot
   github.release:      { risk: high,   executor: github }
-  vimeo.publish:       { risk: medium, executor: manual }   # owner completes in Vimeo until an executor exists
+  vimeo.publish:       { risk: medium, executor: vimeo }    # title, description, chapters and (if asked) make public
   wordpress.publish:   { risk: medium, executor: manual }
   linkedin.post:       { risk: medium, executor: manual }   # decision 8: drafts go to Telegram, owner posts
   discord.announce:    { risk: medium, executor: discord }  # the bot posts to channels.announcements (config/discord.yaml)

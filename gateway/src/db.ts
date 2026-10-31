@@ -120,7 +120,7 @@ export class Db {
     return this.db
       .prepare(
         "SELECT * FROM sessions WHERE agent = ? AND origin = 'telegram' AND chat_id = ? " +
-          "AND status NOT IN ('terminated') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+          "AND status NOT IN ('terminated', 'idle:budget_reached') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC, rowid DESC LIMIT 1",
       )
       .bind(agent, chatId, `-${maxAgeHours} hours`)
       .first<SessionRow>();
@@ -131,7 +131,7 @@ export class Db {
     return this.db
       .prepare(
         "SELECT * FROM sessions WHERE agent = ? AND origin = 'discord' AND discord_user = ? " +
-          "AND status NOT IN ('terminated') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+          "AND status NOT IN ('terminated', 'idle:budget_reached') AND updated_at > datetime('now', ?) ORDER BY updated_at DESC, rowid DESC LIMIT 1",
       )
       .bind(agent, discordUser, `-${maxAgeHours} hours`)
       .first<SessionRow>();
