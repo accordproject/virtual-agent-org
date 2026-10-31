@@ -1,4 +1,53 @@
 {
-  "agents": {},
-  "deployments": {}
+  "agents": {
+    "ada": {
+      "agent_id": "agent_01GhKHRERgLGGo6RkSTJ8fUn",
+      "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+      "vault_ids": [],
+      "memory_store_ids": [
+        "memstore_01SKxZpZYLRuLrv4n8Wzu1zK",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+      ],
+      "session_budget_cents": 150
+    },
+    "mira": {
+      "agent_id": "agent_01JJRVpTHRsTGvdUibd8AHc2",
+      "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+      "vault_ids": [
+        "vlt_011CgaBTBDWuVAVge38cpfXs"
+      ],
+      "memory_store_ids": [
+        "memstore_01HK8Hj5z977QcYaXeV4gZea",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+      ],
+      "session_budget_cents": 100
+    },
+    "vera": {
+      "agent_id": "agent_01Xm6DL5fkCvsnExn43WT9c6",
+      "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+      "vault_ids": [
+        "vlt_011CgaBTFguaDSKiRnwSym7H"
+      ],
+      "memory_store_ids": [
+        "memstore_01TSRBB6kgifWrTvvFSLab72",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+      ],
+      "session_budget_cents": 100
+    },
+    "otto": {
+      "agent_id": "agent_016pMCVZW1AZjGEmbAjE12Vj",
+      "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+      "vault_ids": [
+        "vlt_011CgaBTKwP5cnZzVpNHktBQ"
+      ],
+      "memory_store_ids": [
+        "memstore_014xvBZzpaNPLxL4xXdHPwyN",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+      ],
+      "session_budget_cents": 100
+    }
+  },
+  "deployments": {},
+  "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+  "shared_memory_store_id": "memstore_016a2PyDfBhNYKi7QkXfsiTp"
 }
