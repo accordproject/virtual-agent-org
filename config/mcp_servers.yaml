@@ -1,0 +1,25 @@
+# External MCP servers agents may use, and how each agent authenticates.
+# Each agent gets its own vault; deploy.ts adds one credential per server from
+# the environment variable named in `token_env` (with <AGENT> replaced by the
+# agent's name in capitals, e.g. MIRA_GITHUB_TOKEN). Tokens are never committed.
+
+servers:
+  github:
+    url: https://api.githubcopilot.com/mcp/
+    token_env: <AGENT>_GITHUB_TOKEN
+    # Phase 0: fine-grained personal access tokens scoped to the sandbox repo only.
+    # Phase 1: per-agent GitHub App tokens (decision 3), rotated by the gateway.
+  vimeo:
+    url: ""            # TODO: Vimeo MCP server URL; leave empty to skip
+    token_env: <AGENT>_VIMEO_TOKEN
+  wordpress:
+    url: ""            # TODO: WordPress.com MCP server URL; leave empty to skip
+    token_env: <AGENT>_WORDPRESS_TOKEN
+
+# How permission policies map from permissions.yaml modes.
+# Scoping lives in the credential (a read-only token cannot write); always_ask is
+# the backstop for servers whose token can write.
+modes:
+  read: always_allow
+  read_plus_triage: always_allow
+  draft_only: always_ask

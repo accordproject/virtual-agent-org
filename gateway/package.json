@@ -1,0 +1,20 @@
+{
+  "name": "virtual-agent-org-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply virtual-agent-org --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261031.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "better-sqlite3": "^13.0.3",
+    "typescript": "^5.6.0",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.156.0"
+  }
+}

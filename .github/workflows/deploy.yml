@@ -1,0 +1,46 @@
+name: deploy
+# Manual only. Deploys agents to Claude Managed Agents, then the gateway to Cloudflare,
+# and opens a PR with any new resource IDs.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print what would change without applying it
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # require owner approval in the repo's environment settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci && npm ci --prefix gateway
+      - run: npm test
+      - name: Deploy agents
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_DEPLOY_KEY }}
+          MIRA_GITHUB_TOKEN: ${{ secrets.MIRA_GITHUB_TOKEN }}
+          VERA_GITHUB_TOKEN: ${{ secrets.VERA_GITHUB_TOKEN }}
+          OTTO_GITHUB_TOKEN: ${{ secrets.OTTO_GITHUB_TOKEN }}
+        run: npx tsx scripts/deploy.ts ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Deploy gateway
+        if: ${{ !inputs.dry_run }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm --prefix gateway run migrate && npm --prefix gateway run deploy
+      - name: Propose updated resource IDs
+        if: ${{ !inputs.dry_run }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: deploy/resource-ids
+          title: "Update deployed resource IDs"
+          add-paths: gateway/src/generated/deployed.json

@@ -1,0 +1,148 @@
+{
+  "current_phase": 1,
+  "timezone": "Europe/London",
+  "monthly_credit_usd": 200,
+  "sandbox_repo": "mttrbrts/virtual-agent-org-sandbox",
+  "repos": [],
+  "action_kinds": {
+    "github.merge": {
+      "risk": "medium",
+      "executor": "github"
+    },
+    "github.close": {
+      "risk": "low",
+      "executor": "github"
+    },
+    "github.comment": {
+      "risk": "low",
+      "executor": "github"
+    },
+    "github.release": {
+      "risk": "high",
+      "executor": "github"
+    },
+    "vimeo.publish": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "wordpress.publish": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "linkedin.post": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "discord.announce": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "message.person": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "email.send": {
+      "risk": "high",
+      "executor": "manual"
+    },
+    "spec.change": {
+      "risk": "high",
+      "executor": "manual"
+    },
+    "other": {
+      "risk": "high",
+      "executor": "manual"
+    }
+  },
+  "agents": {
+    "ada": {
+      "name": "ada",
+      "title": "Chief of Staff",
+      "phase": 1,
+      "requestable": [
+        "spec.change",
+        "other"
+      ]
+    },
+    "mira": {
+      "name": "mira",
+      "title": "Maintainer Desk",
+      "phase": 1,
+      "requestable": [
+        "github.merge",
+        "github.close",
+        "github.comment",
+        "github.release"
+      ]
+    },
+    "vera": {
+      "name": "vera",
+      "title": "Metrics & Audit",
+      "phase": 1,
+      "requestable": []
+    },
+    "otto": {
+      "name": "otto",
+      "title": "Meetings",
+      "phase": 1,
+      "requestable": [
+        "vimeo.publish",
+        "github.comment",
+        "message.person"
+      ]
+    },
+    "rosa": {
+      "name": "rosa",
+      "title": "Community",
+      "phase": 2,
+      "requestable": [
+        "github.comment",
+        "discord.announce",
+        "message.person"
+      ]
+    },
+    "juno": {
+      "name": "juno",
+      "title": "Marketing & Docs",
+      "phase": 2,
+      "requestable": [
+        "wordpress.publish",
+        "linkedin.post",
+        "github.comment"
+      ]
+    },
+    "sage": {
+      "name": "sage",
+      "title": "Research",
+      "phase": 2,
+      "requestable": []
+    },
+    "kit": {
+      "name": "kit",
+      "title": "Training & Security",
+      "phase": 3,
+      "requestable": [
+        "github.comment",
+        "other"
+      ]
+    },
+    "felix": {
+      "name": "felix",
+      "title": "Release & CI",
+      "phase": 3,
+      "requestable": [
+        "github.release",
+        "github.comment"
+      ]
+    },
+    "nell": {
+      "name": "nell",
+      "title": "Ecosystem & Funding",
+      "phase": 3,
+      "requestable": [
+        "email.send",
+        "message.person"
+      ]
+    }
+  }
+}

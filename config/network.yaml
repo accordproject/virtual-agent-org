@@ -1,0 +1,47 @@
+# Network-wide settings. Changes here are reviewed PRs, merged by the owner.
+
+network:
+  name: virtual-agent-org
+  timezone: Europe/London
+  # Phase gates: an agent is deployed only when its phase <= current_phase.
+  # Phase 0 (foundations) runs the Phase 1 agents against the sandbox repo only:
+  # github.repos stays empty, schedules stay off and the gateway stays in DRY_RUN.
+  current_phase: 1
+  # Scheduled runs (check-ins, triage passes). Off until the Phase 0 gate passes.
+  schedules_enabled: false
+
+github:
+  org: accordproject
+  # Phase 0 runs only against the sandbox repo. Add real repos in Phase 1.
+  sandbox_repo: mttrbrts/virtual-agent-org-sandbox
+  repos: []          # e.g. [accordproject/concerto, accordproject/template-engine]
+
+telegram:
+  # Numeric Telegram user IDs. Set the real values as Worker secrets, not here;
+  # these role names are what the gateway checks.
+  roles:
+    owner:
+      can: [instruct, approve, reject, pause, resume, stop, revoke, ask, status, queue]
+    tsc_member:
+      can: [ask, status, queue, comment]
+
+budgets:
+  # Monthly API credits from the linked Max 20x plan (USD). Credits do not roll over.
+  monthly_credit_usd: 200
+  # Alert in Ada's check-in when forecast spend exceeds this share of credits.
+  forecast_alert_ratio: 0.8
+  # Vera flags any agent whose weekly spend exceeds this multiple of its trailing median.
+  anomaly_spend_multiple: 1.5
+
+agents:
+  # name: phase in which the agent is first deployed
+  ada: 1
+  mira: 1
+  vera: 1
+  otto: 1
+  rosa: 2
+  juno: 2
+  sage: 2
+  kit: 3
+  felix: 3
+  nell: 3
