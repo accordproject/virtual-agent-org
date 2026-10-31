@@ -5,7 +5,18 @@ import deployed from "./generated/deployed.json";
 
 export interface ActionKind {
   risk: "low" | "medium" | "high";
-  executor: "github" | "manual";
+  executor: "github" | "discord" | "manual";
+}
+
+export interface Person {
+  name: string;
+  /** From people.yaml: any of owner, tsc_member, maintainer. Labels only; they grant no rights. */
+  roles: string[];
+  /** Full repo names, e.g. accordproject/concerto */
+  maintains?: string[];
+  github?: string;
+  discord?: string;
+  telegram?: string;
 }
 
 export interface AgentConfig {
@@ -23,6 +34,7 @@ export interface NetworkConfig {
   repos: string[];
   action_kinds: Record<string, ActionKind>;
   agents: Record<string, AgentConfig>;
+  people?: Person[];
 }
 
 export interface DeployedAgent {

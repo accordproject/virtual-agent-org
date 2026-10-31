@@ -1,5 +1,6 @@
 import { DEPLOYED, NETWORK, type DeployedConfig, type NetworkConfig } from "./config";
 import { Db } from "./db";
+import { postToDiscord } from "./discord";
 import type { Env } from "./env";
 import { GitHub } from "./github";
 import { ManagedClient } from "./managed";
@@ -14,6 +15,8 @@ export interface Ctx {
   deployed: DeployedConfig;
   ownerChatId: number;
   github: () => Promise<GitHub>;
+  /** Announcements channel; `post` returns the number of Discord messages sent. */
+  discord: { configured: boolean; post: (text: string) => Promise<number> };
   dryRun: boolean;
 }
 
@@ -31,6 +34,10 @@ export function makeCtx(env: Env, overrides: Partial<Ctx> = {}): Ctx {
         throw new Error("Gateway GitHub App secrets are not set");
       }
       return GitHub.forInstallation(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, env.GITHUB_INSTALLATION_ID);
+    },
+    discord: {
+      configured: !!env.DISCORD_ANNOUNCE_WEBHOOK_URL,
+      post: (text) => postToDiscord(env.DISCORD_ANNOUNCE_WEBHOOK_URL ?? "", text),
     },
     dryRun: env.DRY_RUN !== "false",
     ...overrides,

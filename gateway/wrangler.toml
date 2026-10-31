@@ -5,7 +5,7 @@ compatibility_date = "2026-10-01"
 # account_id = "fe0bfc8fb9ecfbc441c6663f8eca680c"
 
 [vars]
-DRY_RUN = "true"   # set to "false" only after the Phase 0 gate passes
+DRY_RUN = "false"   # set to "false" only after the Phase 0 gate passes
 
 [[d1_databases]]
 binding = "DB"

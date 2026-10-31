@@ -28,7 +28,7 @@ export interface TgMessage {
 const LIMIT = 4000; // Telegram caps at 4096 characters
 
 export class Telegram {
-  constructor(private token: string, private fetchImpl: typeof fetch = fetch) {}
+  constructor(private token: string, private fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {}
 
   private async call<T>(method: string, body: unknown): Promise<T> {
     const res = await this.fetchImpl(`https://api.telegram.org/bot${this.token}/${method}`, {

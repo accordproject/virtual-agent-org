@@ -35,7 +35,7 @@ export class ManagedAgentsError extends Error {
 }
 
 export class ManagedClient {
-  constructor(private apiKey: string, private fetchImpl: typeof fetch = fetch) {}
+  constructor(private apiKey: string, private fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {}
 
   private async req<T>(method: string, path: string, body?: unknown, beta = BETA): Promise<T> {
     const res = await this.fetchImpl(`${BASE}${path}`, {

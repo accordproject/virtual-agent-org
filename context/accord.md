@@ -5,8 +5,7 @@ Edit this file by PR; agents read it, never write it.
 
 ## What the project is
 
-Accord Project is an open source project for smart legal agreements: templates,
-the Concerto modelling language, and runtimes that execute legal logic.
+Accord Project is an open source project for smart legal agreements: templates, the Concerto modelling language, and runtimes that execute legal logic.
 
 ## Where work happens
 
@@ -16,14 +15,26 @@ the Concerto modelling language, and runtimes that execute legal logic.
   Prototype, Vocabulary Features, Concerto V4 Upgrade".
 - Community metrics baseline: https://mttrbrts.github.io/ap-stats/
 
-## TODO before Phase 1 (Matt to fill in)
+## Repos in scope (Phase 1)
 
-- Repos in scope and their CODEOWNERS.
-- Tech WG day, time and joining link.
-- Community channels (Discord or other) and who moderates them.
-- TSC members and how they prefer to be contacted.
-- The project website (WordPress site URL).
+- accordproject/concerto
+- accordproject/template-playground
+- accordproject/template-engine
+- accordproject/virtual-agent-org-sandbox (for testing the network itself)
+
+## Reference information
+
+- CODEOWNERS are present in every repo. The @accordproject/maintainers group in GitHub includes all maintainers, and @accordproject/tsc includes all TSC members
+- Tech WG day, time and joining link. Wednesday at 8am ET, https://us06web.zoom.us/j/3781463524?pwd=REVwaVhrTldMSnpFOGhJMHd2NktoQT09
+- Community channels (Discord, server 874841541787656263). Key channels are announcements (874841542311960608), technology-wg (874874269996298252) & tsc (874895668823609364)
+- TSC members and how they prefer to be contacted (in config/people.yaml)
+- The project website (https://accordproject.org)
 - Topics currently off limits for public comment.
+- Governance docs:
+  - Governance and Charter, https://github.com/accordproject/governance
+  - Contributing and AI Usage Policy, https://github.com/accordproject/techdocs
+  - Technical Steering Committee, https://github.com/accordproject/technical-steering-committee
+
 
 ## Baseline, 3 Aug 2025 – 3 Aug 2026 (ap-stats)
 
@@ -34,7 +45,7 @@ the Concerto modelling language, and runtimes that execute legal logic.
 | PRs opened | 1,437 (bots 26.4%) |
 | Retention | 17.4% (16 of 92 prior-year contributors returned) |
 
-## Targets (decision 6, proposed)
+## Targets (agreed 31 Oct 2026)
 
 Time to merge mean 7 days, P90 21 days; first response 2 business days, P90 5 days;
 retention 30%; all within six months.

@@ -32,10 +32,15 @@ pattern ("Accord Project Tech WG – YYYY-MM-DD – Topic, Topic, Topic"), chapt
 200-word summary and a list of actions with owners. Queue publishing with
 `request_action(kind="vimeo.publish")`, with all text in the payload.
 
+Then queue a Discord announcement with `request_action(kind="discord.announce")`:
+the meeting title, three lines on what was decided, the recording link and the
+actions with owners, under 1,200 characters, as `payload.text`. No @mentions;
+the gateway strips pings and adds the agent label.
+
 ## Governance clerk duties
 
 Draft TSC minutes and election notices when Ada assigns them.
 
 ## You must queue
 
-Publishing anything, sending invites, and any message to a named person.
+Publishing anything, posting to Discord, sending invites, and any message to a named person.

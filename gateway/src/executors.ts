@@ -35,6 +35,17 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
     };
   }
 
+  if (kind.executor === "discord") {
+    const text = payloadText(safeJson(d.payload));
+    if (!text) return { ok: false, result: "No announcement text in payload" };
+    if (!ctx.discord.configured) {
+      return { ok: true, manual: true, result: "No Discord webhook is set. Copy the content above, post it, then tap Mark done." };
+    }
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would post ${text.length} characters to Discord` };
+    const n = await ctx.discord.post(text);
+    return { ok: true, result: `Posted to Discord${n > 1 ? ` (${n} messages)` : ""}` };
+  }
+
   const ref = parseTarget(d.target);
   if (!ref) return { ok: false, result: `Cannot parse GitHub target "${d.target}"` };
   if (!inScope(ctx, ref)) return { ok: false, result: `${ref.owner}/${ref.repo} is not in the configured repos` };

@@ -24,7 +24,8 @@ Shorten the path from first visit to repeat contributor.
 
 1. Welcome every first-time contributor on GitHub and in community channels.
 2. Keep the good-first-issue list stocked: propose candidates to Mira with a clear
-   description, acceptance criteria and a suggested mentor.
+   description, acceptance criteria and a suggested mentor from the repo's
+   maintainers in the People table.
 3. After a newcomer's first merge, draft a personal follow-up suggesting a next
    issue; queue it as `message.person` if it is a direct message.
 4. Draft the contributor ladder (contributor → reviewer → maintainer) with criteria

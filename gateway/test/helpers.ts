@@ -34,11 +34,18 @@ export const NETWORK: NetworkConfig = {
     "github.merge": { risk: "medium", executor: "github" },
     "github.comment": { risk: "low", executor: "github" },
     "vimeo.publish": { risk: "medium", executor: "manual" },
+    "discord.announce": { risk: "medium", executor: "discord" },
   },
+  people: [
+    { name: "Matt Roberts", roles: ["owner"], github: "mttrbrts", telegram: "555" },
+    { name: "Jane Doe", roles: ["tsc_member"], github: "janedoe", telegram: "88", discord: "123456789012345678" },
+    { name: "Sam Lee", roles: ["tsc_member", "maintainer"], maintains: ["accordproject/concerto"], github: "samlee", telegram: "66" },
+    { name: "Ali Khan", roles: ["maintainer"], github: "alikhan", discord: "223456789012345678" },
+  ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
     mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment"] },
-    otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish"] },
+    otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
 };
@@ -54,13 +61,14 @@ export const DEPLOYED: DeployedConfig = {
 
 export interface Fakes {
   sent: { chatId: number; text: string; opts?: unknown }[];
+  discord: string[];
   calls: { method: string; args: unknown[] }[];
   events: Record<string, any[]>;
   sessions: Record<string, any>;
 }
 
 export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fakes } {
-  const fakes: Fakes = { sent: [], calls: [], events: {}, sessions: {} };
+  const fakes: Fakes = { sent: [], discord: [], calls: [], events: {}, sessions: {} };
   let msgId = 100;
   let sesn = 0;
   const tg = {
@@ -105,6 +113,13 @@ export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fa
     ownerChatId: 42,
     github: async () => {
       throw new Error("no github in tests");
+    },
+    discord: {
+      configured: true,
+      post: async (text: string) => {
+        fakes.discord.push(text);
+        return 1;
+      },
     },
     dryRun: true,
     ...overrides,

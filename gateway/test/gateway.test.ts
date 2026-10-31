@@ -183,3 +183,99 @@ describe("parsing", () => {
     expect(parts.every((p) => p.length <= 4000)).toBe(true);
   });
 });
+
+describe("fetch binding (Workers rejects fetch called with another `this`)", () => {
+  it("clients call the global fetch unbound", async () => {
+    const real = globalThis.fetch;
+    const strict = function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, result: { message_id: 1 } })));
+    } as unknown as typeof fetch;
+    globalThis.fetch = strict;
+    try {
+      const { Telegram } = await import("../src/telegram");
+      const { ManagedClient } = await import("../src/managed");
+      const { postToDiscord } = await import("../src/discord");
+      await expect(new Telegram("t").send(1, "hi")).resolves.toBe(1);
+      await expect(new ManagedClient("k").retrieveSession("s")).resolves.toBeDefined();
+      await expect(postToDiscord("https://discord.com/api/webhooks/1/a", "hi")).resolves.toBe(1);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});
+
+describe("discord announcements", () => {
+  const queueAnnounce = (ctx: any, text = "Tech WG summary") =>
+    handleTool(ctx, "otto", "s", "request_action", {
+      kind: "discord.announce", target: "discord:#announcements", summary: "Post Tech WG summary", rationale: "r", risk: "low",
+      payload: { text },
+    });
+
+  it("posts the approved text to the webhook", async () => {
+    const { ctx, fakes } = makeTestCtx({ dryRun: false });
+    await queueAnnounce(ctx);
+    expect(await approve(ctx, "D-1")).toBe("D-1: Posted to Discord");
+    expect(fakes.discord).toEqual(["Tech WG summary"]);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
+  });
+
+  it("falls back to manual posting when no webhook is set", async () => {
+    const { ctx, fakes } = makeTestCtx({ dryRun: false });
+    ctx.discord = { configured: false, post: async () => 0 };
+    await queueAnnounce(ctx);
+    expect(await approve(ctx, "D-1")).toContain("Mark done");
+    expect(fakes.discord).toHaveLength(0);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("approved");
+  });
+
+  it("only labels, never pings, and splits long posts", async () => {
+    const { postToDiscord, withLabel, AGENT_LABEL } = await import("../src/discord");
+    const bodies: any[] = [];
+    const urls: string[] = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      urls.push(url);
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response("{}");
+    }) as unknown as typeof fetch;
+    const hook = "https://discord.com/api/webhooks/123/abc-DEF_1";
+    const long = Array.from({ length: 120 }, (_, i) => `line ${i} @everyone`.padEnd(40, ".")).join("\n");
+    const n = await postToDiscord(hook, long, fake);
+    expect(n).toBeGreaterThan(1);
+    expect(bodies.every((b) => b.content.length <= 2000 && b.allowed_mentions.parse.length === 0)).toBe(true);
+    expect(urls.every((u) => u === `${hook}?wait=true`)).toBe(true);
+    expect(bodies.at(-1).content).toContain(AGENT_LABEL);
+    expect(withLabel(`Hi\n\n${AGENT_LABEL}`).match(new RegExp(AGENT_LABEL, "g"))).toHaveLength(1);
+    await expect(postToDiscord("https://evil.example/hook", "x", fake)).rejects.toThrow(/not a Discord webhook/);
+  });
+});
+
+describe("people", () => {
+  it("describes people by their roles", async () => {
+    const { describePerson } = await import("../src/people");
+    const { ctx } = makeTestCtx();
+    expect(describePerson(ctx, "telegram", 66)).toBe("Sam Lee (TSC member, maintainer of accordproject/concerto)");
+    expect(describePerson(ctx, "discord", "223456789012345678")).toBe("Ali Khan (maintainer)");
+  });
+
+  it("gives listed people read-and-ask access, and never owner rights", async () => {
+    const { roleFor, displayName } = await import("../src/people");
+    const { ctx } = makeTestCtx();
+    expect(roleFor(ctx, "telegram", 42)).toBe("owner"); // the secret
+    expect(roleFor(ctx, "telegram", 555)).toBe("member"); // listed as owner in people.yaml, but not the secret
+    expect(roleFor(ctx, "telegram", 88)).toBe("member");
+    expect(roleFor(ctx, "discord", "123456789012345678")).toBe("member");
+    expect(roleFor(ctx, "discord", "223456789012345678")).toBe("member"); // maintainers too
+    expect(roleFor(ctx, "telegram", 999)).toBeNull();
+    expect(displayName(ctx, "telegram", 88)).toBe("Jane Doe");
+  });
+
+  it("names TSC members to Ada and ignores group chatter", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleUpdate(ctx, { update_id: 9, message: { message_id: 9, from: { id: 88 }, chat: { id: -5, type: "group" }, text: "hello all" } });
+    expect(fakes.calls.some((c) => c.method === "createSession")).toBe(false);
+    await handleUpdate(ctx, { update_id: 10, message: { message_id: 10, from: { id: 88 }, chat: { id: 88, type: "private" }, text: "How is triage going?" } });
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.text).toMatch(/^Jane Doe \(TSC member\) asks/);
+  });
+});

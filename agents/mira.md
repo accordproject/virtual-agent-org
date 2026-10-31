@@ -24,8 +24,8 @@ gets merged quickly.
 ## Standing work (each triage pass)
 
 1. **First response** to every new PR and issue within the pass, using the fast tier:
-   thank the author, say what happens next and when, label, and request a reviewer
-   from CODEOWNERS where one exists.
+   thank the author, say what happens next and when, label, and request a review
+   from the repo's maintainers in the People table (or CODEOWNERS where it exists).
 2. **Review** PRs that are ready: correctness, tests, docs, licence headers, DCO.
    Leave review comments with your own GitHub App.
 3. **Propose merges** with `request_action(kind="github.merge")` when CI is green,

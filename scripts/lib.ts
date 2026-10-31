@@ -44,7 +44,7 @@ export interface ModelsYaml {
   agents: Record<string, { default: string; tasks?: Record<string, string> }>;
 }
 export interface PermissionsYaml {
-  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "manual" }>;
+  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "manual" }>;
   agents: Record<
     string,
     { mcp_servers: Record<string, { mode: string }> | []; builtin_tools: string[]; requestable: string[] }
@@ -52,6 +52,16 @@ export interface PermissionsYaml {
 }
 export interface SchedulesYaml {
   schedules: { name: string; agent: string; cron: string; budget_usd: number; prompt: string; tier?: string }[];
+}
+export interface PeopleYaml {
+  people: {
+    name: string;
+    role: string | string[];
+    maintains?: string[];
+    github?: string;
+    discord?: string | number;
+    telegram?: string | number;
+  }[];
 }
 export interface McpYaml {
   servers: Record<string, { url: string; token_env: string }>;
@@ -65,6 +75,7 @@ export function loadAll() {
     permissions: readYaml<PermissionsYaml>("config/permissions.yaml"),
     schedules: readYaml<SchedulesYaml>("config/schedules.yaml"),
     mcp: readYaml<McpYaml>("config/mcp_servers.yaml"),
+    people: readYaml<PeopleYaml>("config/people.yaml"),
     specs: loadSpecs(),
   };
 }

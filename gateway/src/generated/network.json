@@ -35,7 +35,7 @@
     },
     "discord.announce": {
       "risk": "medium",
-      "executor": "manual"
+      "executor": "discord"
     },
     "message.person": {
       "risk": "medium",
@@ -54,6 +54,118 @@
       "executor": "manual"
     }
   },
+  "people": [
+    {
+      "name": "Matt Roberts",
+      "roles": [
+        "owner",
+        "tsc_member",
+        "maintainer"
+      ],
+      "github": "mttrbrts",
+      "discord": "875116476460326916",
+      "telegram": "9110211942"
+    },
+    {
+      "name": "Dan Selman",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/template-engine"
+      ],
+      "github": "dselman",
+      "discord": "708424790289023107"
+    },
+    {
+      "name": "Diana Lease",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "github": "dianalease",
+      "discord": "644711207995047946"
+    },
+    {
+      "name": "Niall Roche",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/apap"
+      ],
+      "github": "niallroche",
+      "discord": "718544324857561158"
+    },
+    {
+      "name": "Martin Halford",
+      "roles": [
+        "tsc_member"
+      ],
+      "github": "martinhalford",
+      "discord": "822966912844955688"
+    },
+    {
+      "name": "Jonathan Casey",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto"
+      ],
+      "github": "jonathan-casey",
+      "discord": "928310212136402944"
+    },
+    {
+      "name": "Tom Brooke",
+      "roles": [
+        "tsc_member"
+      ],
+      "github": "tbrooke",
+      "discord": "491630050089893892"
+    },
+    {
+      "name": "Ertugrul Karademir",
+      "roles": [
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/concerto-rust"
+      ],
+      "github": "ekarademir",
+      "discord": "1143502099448070156"
+    },
+    {
+      "name": "Jamie Shorten",
+      "roles": [
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/concerto-rust",
+        "accordproject/concerto-dotnet"
+      ],
+      "github": "jamieshorten",
+      "discord": "560186012781903922"
+    },
+    {
+      "name": "Sanket Shevkar",
+      "roles": [
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/template-archive"
+      ],
+      "github": "sanketshevkar",
+      "discord": "703280494397358211"
+    }
+  ],
   "agents": {
     "ada": {
       "name": "ada",
@@ -87,6 +199,7 @@
       "phase": 1,
       "requestable": [
         "vimeo.publish",
+        "discord.announce",
         "github.comment",
         "message.person"
       ]

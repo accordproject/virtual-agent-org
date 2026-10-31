@@ -4,18 +4,16 @@ import { AgentUnavailable, messageAgent, postDecision } from "./agents";
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, resume, revoke, stop } from "./controls";
 import type { Role } from "./env";
+import { describePerson, roleFor } from "./people";
 import type { TgMessage, TgUpdate } from "./telegram";
 
 const PERMS: Record<Role, Set<string>> = {
   owner: new Set(["instruct", "approve", "control", "ask", "status", "queue"]),
-  tsc_member: new Set(["ask", "status", "queue"]),
+  member: new Set(["ask", "status", "queue"]),
 };
 
 export function roleOf(ctx: Ctx, userId: number | undefined): Role | null {
-  if (!userId) return null;
-  if (String(userId) === ctx.env.OWNER_TELEGRAM_ID) return "owner";
-  const tsc = (ctx.env.TSC_TELEGRAM_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return tsc.includes(String(userId)) ? "tsc_member" : null;
+  return roleFor(ctx, "telegram", userId);
 }
 
 const HELP = `Commands
@@ -69,7 +67,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
     await ctx.db.audit({ event_type: "telegram.unauthorised", detail: { from: m.from?.id, username: m.from?.username } });
     return; // silent: don't confirm the bot exists to strangers
   }
-  if (m.chat.type !== "private" && role === "owner" && !m.text?.startsWith("/")) {
+  if (m.chat.type !== "private" && !m.text?.startsWith("/")) {
     // In groups, only commands are handled, so chatter doesn't reach Ada.
     return;
   }
@@ -88,7 +86,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
 
   if (!text.startsWith("/")) {
     if (!can("instruct") && !can("ask")) return;
-    const prefix = role === "owner" ? "" : `A TSC member (Telegram ${m.from?.id}) asks. They cannot instruct or approve; answer only.\n\n`;
+    const prefix = role === "owner" ? "" : `${describePerson(ctx, "telegram", m.from?.id)} asks. They cannot instruct or approve; answer only.\n\n`;
     try {
       await messageAgent(ctx, "ada", m.chat.id, prefix + text);
     } catch (e) {
@@ -110,7 +108,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
         await reply(HELP);
         return;
       case "/whoami":
-        await reply(`Telegram id ${m.from?.id} · role ${role}`);
+        await reply(`${describePerson(ctx, "telegram", m.from?.id)} · Telegram id ${m.from?.id} · access: ${role}`);
         return;
       case "/status":
         if (!can("status")) return;

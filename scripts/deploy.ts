@@ -62,8 +62,28 @@ function systemPrompt(agent: string): string {
     "## Shared context\n\nThe shared memory store mounted read-only in your sandbox holds Accord Project context " +
       "(/context/accord.md). Read it before your first task in a session.",
   );
+  parts.push(rosterSection());
   parts.push(`## Your configuration\n\nAgent: ${agent}. Requestable actions: ${cfg.permissions.agents[agent].requestable.join(", ") || "none"}.`);
   return parts.join("\n\n---\n\n");
+}
+
+function rosterSection(): string {
+  const label: Record<string, string> = { owner: "TSC chair (Matt, the owner)", tsc_member: "TSC member", maintainer: "maintainer" };
+  const rows = (compile(cfg).people ?? []).map((p) => {
+    const roles = p.roles.map((r) => label[r] ?? r).join(", ");
+    return `| ${p.name} | ${p.github ? `@${p.github}` : "—"} | ${roles} | ${p.maintains?.join(", ") || "—"} |`;
+  });
+  return [
+    "## People",
+    "",
+    "Who's who in the project. Maintainers review and merge: request their review (GitHub's reviewer request,",
+    "not an @mention) on PRs in repos they maintain, or from any listed maintainer when a repo has none.",
+    "Don't @mention the people below in public text; name them in a status report or request_action payload instead.",
+    "",
+    "| Name | GitHub | Roles | Maintains |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+  ].join("\n");
 }
 
 function toolsFor(agent: string) {

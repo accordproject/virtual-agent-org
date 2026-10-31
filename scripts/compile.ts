@@ -8,9 +8,52 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILTIN_TOOLS, ROOT, loadAll } from "./lib";
 
+export const PERSON_ROLES = ["owner", "tsc_member", "maintainer"];
+
+/** `role` may be one role or a list, e.g. `role: [tsc_member, maintainer]`. */
+export function rolesOf(role: string | string[] | undefined): string[] {
+  if (role === undefined || role === null) return [];
+  return (Array.isArray(role) ? role : [role]).map((r) => String(r).trim()).filter(Boolean);
+}
+
+/** "concerto" → "accordproject/concerto"; full names pass through. */
+export function fullRepo(repo: string, org: string): string {
+  return repo.includes("/") ? repo : `${org}/${repo}`;
+}
+
 export function validate(cfg = loadAll()): string[] {
-  const { network, models, permissions, schedules, mcp, specs } = cfg;
+  const { network, models, permissions, schedules, mcp, specs, people } = cfg;
   const errs: string[] = [];
+
+  for (const [k, v] of Object.entries(permissions.action_kinds)) {
+    if (!["github", "discord", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
+  }
+
+  const seenIds = new Set<string>();
+  for (const [i, p] of (people.people ?? []).entries()) {
+    const who = p.name || `people[${i}]`;
+    if (!p.name) errs.push(`people[${i}]: name is required`);
+    const roles = rolesOf(p.role);
+    if (!roles.length) errs.push(`${who}: role is required`);
+    for (const r of roles) if (!PERSON_ROLES.includes(r)) errs.push(`${who}: role "${r}" must be one of ${PERSON_ROLES.join(", ")}`);
+    if (p.maintains !== undefined) {
+      if (!Array.isArray(p.maintains)) errs.push(`${who}: maintains must be a list of repos`);
+      else {
+        if (!roles.includes("maintainer")) errs.push(`${who}: maintains is set but maintainer is not one of their roles`);
+        for (const r of p.maintains) if (!/^([\w.-]+\/)?[\w.-]+$/.test(String(r))) errs.push(`${who}: "${r}" is not a repo name`);
+      }
+    }
+    if (p.github && !/^[A-Za-z0-9-]{1,39}$/.test(p.github)) errs.push(`${who}: "${p.github}" is not a GitHub login`);
+    for (const platform of ["discord", "telegram"] as const) {
+      const id = p[platform];
+      if (id === undefined || id === "") continue;
+      if (typeof id === "number" && platform === "discord") errs.push(`${who}: quote the Discord id, it is too long to be a number`);
+      if (!/^\d{5,20}$/.test(String(id))) errs.push(`${who}: ${platform} id "${id}" should be digits only`);
+      const key = `${platform}:${id}`;
+      if (seenIds.has(key)) errs.push(`${who}: ${platform} id ${id} is listed twice`);
+      seenIds.add(key);
+    }
+  }
   const names = Object.keys(network.agents);
 
   for (const n of names) {
@@ -60,7 +103,8 @@ export function validate(cfg = loadAll()): string[] {
 }
 
 export function compile(cfg = loadAll()) {
-  const { network, permissions, specs } = cfg;
+  const { network, permissions, specs, people } = cfg;
+  const clean = (v: string | number | undefined) => (v === undefined || v === "" ? undefined : String(v));
   return {
     current_phase: network.network.current_phase,
     timezone: network.network.timezone,
@@ -68,6 +112,14 @@ export function compile(cfg = loadAll()) {
     sandbox_repo: network.github.sandbox_repo,
     repos: network.github.repos ?? [],
     action_kinds: permissions.action_kinds,
+    people: (people.people ?? []).map((p) => ({
+      name: p.name,
+      roles: rolesOf(p.role),
+      ...(p.maintains?.length ? { maintains: p.maintains.map((r) => fullRepo(String(r), network.github.org)) } : {}),
+      ...(p.github ? { github: p.github } : {}),
+      ...(clean(p.discord) ? { discord: clean(p.discord) } : {}),
+      ...(clean(p.telegram) ? { telegram: clean(p.telegram) } : {}),
+    })),
     agents: Object.fromEntries(
       Object.keys(network.agents).map((n) => [
         n,

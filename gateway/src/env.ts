@@ -16,8 +16,13 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY?: string; // PKCS#8 PEM
   GITHUB_INSTALLATION_ID?: string;
 
+  // Discord channel webhook for approved discord.announce decisions (optional)
+  DISCORD_ANNOUNCE_WEBHOOK_URL?: string;
+
   // "true" until the Phase 0 gate: approved actions are logged, not executed
   DRY_RUN?: string;
 }
 
-export type Role = "owner" | "tsc_member";
+/** Access level in the gateway. Only the OWNER_TELEGRAM_ID secret makes an owner;
+ *  everyone listed in people.yaml is a member (ask Ada, /status, /queue). */
+export type Role = "owner" | "member";

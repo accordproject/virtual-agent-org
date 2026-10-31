@@ -50,9 +50,9 @@ export async function appJwt(appId: string, pem: string, nowSeconds = Math.floor
 }
 
 export class GitHub {
-  constructor(private token: string, private fetchImpl: typeof fetch = fetch) {}
+  constructor(private token: string, private fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {}
 
-  static async forInstallation(appId: string, pem: string, installationId: string, fetchImpl: typeof fetch = fetch) {
+  static async forInstallation(appId: string, pem: string, installationId: string, fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {
     const jwt = await appJwt(appId, pem);
     const res = await fetchImpl(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
       method: "POST",
