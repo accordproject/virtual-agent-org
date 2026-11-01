@@ -172,3 +172,11 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 
 - `.github/CODEOWNERS` makes the owner the reviewer for every file, matching the rule
   that agents only propose changes. Revisit when someone else maintains the gateway.
+
+**31. How agents' reports of tool problems reach the owner** · RESOLVED: no new route yet
+
+- Agents' tool complaints reach the owner only through status reports and Ada's
+  check-in. Calls the gateway rejects (a missing or invalid field) are answered with
+  an error but not flagged in the audit log.
+- Revisit with the self-improvement loop, which will read status reports and the
+  audit log for evidence.
