@@ -11,7 +11,8 @@ import { AgentUnavailable, assertAvailable, discordApprovable, messageAgent, pos
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, stop } from "./controls";
 import { describePerson, roleFor } from "./people";
-import { gatherStatus, queueMarkdown, statusMarkdown } from "./status";
+import { toMessage } from "./discordBot";
+import { gatherStatus, queueMarkdown, statusCards } from "./status";
 
 const EPHEMERAL = 64;
 const reply = (content: string) => ({ type: 4, data: { content: content.slice(0, 1990), flags: EPHEMERAL, allowed_mentions: { parse: [] } } });
@@ -86,7 +87,7 @@ async function command(ctx: Ctx, i: Interaction, userId: string, owner: boolean,
     }
 
     case "status":
-      return reply(statusMarkdown(await gatherStatus(ctx)));
+      return { type: 4, data: { ...toMessage(statusCards(await gatherStatus(ctx))), flags: EPHEMERAL } };
 
     case "queue": {
       const open = await ctx.db.listDecisions({ status: "open" });
