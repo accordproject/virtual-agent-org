@@ -74,7 +74,7 @@ Matt writes British English. Keep messages plain and short.
 | `context/accord.md` | Shared read-only context, written to the shared memory store |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
 | `scripts/deploy.ts` | Creates or updates agents, vaults, memory stores and deployments; writes `deployed.json` |
-| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools, `executors.ts` approved actions, `review.ts` PR facts, risk and merge checks, `agents.ts` sessions and cards, `sessions.ts` event processing |
+| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping |
 | `gateway/test/` | vitest suite with an in-memory D1 and fakes for every external API |
 
 ## Commands
@@ -107,8 +107,9 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
 
 ## Conventions
 
-- **Tests.** Every behaviour change gets a test in `gateway/test/gateway.test.ts`,
-  using `makeTestCtx()` from `helpers.ts`. Fakes record calls; never hit real APIs in
+- **Tests.** Every behaviour change gets a test in the matching `gateway/test/<area>.test.ts`
+  (actions, channels, decisions, edge, review, sessions, tools, vimeo), using
+  `makeTestCtx()` from `helpers.ts`. Fakes record calls; never hit real APIs in
   tests.
 - **Fetch binding.** Workers reject `fetch` called with the wrong `this`, so every
   client wraps it as `(input, init) => fetch(input, init)`. Keep that pattern;
@@ -141,7 +142,9 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
   - events-list pagination (`managed.ts`);
   - the Vimeo texttrack `link` field (`vimeo.ts`);
   - the PR GraphQL query, including `latestOpinionatedReviews`, and the fallback when
-    GitHub refuses a review's inline comments (`github.ts`, `executors.ts`).
+    GitHub refuses a review's inline comments (`github.ts`, `actions.ts`);
+  - the GraphQL read of `HEAD:.github/workflows` behind automatic CI approval
+    (`workflowFiles` in `github.ts`, decision 45).
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
 - **Decision 10** (open): long-term funding for the API credits.
