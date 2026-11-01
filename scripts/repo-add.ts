@@ -14,7 +14,9 @@
 //
 // It refuses a repo whose workflows use pull_request_target or self-hosted runners,
 // because Mira approves fork PRs' CI runs without asking (decision 20). Pass
-// --accept-ci-risk once Matt has decided that is acceptable for the repo.
+// --accept-ci-risk once Matt has decided that is acceptable for the repo. It warns
+// about workflow_run triggers and secrets in pull_request workflows, which make the
+// gateway send CI approvals to Matt instead.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -22,7 +24,7 @@ import { join } from "node:path";
 import { GitHub } from "../gateway/src/github";
 import { compile, validate } from "./compile";
 import { ROOT, loadAll } from "./lib";
-import { REPO_RE, addRepoToNetworkYaml, workflowRisks } from "./repos";
+import { REPO_RE, addRepoToNetworkYaml, workflowRisks, workflowWarnings } from "./repos";
 
 /** The account the agents' GitHub tokens belong to (decision 12). */
 const AGENT_LOGIN = "mttrbrts-agent";
@@ -95,10 +97,17 @@ if (dir.status === 404) report("ok", "no GitHub Actions workflows");
 else if (dir.status !== 200) report("unknown", `couldn't list workflows (HTTP ${dir.status})`);
 else {
   const risks: string[] = [];
+  const warnings: string[] = [];
   for (const f of dir.body.filter((f) => f.type === "file" && /\.ya?ml$/.test(f.name))) {
     const file = await get<{ content?: string }>(`/repos/${repo}/contents/${f.path}`);
     const text = Buffer.from(file.body.content ?? "", "base64").toString("utf8");
     risks.push(...workflowRisks(text).map((r) => `${f.name}: ${r}`));
+    warnings.push(...workflowWarnings(text).map((r) => `${f.name}: ${r}`));
+  }
+  // Not a reason to refuse the repo, but the gateway checks the same things before
+  // approving CI by itself, and sends the approval to Matt while any remain.
+  if (warnings.length) {
+    report("fail", `the gateway won't approve fork PRs' CI by itself while workflows have:\n      ${warnings.join("\n      ")}`, "Matt approves those CI runs from the card instead");
   }
   if (!risks.length) report("ok", `workflows use neither pull_request_target nor self-hosted runners (${dir.body.length} checked)`);
   else {

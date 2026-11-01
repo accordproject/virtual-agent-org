@@ -503,4 +503,77 @@ export class Db {
     if (row) await this.db.prepare("DELETE FROM pending_replies WHERE message_id = ?").bind(messageId).run();
     return row;
   }
+
+  // ---- runtime: tool results, sweeping and retention ------------------------
+
+  /** The answer already given to a custom tool call, if any. */
+  async toolResult(eventId: string): Promise<string | null> {
+    const row = await this.db.prepare("SELECT result FROM tool_results WHERE event_id = ?").bind(eventId).first<{ result: string }>();
+    return row?.result ?? null;
+  }
+
+  async saveToolResult(eventId: string, result: string) {
+    await this.db.prepare("INSERT OR REPLACE INTO tool_results (event_id, result) VALUES (?, ?)").bind(eventId, result).run();
+  }
+
+  async markEventDone(eventId: string) {
+    await this.db.prepare("UPDATE processed_events SET done = 1 WHERE event_id = ?").bind(eventId).run();
+  }
+
+  /** True when a claimed event is handled, or was claimed long enough ago that whoever claimed it has finished or released it. */
+  async claimSettled(eventId: string, minutes = 5): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS ok FROM processed_events WHERE event_id = ? AND (done = 1 OR ts < datetime('now', ?))")
+      .bind(eventId, `-${minutes} minutes`)
+      .first<{ ok: number }>();
+    return !!row;
+  }
+
+  /** The last event of a session handled along with every event before it. */
+  async eventsDoneThrough(sessionId: string): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT events_done_through FROM sessions WHERE id = ?")
+      .bind(sessionId)
+      .first<{ events_done_through: string | null }>();
+    return row?.events_done_through ?? null;
+  }
+
+  async setEventsDoneThrough(sessionId: string, eventId: string) {
+    await this.db.prepare("UPDATE sessions SET events_done_through = ? WHERE id = ?").bind(eventId, sessionId).run();
+  }
+
+  /**
+   * Sessions the sweeper should look at, least recently updated first. Finished,
+   * spent and stale sessions are left out; a webhook still wakes any of them.
+   */
+  async sweepableSessions(limit: number): Promise<SessionRow[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT * FROM sessions WHERE status NOT IN ('terminated', 'done', 'stale', 'idle:end_turn', 'idle:budget_reached') " +
+          "ORDER BY updated_at ASC, rowid ASC LIMIT ?",
+      )
+      .bind(limit)
+      .all<SessionRow>();
+    return results;
+  }
+
+  /** Marks idle sessions nobody has touched for `days` as stale. Returns how many. */
+  async markStaleSessions(days: number): Promise<number> {
+    const r = await this.db
+      .prepare("UPDATE sessions SET status = 'stale' WHERE status LIKE 'idle:%' AND updated_at < datetime('now', ?)")
+      .bind(`-${days} days`)
+      .run();
+    return r.meta?.changes ?? 0;
+  }
+
+  /** Deletes event claims and tool results older than `eventDays`, and audit rows older than `auditDays`. */
+  async prune(eventDays: number, auditDays: number): Promise<{ events: number; tool_results: number; audit: number }> {
+    const del = async (sql: string, days: number) =>
+      (await this.db.prepare(sql).bind(`-${days} days`).run()).meta?.changes ?? 0;
+    return {
+      events: await del("DELETE FROM processed_events WHERE ts < datetime('now', ?)", eventDays),
+      tool_results: await del("DELETE FROM tool_results WHERE created_at < datetime('now', ?)", eventDays),
+      audit: await del("DELETE FROM audit WHERE ts < datetime('now', ?)", auditDays),
+    };
+  }
 }
