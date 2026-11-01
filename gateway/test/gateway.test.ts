@@ -581,20 +581,56 @@ describe("status formatting", () => {
     monthCents: 312,
     creditUsd: 200,
     agents: [
-      { name: "ada", title: "Chief of Staff", state: "active", tasks: 1, decisions: 0, weekCents: 142, last: { at: "2026-10-31 20:15:03", line: "Assigned T-4 to Mira" } },
+      {
+        name: "ada", title: "Chief of Staff", state: "active", tasks: 1, decisions: 0, weekCents: 142,
+        last: { at: "2026-10-31 20:15:03", line: "Assigned T-4 to Mira", doing: ["Assigned T-4 to Mira"], blocked: [] },
+      },
       { name: "mira", title: "Maintainer Desk", state: "paused", tasks: 2, decisions: 1, weekCents: 170 },
     ],
   };
 
-  it("renders Discord markdown with a block per agent", async () => {
-    const { statusMarkdown } = await import("../src/status");
-    const md = statusMarkdown(sample);
-    expect(md.split("\n")[0]).toBe("### Agent network · Phase 1");
-    expect(md).toContain("🟢 **Ada** · Chief of Staff");
-    expect(md).toContain("⏸️ **Mira** · Maintainer Desk · *paused*");
-    expect(md).toContain("-# 2 open tasks · 1 decision waiting · $1.70 this week");
-    expect(md).toContain("-# Last report 10-31 20:15: Assigned T-4 to Mira");
-    expect(md).toContain("$3.12 of $200 credits this month (2%)");
+  it("renders Discord status as one card per agent", async () => {
+    const { statusCards } = await import("../src/status");
+    const p = statusCards(sample);
+    expect(p.content.split("\n")[0]).toBe("### Agent network · Phase 1");
+    expect(p.content).toContain("$3.12 of $200 credits this month (2%)");
+    expect(p.embeds!.map((e) => e.title)).toEqual(["🟢 Ada · Chief of Staff", "⏸️ Mira · Maintainer Desk · paused"]);
+    expect(p.embeds!.map((e) => e.color)).toEqual([0x2e9e5b, 0xe0a100]);
+    expect(p.embeds![0].description).toBe("1 open task · 0 decisions waiting · $1.42 this week\n\n**Last report** 10-31 20:15\n- Assigned T-4 to Mira");
+    expect(p.embeds![1].description).toBe("2 open tasks · 1 decision waiting · $1.70 this week\n\nNo report yet.");
+  });
+
+  it("shows the whole report and what is blocked", async () => {
+    const { statusCards, discordSafe } = await import("../src/status");
+    const long = "Reviewing accordproject/concerto#1590 ".repeat(8).trim();
+    const p = statusCards({
+      ...sample,
+      agents: [{ ...sample.agents[0], last: { at: "2026-11-01 09:00:00", line: long, doing: [long, "Triage pass"], blocked: ["Needs @mttrbrts to approve D-7"] } }],
+    });
+    const d = p.embeds![0].description;
+    expect(d).toContain(`- ${discordSafe(long, 4096)}`);
+    expect(long.length).toBeGreaterThan(140);
+    expect(d).toContain("- Triage pass");
+    expect(d).toContain("**Blocked**\n- Needs @\u200bmttrbrts to approve D-7");
+  });
+
+  it("keeps ten agents' cards within Discord's limits", async () => {
+    const { statusCards } = await import("../src/status");
+    const busy = { ...sample.agents[0], last: { at: "2026-11-01 09:00:00", line: "x", doing: ["y".repeat(3000)], blocked: ["z".repeat(3000)] } };
+    const p = statusCards({ ...sample, agents: Array.from({ length: 10 }, (_, i) => ({ ...busy, name: `agent${i}` })) });
+    expect(p.embeds).toHaveLength(10);
+    const total = p.embeds!.reduce((n, e) => n + (e.title ?? "").length + e.description.length, 0);
+    expect(total).toBeLessThanOrEqual(6000);
+    expect(p.embeds!.every((e) => e.description.length <= 4096 && e.description.endsWith("…"))).toBe(true);
+  });
+
+  it("answers /status with cards", async () => {
+    const { handleInteraction } = await import("../src/discordInteractions");
+    const { ctx } = makeTestCtx();
+    const res: any = await handleInteraction(ctx, { type: 2, token: "t", user: { id: ctx.ownerDiscordId! }, data: { name: "status" } }, () => {});
+    expect(res.type).toBe(4);
+    expect(res.data.flags).toBe(64);
+    expect(res.data.embeds.length).toBeGreaterThan(0);
   });
 
   it("keeps the Telegram text as it was", async () => {

@@ -1,8 +1,9 @@
 // Network status, gathered once and rendered for each app:
-// plain text for Telegram, Discord markdown for Discord.
+// plain text for Telegram, Discord cards for Discord.
 
 import { cap, type Ctx } from "./context";
 import type { Decision } from "./db";
+import type { DiscordPayload } from "./discordBot";
 
 export interface AgentStatusRow {
   name: string;
@@ -11,7 +12,7 @@ export interface AgentStatusRow {
   tasks: number;
   decisions: number;
   weekCents: number;
-  last?: { at: string; line: string };
+  last?: { at: string; line: string; doing: string[]; blocked: string[] };
 }
 
 export interface NetworkStatus {
@@ -45,7 +46,7 @@ export async function gatherStatus(ctx: Ctx): Promise<NetworkStatus> {
         tasks: tasks.filter((t) => t.agent === a.name).length,
         decisions: open.filter((d) => d.agent === a.name).length,
         weekCents: spendWeek[a.name] ?? 0,
-        last: st ? { at: st.at, line: st.doing[0] ?? st.done[0] ?? "—" } : undefined,
+        last: st ? { at: st.at, line: st.doing[0] ?? st.done[0] ?? "—", doing: st.doing, blocked: st.blocked } : undefined,
       };
     });
   return {
@@ -88,21 +89,38 @@ export function discordSafe(text: string, max = 140): string {
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
-/** Discord: headed, one block per agent, detail in small text. */
-export function statusMarkdown(s: NetworkStatus): string {
+const STATE_COLOUR: Record<string, number> = {
+  active: 0x2e9e5b,
+  paused: 0xe0a100,
+  stopped: 0xd03b3b,
+  revoked: 0xd03b3b,
+  "not deployed": 0x8a8f98,
+};
+
+/** Discord: a header, then one card per agent with its whole latest report. */
+export function statusCards(s: NetworkStatus): DiscordPayload {
   const pct = s.creditUsd ? Math.round((s.monthCents / 100 / s.creditUsd) * 100) : 0;
-  const out = [
+  const content = [
     `### Agent network · Phase ${s.phase}`,
     `-# ${s.dryRun ? "DRY RUN: approved actions are logged, not executed" : "Live: approved actions execute"} · ${usd(s.monthCents)} of $${s.creditUsd} credits this month (${pct}%)`,
-    "",
-  ];
-  for (const a of s.agents) {
-    out.push(`${STATE_MARK[a.state] ?? "⚪"} **${cap(a.name)}** · ${a.title}${a.state === "active" ? "" : ` · *${a.state}*`}`);
-    out.push(`-# ${plural(a.tasks, "open task")} · ${plural(a.decisions, "decision")} waiting · ${usd(a.weekCents)} this week`);
-    if (a.last) out.push(`-# Last report ${a.last.at.slice(5, 16)}: ${discordSafe(a.last.line)}`);
-    out.push("");
-  }
-  return out.join("\n").trim();
+  ].join("\n");
+  // Discord allows 6,000 characters across a message's cards and 4,096 in one.
+  const budget = Math.floor(6000 / Math.max(s.agents.length, 1));
+  const embeds = s.agents.map((a) => {
+    const title = `${STATE_MARK[a.state] ?? "⚪"} ${cap(a.name)} · ${a.title}${a.state === "active" ? "" : ` · ${a.state}`}`;
+    const lines = [`${plural(a.tasks, "open task")} · ${plural(a.decisions, "decision")} waiting · ${usd(a.weekCents)} this week`, ""];
+    if (!a.last) lines.push("No report yet.");
+    else {
+      lines.push(`**Last report** ${a.last.at.slice(5, 16)}`);
+      for (const item of a.last.doing.length ? a.last.doing : [a.last.line]) lines.push(`- ${discordSafe(item, 4096)}`);
+      if (a.last.blocked.length) lines.push("", "**Blocked**", ...a.last.blocked.map((b) => `- ${discordSafe(b, 4096)}`));
+    }
+    const max = Math.min(4096, budget - title.length);
+    const text = lines.join("\n");
+    const description = text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    return { title, description, color: STATE_COLOUR[a.state] ?? STATE_COLOUR["not deployed"] };
+  });
+  return { content, embeds };
 }
 
 const RISK_MARK: Record<string, string> = { low: "🟢", medium: "🟡", high: "🔴" };
