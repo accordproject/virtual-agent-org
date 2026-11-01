@@ -180,3 +180,22 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   an error but not flagged in the audit log.
 - Revisit with the self-improvement loop, which will read status reports and the
   audit log for evidence.
+
+**32. How Mira starts work** · RESOLVED: on a schedule
+
+- Mira keeps her scheduled passes rather than reacting to GitHub webhooks. Each
+  session has a fixed start-up cost, which a pass spreads across many items.
+- Revisit if first responses to new contributors need to come within the hour.
+
+**33. Mentioning Ada on GitHub** · RESOLVED: not supported
+
+- Comments on GitHub don't reach Ada. Anyone can write a public comment, and owner
+  rights come only from the Telegram and Discord ids (rule 5).
+
+**34. Discord commands in DMs** · RESOLVED
+
+- The slash commands are registered globally and work in the server and in DMs with
+  the bot, so conversations with Ada can stay private. Who may do what is unchanged
+  (decision 15).
+- Plain messages without a command would need a permanent connection to Discord,
+  and Telegram already covers them.

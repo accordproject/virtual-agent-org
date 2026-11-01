@@ -478,6 +478,22 @@ describe("discord bot (decision 15B)", () => {
     const ask = defs.find((d) => d.name === "ask") as any;
     expect(ask.options[0].choices.map((c: any) => c.value)).toEqual(["ada", "mira"]);
   });
+
+  it("registers every command for the server and the bot's DMs", async () => {
+    const { commandDefinitions } = await import("../src/discordInteractions");
+    for (const d of commandDefinitions(["ada"]) as any[]) {
+      expect(d.contexts).toEqual([0, 1]); // GUILD, BOT_DM
+      expect(d.integration_types).toEqual([0]); // installed in a server
+    }
+  });
+
+  it("takes /ada from a DM with the bot", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const res = await run(ctx, { type: 2, user: { id: OWNER }, data: { name: "ada", options: [{ name: "message", value: "Any news?" }] } });
+    expect(res.data.content).toMatch(/Sent to Ada/);
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.text).toBe("Any news?");
+  });
 });
 
 describe("sessions that are waiting", () => {

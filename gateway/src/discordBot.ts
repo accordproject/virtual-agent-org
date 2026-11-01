@@ -106,7 +106,12 @@ export class DiscordBot {
     await this.call("PATCH", `/webhooks/${this.appId}/${interactionToken}/messages/@original`, toMessage({ content }), false);
   }
 
-  /** Registers guild slash commands (instant, unlike global commands). */
+  /** Registers global slash commands, which can also work in DMs with the bot. */
+  async putGlobalCommands(commands: unknown[]) {
+    return this.call<unknown[]>("PUT", `/applications/${this.appId}/commands`, commands);
+  }
+
+  /** Replaces one server's own slash commands; an empty list removes them. */
   async putGuildCommands(guildId: string, commands: unknown[]) {
     return this.call<unknown[]>("PUT", `/applications/${this.appId}/guilds/${guildId}/commands`, commands);
   }
