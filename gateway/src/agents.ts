@@ -1,6 +1,6 @@
 import { cap, type Ctx } from "./context";
 import type { Decision, SessionRow, StartedBy } from "./db";
-import { decisionButtons, decisionCard, discordCard } from "./format";
+import { decisionButtons, decisionCard, discordCard, discordCardFits } from "./format";
 import { ManagedAgentsError } from "./managed";
 import { riskAtMost } from "./risk";
 
@@ -105,10 +105,13 @@ export function isWaitingSession(e: unknown): boolean {
   return e instanceof ManagedAgentsError && e.status === 400 && /waiting on responses|session budget reached/i.test(e.body);
 }
 
-/** Whether the owner may approve this decision from Discord (decision 15B). */
-export function discordApprovable(ctx: Ctx, d: Pick<Decision, "kind" | "risk">): boolean {
+/**
+ * Whether the owner may approve this decision from Discord (decision 15B). A card whose
+ * content doesn't fit in Discord goes to Telegram, so nothing is approved unseen.
+ */
+export function discordApprovable(ctx: Ctx, d: Decision): boolean {
   if (d.kind === "tool.confirm") return false;
-  return riskAtMost(d.risk, ctx.network.discord_approval_max_risk ?? "none");
+  return riskAtMost(d.risk, ctx.network.discord_approval_max_risk ?? "none") && discordCardFits(d);
 }
 
 /**

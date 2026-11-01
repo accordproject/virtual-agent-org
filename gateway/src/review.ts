@@ -3,6 +3,7 @@
 // text of every review it posts. Models return findings; code decides and acts.
 
 import type { ReviewConfig } from "./config";
+import type { Risk } from "./risk";
 import type { Ctx } from "./context";
 import type { Review } from "./db";
 import type { GitHub, OpenPull, PrDetail, RepoRef, WorkflowRun } from "./github";
@@ -30,7 +31,7 @@ export const reviewConfig = (ctx: Ctx): ReviewConfig => ctx.network.review ?? DE
 
 export const SEVERITIES = ["blocking", "should-fix", "nit"] as const;
 export type Severity = (typeof SEVERITIES)[number];
-export type Risk = "low" | "medium" | "high";
+export type { Risk } from "./risk";
 
 const FIRST_TIME = ["FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE", "MANNEQUIN"];
 const TRUSTED = ["OWNER", "MEMBER", "COLLABORATOR"];

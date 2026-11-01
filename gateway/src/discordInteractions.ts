@@ -132,7 +132,7 @@ async function button(ctx: Ctx, i: Interaction, userId: string, owner: boolean, 
 
   switch (action) {
     case "a":
-      if (!discordApprovable(ctx, d)) return reply(`${d.id} is ${d.risk} risk: approve it in Telegram.`);
+      if (!discordApprovable(ctx, d)) return reply(`${d.id} is ${d.risk} risk or too long for Discord: approve it in Telegram.`);
       run(() => approve(ctx, d.id)); // refreshes the cards in both apps
       return DEFER_UPDATE;
     case "r":

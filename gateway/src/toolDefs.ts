@@ -55,7 +55,7 @@ export const TOOLS = {
         payload: {
           type: "object",
           description:
-            "Everything needed to execute: e.g. {merge_method:'squash'} or the full text to publish. For discord.ops: {text, mention: [GitHub logins]}.",
+            "Everything needed to execute, checked when you call: unknown fields are refused, and Matt's card shows every field that will run. E.g. github.merge {sha, merge_method}; github.comment and github.close {text}; github.release {tag, name, body, commitish, draft}; github.docs_pr {path, content, title, body}; discord.announce {text}; discord.ops {text, mention: [GitHub logins]}; message.person {to: [GitHub logins or names], text}; vimeo.publish {video_id, name, description, chapters, make_public}.",
         },
       },
       required: ["kind", "target", "summary", "rationale", "risk"],

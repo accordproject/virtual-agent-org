@@ -1,6 +1,7 @@
 // Handlers for the custom tools agents call. The gateway is the enforcement point:
 // it checks who may call what before doing anything.
 
+import { ActionInvalid, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, startSession } from "./agents";
 import { cap, type Ctx } from "./context";
 import type { Decision, StartedBy } from "./db";
@@ -8,7 +9,7 @@ import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import { memberOf } from "./people";
 import {
-  GATEWAY_LABEL, KIND_LABELS, checklist, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
+  GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
 } from "./review";
 import { maxRisk, toRisk, type Risk } from "./risk";
 import { schemaProblems } from "./schema";
@@ -237,8 +238,10 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   // Rule 5: a member may ask, not instruct. Work a member set going never runs an auto
   // kind, and its cards say whose request it was.
   const member = await sessionMember(ctx, sessionId);
+  // Finding 1: the payload is checked now, and the card and the executor both use the checked copy.
+  const n = validated(ctx, kind, input.target, input.payload);
   if (ctx.network.action_kinds[kind]?.auto && kind === "github.approve_ci" && declared !== "high" && !member) {
-    return autoApproveCi(ctx, agent, sessionId, input);
+    return autoApproveCi(ctx, agent, sessionId, input, n);
   }
   let rationale = s(input.rationale, "rationale");
   if (member) rationale = `⚠ Prompted by ${member.name} (member) via ${member.platform}.\n\n${rationale}`;
@@ -246,9 +249,8 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   let reviewId: string | undefined;
   if (kind === "github.merge") {
     // Decision 35: the gateway checks the PR itself, and refuses rather than queue a merge that can't go ahead.
-    const ref = prRef(ctx, input.target);
-    const payload = (input.payload && typeof input.payload === "object" ? input.payload : {}) as Input;
-    const sha = typeof payload.sha === "string" ? payload.sha : "";
+    const ref = prRef(ctx, n.target);
+    const sha = typeof n.payload.sha === "string" ? n.payload.sha : "";
     if (sha.length < 7) throw new ToolError("payload.sha is required: the head commit the review check reviewed");
     const f = await prFacts(ctx, ref);
     const review = await ctx.db.latestReview(f.target, f.sha);
@@ -263,16 +265,26 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   const d = await ctx.db.createDecision({
     agent,
     kind,
-    target: s(input.target, "target"),
+    target: n.target,
     summary: s(input.summary, "summary").slice(0, 200),
     rationale,
     risk,
-    payload: input.payload ?? {},
+    payload: n.payload,
     session_id: sessionId,
   });
   if (reviewId) await ctx.db.linkMerge(reviewId, d.id);
   await postDecision(ctx, d);
   return `Queued as ${d.id}. Do not wait for it: continue with other work. Check the outcome later with get_decisions.`;
+}
+
+/** The request as the gateway will run it, or a ToolError listing every problem. */
+function validated(ctx: Ctx, kind: string, target: unknown, payload: unknown): Normalised {
+  try {
+    return validateAction(ctx, kind, s(target, "target"), payload ?? {});
+  } catch (e) {
+    if (e instanceof ActionInvalid) throw new ToolError(`Not queued. Fix the request and call again:\n- ${e.problems.join("\n- ")}`);
+    throw e;
+  }
 }
 
 /** The member this session acts for, if a member's message set it going. */
@@ -344,18 +356,14 @@ async function runAuto(ctx: Ctx, d: Decision, why: string) {
  * ahead when nothing in it changes what CI runs or installs. Otherwise it queues
  * the request for Matt as high risk. Either way there is a decision record.
  */
-async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: Input): Promise<string> {
-  const target = s(input.target, "target");
-  const ref = parseTarget(target);
-  if (!ref?.number) throw new ToolError("target must be a pull request, e.g. accordproject/concerto#123");
-  if (!inScope(ctx, ref)) throw new ToolError(`${ref.owner}/${ref.repo} is not in the configured repos`);
-  const payload = (input.payload && typeof input.payload === "object" ? input.payload : {}) as Input;
-  if (typeof payload.sha !== "string" || payload.sha.length < 7) {
-    throw new ToolError("payload.sha is required: the head commit you reviewed (at least 7 characters)");
-  }
+async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: Input, n: Normalised): Promise<string> {
+  const { target, payload } = n;
+  const ref = prRef(ctx, target);
   const gh = await ctx.github();
-  const files = await gh.pullFiles(ref as Required<typeof ref>);
+  const files = await gh.pullFiles(ref);
   const risky = ciSensitivePaths(files);
+  // Finding 4: what limits fork CI is how the repo's workflows run, not only which files changed.
+  const unsafe = await ciApprovalRisks(gh, ref);
   const base = {
     agent,
     kind: "github.approve_ci",
@@ -371,8 +379,13 @@ async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: 
     await postDecision(ctx, d);
     return `Queued for Matt as ${d.id}: the PR changes files CI runs or installs (${shown}). Continue with other work.`;
   }
+  if (unsafe.length) {
+    const d = await ctx.db.createDecision({ ...base, risk: "high", rationale: `${base.rationale}\n\nNot approved automatically: the repo's workflows aren't safe to run for a fork:\n- ${unsafe.join("\n- ")}` });
+    await postDecision(ctx, d);
+    return `Queued for Matt as ${d.id}: the repo's workflows aren't safe to approve automatically. Continue with other work.`;
+  }
   const d = await ctx.db.createDecision({ ...base, risk: "low" });
-  const r = await runAuto(ctx, d, "approved automatically: no workflow, build or dependency files changed");
+  const r = await runAuto(ctx, d, "approved automatically: no workflow, build or dependency files changed, and the repo's workflows are safe for forks");
   return `${d.id} ${r.ok ? "done" : "failed"}: ${r.result}`;
 }
 
@@ -554,7 +567,7 @@ async function submitReview(ctx: Ctx, sessionId: string, input: Input): Promise<
     summary: `Review of ${f.target}: ${verdict.replace("_", " ")}`,
     rationale: `${findings.length} confirmed finding${findings.length === 1 ? "" : "s"} at ${f.sha.slice(0, 7)} (${f.risk} risk).`,
     risk: "low",
-    payload: { sha: f.sha, body, comments, labels: reviewLabels(f.risk, verdict) },
+    payload: validated(ctx, "github.review", f.target, { sha: f.sha, body, comments, labels: reviewLabels(f.risk, verdict) }).payload,
     session_id: sessionId,
   });
   const r = await runAuto(ctx, d, "posted automatically after the gateway's checks (decision 36)");
