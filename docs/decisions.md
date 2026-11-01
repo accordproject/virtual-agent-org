@@ -251,13 +251,22 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 
 - PRs carry the `ai/kind:*`, `ai/risk:*` and `ai/decision:*` labels that already exist
   on the repos in scope.
-- Mira sets one `ai/kind:*` label on each new PR in her triage pass, with her own GitHub
-  tools.
+- Mira sets one `ai/kind:*` label in her triage pass, with `label_pr` (decision 41), on any
+  open PR that has none yet: newest first, at most 15 a pass. The backlog clears over a
+  few days without her tracking what she has done. First responses stay for new PRs.
 - The gateway sets `ai/risk:*` (its risk band) and `ai/decision:*` (`needs-changes` when
   a review has blocking findings, otherwise `needs-review`) each time it posts a review,
   replacing its own earlier labels. A model never sets these, so they always match what
   the gateway enforces (decisions 35 and 37).
 - A label GitHub refuses doesn't stop the review being posted; the result says so.
+
+**39. Review queue order** · RESOLVED: age counts for two weeks at most
+
+- The review queue ranks PRs by first-time contributor, age, green CI and size. Age now
+  adds at most 14 points instead of 60, so a fresh first-time PR with green CI comes
+  before the backlog instead of waiting behind it.
+- The queue still reads only the 50 oldest open PRs in each repo. Newer PRs in a repo
+  with more open PRs than that join the queue as older ones close.
 
 **40. File tools for memory** · RESOLVED: every agent gets read, write, edit and glob
 
@@ -267,6 +276,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   only the agent's own sandbox and memory stores.
 - Ada gets these four and nothing else. The config check still refuses her any other
   built-in tool and any MCP server, so she still has no side effects.
+- Stores are mounted at `/mnt/memory/<store name>/`, confirmed by a test session. Each
+  agent's prompt gives the full paths to its notes and to the shared context.
 
 **41. How Mira labels PRs** · RESOLVED: through a gateway tool, one label at a time
 

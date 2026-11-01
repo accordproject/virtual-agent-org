@@ -431,9 +431,12 @@ describe("risk and CI in code", () => {
     const q = queueFrom("accordproject/concerto", [pull(1, 20), pull(2, 3, { authorAssociation: "FIRST_TIME_CONTRIBUTOR" }), pull(3, 40, { isDraft: true })], new Set(["accordproject/concerto#1@sha1"]), now);
     expect(q.map((p) => [p.target, p.priority, p.reviewed_at_head])).toEqual([
       ["accordproject/concerto#2", 53, false],
-      ["accordproject/concerto#1", 40, true],
+      ["accordproject/concerto#1", 34, true],
       ["accordproject/concerto#3", 0, false],
     ]);
+    // Age counts for two weeks at most (decision 39), so a fresh first-time PR isn't stuck behind the backlog.
+    const fresh = queueFrom("accordproject/concerto", [pull(4, 365), pull(5, 1, { authorAssociation: "FIRST_TIME_CONTRIBUTOR" })], new Set(), now);
+    expect(fresh.map((p) => [p.target, p.priority])).toEqual([["accordproject/concerto#5", 51], ["accordproject/concerto#4", 34]]);
   });
 });
 
