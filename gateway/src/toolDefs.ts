@@ -196,25 +196,118 @@ export const OTTO_TOOLS: CustomToolDef[] = [
   },
 ];
 
+const finding = (summary: string) => ({
+  type: "object",
+  properties: {
+    path: str("File the finding is in, as the PR changes it; omit for the whole PR"),
+    line: { type: "integer", description: "Line in the PR's version of the file; omit if not tied to one line" },
+    severity: { type: "string", enum: ["blocking", "should-fix", "nit"] },
+    area: str("One of the review areas in config/review.yaml: correctness, security, api_compat, tests, docs, conventions, hygiene"),
+    summary: str(summary),
+  },
+  required: ["severity", "area", "summary"],
+});
+const draft = finding("What is wrong and why it matters, in one to three sentences");
+const draftFinding = { ...draft, properties: { ...draft.properties, confidence: { type: "string", enum: ["high", "medium"] } } };
+const prTarget = str("The PR, e.g. accordproject/concerto#123");
+
 export const MIRA_TOOLS: CustomToolDef[] = [
+  {
+    type: "custom",
+    name: "pr_facts",
+    description:
+      "Facts about one PR, computed by the gateway: head sha, size, files, risk band and why, author and the tone to use, CI state, " +
+      "mergeability, approvals, changes requested, unresolved threads, path rules that apply, the last review and the merge checks as they stand.",
+    input_schema: { type: "object", properties: { target: prTarget }, required: ["target"] },
+  },
+  {
+    type: "custom",
+    name: "pr_queue",
+    description:
+      "A repo's open PRs in review order: first-time contributors first, then oldest, then green CI and small size. " +
+      "Each says whether it is a draft and whether it was already reviewed at its current head.",
+    input_schema: { type: "object", properties: { repo: str("owner/name, e.g. accordproject/concerto") }, required: ["repo"] },
+  },
   {
     type: "custom",
     name: "request_review_check",
     description:
-      "Hand your draft review of a PR to a fresh session, which checks each finding against the code, posts only confirmed ones, " +
+      "Hand your draft findings on a PR to a fresh session, which checks each against the code, submits only confirmed ones, " +
       "and alone may propose the merge. Do not post the review or propose the merge yourself. Returns a task id.",
     input_schema: {
       type: "object",
       properties: {
-        target: str("The PR, e.g. accordproject/concerto#123"),
+        target: prTarget,
         sha: str("The head commit you reviewed"),
-        changed_lines: { type: "integer", description: "Lines added plus deleted in the PR" },
-        draft: str(
-          "Your findings, one per item: file:line, severity (blocking, should-fix, nit), confidence (high, medium), and why. " +
-            "Then CI state, maintainer approvals, unresolved threads, and whether you think it is ready to merge.",
-        ),
+        findings: {
+          type: "array",
+          description: "One per finding, with your confidence; an empty list if you found nothing",
+          items: draftFinding,
+        },
+        notes: str("Anything else the check should know: CI, approvals, threads, whether you think it is ready. Optional"),
       },
-      required: ["target", "sha", "changed_lines", "draft"],
+      required: ["target", "sha", "findings"],
+    },
+  },
+  {
+    type: "custom",
+    name: "submit_review",
+    description:
+      "Review check only. Submit the confirmed findings; the gateway checks them and the text, then posts one review on the PR " +
+      "(a summary plus inline comments) and tells you whether anything is blocking. Public text: write only about the PR.",
+    input_schema: {
+      type: "object",
+      properties: {
+        target: prTarget,
+        summary: str("A short summary for the author: what the PR does well, what must change, what would make it mergeable"),
+        findings: { type: "array", items: finding("The finding as the author will read it: what, why, and a suggested fix") },
+      },
+      required: ["target", "summary", "findings"],
+    },
+  },
+  {
+    type: "custom",
+    name: "review_findings",
+    description:
+      "Posted findings and how they fared: by default those with no outcome yet. Also returns stats by area and severity " +
+      "(posted, acted, dismissed) and by risk band (reviews, merge proposals approved or rejected, merged, closed, reverted).",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["open", "all"] },
+        repo: str("owner/name; omit for all repos"),
+        days: { type: "integer", minimum: 1, description: "Only the last N days; stats default to 90" },
+      },
+    },
+  },
+  {
+    type: "custom",
+    name: "record_finding_outcome",
+    description: "Record what came of a posted finding: acted (code changed or the author agreed) or dismissed (someone disagreed, or it merged unchanged).",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: str("Finding id, e.g. F-31"),
+        outcome: { type: "string", enum: ["acted", "dismissed"] },
+        note: str("Who dismissed it and why, in a few words. Optional"),
+      },
+      required: ["id", "outcome"],
+    },
+  },
+  {
+    type: "custom",
+    name: "record_review_outcome",
+    description:
+      "Record what happened to a reviewed PR that the gateway didn't merge itself: merged by a maintainer, closed, reverted, " +
+      "or follow_up (a later PR fixed something it broke).",
+    input_schema: {
+      type: "object",
+      properties: {
+        target: prTarget,
+        outcome: { type: "string", enum: ["merged", "closed", "reverted", "follow_up"] },
+        note: str("The reverting or fixing PR, or who closed it and why. Optional"),
+      },
+      required: ["target", "outcome"],
     },
   },
 ];

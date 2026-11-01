@@ -6,8 +6,18 @@ import deployed from "./generated/deployed.json";
 export interface ActionKind {
   risk: "low" | "medium" | "high";
   executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual";
-  /** Executed at once, without the owner, after the gateway's own safety checks. Only github.approve_ci. */
+  /** Executed at once, without the owner, after the gateway's own safety checks. Only github.approve_ci and github.review. */
   auto?: boolean;
+}
+
+/** config/review.yaml: how Mira reviews (decisions 35 and 36). */
+export interface ReviewConfig {
+  areas: Record<string, string>;
+  max_findings: number;
+  max_nits: number;
+  tone: { first_time: string; maintainer: string; default: string };
+  risk: { high_over_lines: number; high_paths: string[]; low_max_lines: number; low_paths: string[] };
+  path_rules: { glob: string; note: string; repo?: string }[];
 }
 
 export interface Person {
@@ -45,6 +55,8 @@ export interface NetworkConfig {
   approvals_app?: "discord" | "telegram" | "both";
   /** Merge proposals from Mira must come from a fresh review-check session (decision 2A). */
   review_check_required?: boolean;
+  /** Review settings; absent in old builds, when the gateway falls back to DEFAULT_REVIEW. */
+  review?: ReviewConfig;
   /** Model ids by tier, from models.yaml, for sessions the gateway starts on a stronger model. */
   model_tiers?: Record<string, string>;
 }

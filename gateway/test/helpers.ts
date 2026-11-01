@@ -40,6 +40,7 @@ export const NETWORK: NetworkConfig = {
     "vimeo.publish": { risk: "medium", executor: "vimeo" },
     "linkedin.post": { risk: "medium", executor: "manual" },
     "github.approve_ci": { risk: "low", executor: "github", auto: true },
+    "github.review": { risk: "low", executor: "github", auto: true },
   },
   discord_approval_max_risk: "medium",
   people: [
@@ -64,6 +65,86 @@ export const DEPLOYED: DeployedConfig = {
   },
   deployments: { "mira-triage": { id: "dep_mira", agent: "mira" } },
 };
+
+export const HEAD = "abcdef1234567890abcdef1234567890abcdef12";
+
+/** A PR as GitHub describes it, ready to merge unless the test says otherwise. */
+export interface FakePr {
+  head: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  draft: boolean;
+  files: string[];
+  additions: number;
+  deletions: number;
+  author: string;
+  association: string;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  mergeState: string;
+  reviews: { login: string; state: "APPROVED" | "CHANGES_REQUESTED"; association?: string }[];
+  unresolved: number;
+  rollup: string | null;
+  runs: { id: number; workflow_id: number; event: string; status: string; conclusion: string | null }[] | null;
+}
+
+/** A fake GitHub client for the gateway's PR reads and writes. Records reviews and merges. */
+export function fakeGitHub(pr: Partial<FakePr> = {}) {
+  const p: FakePr = {
+    head: HEAD,
+    state: "OPEN",
+    draft: false,
+    files: ["src/parser.ts", "test/parser.test.ts"],
+    additions: 30,
+    deletions: 10,
+    author: "contrib",
+    association: "CONTRIBUTOR",
+    mergeable: "MERGEABLE",
+    mergeState: "CLEAN",
+    reviews: [{ login: "samlee", state: "APPROVED" }],
+    unresolved: 0,
+    rollup: "SUCCESS",
+    runs: [{ id: 1, workflow_id: 10, event: "pull_request", status: "completed", conclusion: "success" }],
+    ...pr,
+  };
+  const posted: { commit_id: string; body: string; comments: { path: string; line: number; body: string }[] }[] = [];
+  const merged: { method: string; sha?: string }[] = [];
+  const gh = {
+    pr: p,
+    posted,
+    merged,
+    rejectInline: false,
+    prDetail: async () => ({
+      state: p.state,
+      isDraft: p.draft,
+      title: "Fix the parser",
+      createdAt: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+      headRefOid: p.head,
+      additions: p.additions,
+      deletions: p.deletions,
+      changedFiles: p.files.length,
+      mergeable: p.mergeable,
+      mergeStateStatus: p.mergeState,
+      reviewDecision: p.reviews.some((r) => r.state === "CHANGES_REQUESTED") ? "CHANGES_REQUESTED" : p.reviews.length ? "APPROVED" : "REVIEW_REQUIRED",
+      authorAssociation: p.association,
+      author: { login: p.author },
+      latestOpinionatedReviews: { nodes: p.reviews.map((r) => ({ state: r.state, authorAssociation: r.association ?? "MEMBER", author: { login: r.login } })) },
+      reviewThreads: { totalCount: p.unresolved, nodes: Array.from({ length: p.unresolved }, () => ({ isResolved: false })) },
+      commits: { nodes: [{ commit: { statusCheckRollup: p.rollup ? { state: p.rollup } : null } }] },
+    }),
+    pullFiles: async () => p.files,
+    runsAt: async () => (p.runs ? p.runs.map((r) => ({ name: `wf${r.workflow_id}`, ...r })) : null),
+    openPulls: async () => [],
+    createReview: async (_r: unknown, review: (typeof posted)[number]) => {
+      if (gh.rejectInline && review.comments.length) throw new Error("GitHub POST /reviews: 422 Line could not be resolved");
+      posted.push(review);
+      return { html_url: `https://github.com/accordproject/concerto/pull/12#pullrequestreview-${posted.length}` };
+    },
+    merge: async (_r: unknown, method: string, sha?: string) => {
+      merged.push({ method, sha });
+      return { merged: true, sha: "feedface00" };
+    },
+  };
+  return gh;
+}
 
 export interface Fakes {
   sent: { chatId: number; text: string; opts?: unknown }[];

@@ -6,7 +6,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILTIN_TOOLS, ROOT, loadAll, readText } from "./lib";
+import { BUILTIN_TOOLS, ROOT, loadAll, readText, type ReviewYaml } from "./lib";
 import { REPOS_MARKER, REPO_RE } from "./repos";
 
 export const PERSON_ROLES = ["owner", "tsc_member", "maintainer"];
@@ -22,8 +22,42 @@ export function fullRepo(repo: string, org: string): string {
   return repo.includes("/") ? repo : `${org}/${repo}`;
 }
 
+/** Kinds the gateway runs without the owner, after its own checks (decisions 20 and 36). */
+export const AUTO_KINDS = ["github.approve_ci", "github.review"];
+const TONES = ["welcoming", "neutral", "terse"];
+
+export function validateReview(r: ReviewYaml | undefined): string[] {
+  if (!r) return ["config/review.yaml is missing"];
+  const errs: string[] = [];
+  const areas = Object.keys(r.areas ?? {});
+  if (!areas.length) errs.push("review.yaml: areas must list at least one area");
+  for (const a of areas) if (!/^[a-z_]+$/.test(a)) errs.push(`review.yaml: area "${a}" should be lower_snake_case`);
+  for (const k of ["max_findings", "max_nits"] as const) {
+    if (!Number.isInteger(r[k]) || r[k] < 0 || r[k] > 50) errs.push(`review.yaml: ${k} must be a whole number from 0 to 50`);
+  }
+  for (const k of ["first_time", "maintainer", "default"] as const) {
+    if (!TONES.includes(r.tone?.[k])) errs.push(`review.yaml: tone.${k} must be one of ${TONES.join(", ")}`);
+  }
+  const risk = r.risk;
+  if (!risk) errs.push("review.yaml: risk is required");
+  else {
+    for (const k of ["high_over_lines", "low_max_lines"] as const) {
+      if (!Number.isInteger(risk[k]) || risk[k] < 0) errs.push(`review.yaml: risk.${k} must be a whole number`);
+    }
+    if (risk.low_max_lines > risk.high_over_lines) errs.push("review.yaml: risk.low_max_lines must not exceed risk.high_over_lines");
+    for (const k of ["high_paths", "low_paths"] as const) {
+      if (!Array.isArray(risk[k]) || risk[k].some((g) => typeof g !== "string" || !g.trim())) errs.push(`review.yaml: risk.${k} must be a list of globs`);
+    }
+  }
+  for (const [i, p] of (r.path_rules ?? []).entries()) {
+    if (typeof p.glob !== "string" || !p.glob.trim() || typeof p.note !== "string" || !p.note.trim()) errs.push(`review.yaml: path_rules[${i}] needs a glob and a note`);
+    if (p.repo !== undefined && !REPO_RE.test(String(p.repo))) errs.push(`review.yaml: path_rules[${i}].repo "${p.repo}" should be owner/name`);
+  }
+  return errs;
+}
+
 export function validate(cfg = loadAll()): string[] {
-  const { network, models, permissions, schedules, mcp, specs, people, peopleIds, discord } = cfg;
+  const { network, models, permissions, schedules, mcp, specs, people, peopleIds, discord, review } = cfg;
   const errs: string[] = [];
 
   for (const [name, id] of Object.entries(discord.channels ?? {})) {
@@ -41,8 +75,9 @@ export function validate(cfg = loadAll()): string[] {
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
     if (!["github", "discord", "discord_ops", "discord_dm", "vimeo", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
     // Only kinds the gateway has its own safety checks for may skip the owner.
-    if (v.auto && k !== "github.approve_ci") errs.push(`action kind ${k}: auto is only allowed for github.approve_ci`);
+    if (v.auto && !AUTO_KINDS.includes(k)) errs.push(`action kind ${k}: auto is only allowed for ${AUTO_KINDS.join(" and ")}`);
   }
+  errs.push(...validateReview(review));
 
   const repos = network.github.repos ?? [];
   if (!Array.isArray(repos)) errs.push("github.repos must be a list");
@@ -143,6 +178,7 @@ export function compile(cfg = loadAll()) {
     discord_approval_max_risk: permissions.discord_approval_max_risk ?? "none",
     approvals_app: permissions.approvals_app ?? "both",
     review_check_required: permissions.review_check_required ?? false,
+    review: { ...cfg.review, path_rules: cfg.review.path_rules ?? [] },
     model_tiers: cfg.models.tiers,
     discord_channels: Object.fromEntries(
       Object.entries(discord.channels ?? {}).filter(([, id]) => id !== undefined && id !== null && id !== "").map(([k, id]) => [k, String(id)]),

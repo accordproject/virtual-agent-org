@@ -5,7 +5,10 @@ import type { Decision } from "./db";
 import { payloadText, safeJson } from "./format";
 import { parseTarget, type RepoRef } from "./github";
 import { resolveMentions } from "./people";
+import { checklist, failed, mergeChecks, prFacts } from "./review";
 import { toSeconds, type Chapter } from "./vimeo";
+
+export { ciSensitivePaths } from "./review";
 
 export interface ExecResult {
   ok: boolean;
@@ -87,19 +90,48 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
   if (!inScope(ctx, ref)) return { ok: false, result: `${ref.owner}/${ref.repo} is not in the configured repos` };
 
   const payload = safeJson(d.payload);
-  if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${d.target}` };
-
-  const gh = await ctx.github();
   const needNumber = (): Required<RepoRef> => {
     if (!ref.number) throw new Error(`${d.kind} needs a PR or issue number in the target`);
     return ref as Required<RepoRef>;
   };
 
+  // Decision 35: the merge checks run again at approval, which may be hours after the proposal.
+  let mergeSha = "";
+  if (d.kind === "github.merge") {
+    const f = await prFacts(ctx, needNumber());
+    const checks = mergeChecks(f, typeof payload.sha === "string" ? payload.sha : "", await ctx.db.latestReview(f.target, f.sha));
+    if (failed(checks).length) return { ok: false, result: `Not merged; the PR changed since the proposal:\n${checklist(failed(checks))}` };
+    mergeSha = f.sha;
+  }
+  if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${d.target}` };
+
+  const gh = await ctx.github();
   switch (d.kind) {
     case "github.merge": {
       const method = (payload.merge_method as "merge" | "squash" | "rebase") ?? "squash";
-      const r = await gh.merge(needNumber(), method, payload.sha as string | undefined);
+      // GitHub refuses if the head moved after the checks above.
+      const r = await gh.merge(needNumber(), method, mergeSha);
+      if (r.merged) await ctx.db.setReviewOutcome(d.target, "merged", `merged by the gateway (${d.id})`);
       return { ok: r.merged, result: r.merged ? `Merged as ${r.sha.slice(0, 7)}` : "GitHub did not merge" };
+    }
+    case "github.review": {
+      // Built and checked by submit_review (decision 36); this only posts it.
+      const review = {
+        commit_id: String(payload.sha ?? ""),
+        body: String(payload.body ?? ""),
+        comments: Array.isArray(payload.comments) ? (payload.comments as { path: string; line: number; body: string }[]) : [],
+      };
+      if (!review.commit_id || !review.body) return { ok: false, result: "Payload needs sha and body" };
+      try {
+        const r = await gh.createReview(needNumber(), review);
+        return { ok: true, result: `Posted review: ${r.html_url}` };
+      } catch (e) {
+        // A line outside the diff makes GitHub refuse the whole review: post the findings in the body instead.
+        if (!review.comments.length || !String(e).includes(": 422")) throw e;
+        const moved = review.comments.map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n\n/, ": ")}`).join("\n");
+        const r = await gh.createReview(needNumber(), { ...review, body: review.body.replace(/\n---\n/, `\n${moved}\n\n---\n`), comments: [] });
+        return { ok: true, result: `Posted review: ${r.html_url} (findings in the summary; GitHub refused the inline comments)` };
+      }
     }
     case "github.close": {
       const n = needNumber();
@@ -197,24 +229,6 @@ async function publishVimeo(ctx: Ctx, p: Record<string, unknown>): Promise<ExecR
     .filter(Boolean)
     .join("; ");
   return { ok: true, result: `${done}: ${video.link}${notes.length ? `\nNotes: ${notes.slice(0, 3).join("; ")}` : ""}` };
-}
-
-/**
- * Paths that change what CI itself runs or installs. A PR touching any of these
- * never has its CI approved without Matt (github.approve_ci is queued instead).
- */
-const CI_SENSITIVE = [
-  /^\.github\//,
-  /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|\.npmrc|\.yarnrc(\.yml)?|lerna\.json|nx\.json)$/,
-  /(^|\/)(Cargo\.toml|Cargo\.lock|build\.rs|go\.mod|go\.sum|requirements[^/]*\.txt|pyproject\.toml|setup\.py|Gemfile(\.lock)?)$/,
-  /(^|\/)([^/]+\.(csproj|fsproj|sln|props|targets)|nuget\.config|global\.json)$/i,
-  /(^|\/)(Dockerfile[^/]*|docker-compose[^/]*|Makefile|Taskfile[^/]*|Justfile)$/,
-  /(^|\/)[^/]+\.(sh|bash|ps1|bat|cmd)$/,
-  /(^|\/)\.husky\//,
-];
-
-export function ciSensitivePaths(files: string[]): string[] {
-  return [...new Set(files.filter((f) => CI_SENSITIVE.some((re) => re.test(f))))];
 }
 
 /** The only files github.docs_pr may write: guidance for contributors and review agents. */

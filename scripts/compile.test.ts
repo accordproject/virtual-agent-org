@@ -20,3 +20,27 @@ test("compile leaves platform ids out of network.json", () => {
   const out = compile(withPeople([{ name: "Kim Park", role: "maintainer", github: "kimpark" }], { "Kim Park": { discord: "323456789012345678" } }));
   assert.deepEqual(out.people, [{ name: "Kim Park", roles: ["maintainer"], github: "kimpark" }]);
 });
+
+test("validate allows auto only for the kinds the gateway checks itself", () => {
+  const cfg = loadAll();
+  const permissions = { ...cfg.permissions, action_kinds: { ...cfg.permissions.action_kinds, "github.merge": { risk: "medium" as const, executor: "github" as const, auto: true } } };
+  assert.ok(validate({ ...cfg, permissions }).includes("action kind github.merge: auto is only allowed for github.approve_ci and github.review"));
+  assert.deepEqual(validate(cfg), []);
+});
+
+test("validate checks review.yaml", () => {
+  const cfg = loadAll();
+  const review = { ...cfg.review, max_nits: -1, tone: { ...cfg.review.tone, first_time: "chirpy" }, risk: { ...cfg.review.risk, low_max_lines: 900 }, path_rules: [{ glob: "", note: "x" }] };
+  const errs = validate({ ...cfg, review });
+  assert.ok(errs.includes("review.yaml: max_nits must be a whole number from 0 to 50"));
+  assert.ok(errs.includes("review.yaml: tone.first_time must be one of welcoming, neutral, terse"));
+  assert.ok(errs.includes("review.yaml: risk.low_max_lines must not exceed risk.high_over_lines"));
+  assert.ok(errs.includes("review.yaml: path_rules[0] needs a glob and a note"));
+});
+
+test("compile passes the review settings to the gateway", () => {
+  const out = compile(loadAll());
+  assert.equal(out.review.max_nits, 3);
+  assert.ok(out.review.risk.high_paths.includes(".github/**"));
+  assert.ok(out.action_kinds["github.review"].auto);
+});

@@ -90,11 +90,20 @@ Critical actions are never given to agents as tools. Each agent has a custom too
    the agent in its next session.
 5. A rejection note goes back to the agent as an instruction.
 
-The only action kind that runs without the owner is `github.approve_ci` (decision 20):
-Mira may approve waiting CI runs on a fork PR after reviewing it, but the gateway
-itself sends any PR that touches workflows, build scripts, dependency or lock files,
-Dockerfiles or shell scripts to the owner instead, and refuses if commits arrived after
-the review.
+Two action kinds run without the owner, each after the gateway's own checks:
+
+- `github.approve_ci` (decision 20): Mira may approve waiting CI runs on a fork PR after
+  reviewing it. The gateway itself sends any PR that touches workflows, build scripts,
+  dependency or lock files, Dockerfiles or shell scripts to the owner instead, and
+  refuses if commits arrived after the review.
+- `github.review` (decision 36): a review check's confirmed findings, posted as one
+  comment-only review. The gateway checks each finding against the PR and refuses text
+  that @mentions anyone but the author or talks about how the review was made.
+
+A merge proposal is checked by the gateway itself, not just by the model, when it is
+queued and again on approval (decision 35). The checks: the reviewed head, a posted
+review with nothing blocking, green CI, mergeable, no changes requested, no unresolved
+threads, and a maintainer's approval unless the PR is low risk. The card lists them.
 
 ## Safety rules
 
@@ -156,7 +165,9 @@ public action without a decision id.
 - **Briefs and budgets:** Ada's `assign_task` requires an objective, output, a
   "done when" test and an effort level that sets the session budget (decision 21).
 - **Review:** Mira's PR reviews are checked by a fresh session before anything is
-  posted or a merge is proposed (decision 22).
+  posted or a merge is proposed (decision 22). The gateway computes each PR's facts
+  and risk band, posts the confirmed findings, and records what maintainers did with
+  them (decisions 35 and 36; settings in `config/review.yaml`).
 - **Memory:** each agent keeps `/notes/working.md` in its own memory store; sessions
   start fresh and read their notes first.
 
