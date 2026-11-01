@@ -142,6 +142,20 @@ export class GitHub {
     });
   }
 
+  async labels(r: Required<RepoRef>): Promise<string[]> {
+    const ls = await this.call<{ name: string }[]>("GET", `/repos/${r.owner}/${r.repo}/issues/${r.number}/labels?per_page=100`);
+    return ls.map((l) => l.name);
+  }
+
+  /** GitHub creates a label the repo doesn't have yet. */
+  addLabels(r: Required<RepoRef>, names: string[]) {
+    return this.call("POST", `/repos/${r.owner}/${r.repo}/issues/${r.number}/labels`, { labels: names });
+  }
+
+  removeLabel(r: Required<RepoRef>, name: string) {
+    return this.call("DELETE", `/repos/${r.owner}/${r.repo}/issues/${r.number}/labels/${encodeURIComponent(name)}`);
+  }
+
   /** Changed file paths in a PR (up to 3,000, GitHub's own limit). */
   async pullFiles(r: Required<RepoRef>): Promise<string[]> {
     const out: string[] = [];

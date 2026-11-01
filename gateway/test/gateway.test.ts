@@ -1018,7 +1018,7 @@ describe("posting reviews (decision 36)", () => {
     const { ctx, fakes, gh } = setup();
     const sid = await startCheck(ctx, fakes);
     const out = await submit(ctx, sid, [SHOULD, { severity: "nit", area: "docs", summary: "Mention the change in the changelog." }]);
-    expect(out).toMatch(/^R-1 \(D-1\) Posted review: https:\/\/github.com\/\S+\. Nothing blocking\. If CI is green/);
+    expect(out).toMatch(/^R-1 \(D-1\) Posted review: https:\/\/github.com\/\S+ and labelled it ai\/risk:medium, ai\/decision:needs-review\. Nothing blocking\. If CI is green/);
     expect(gh.posted).toHaveLength(1);
     const review = gh.posted[0];
     expect(review.commit_id).toBe(HEAD);
@@ -1032,6 +1032,28 @@ describe("posting reviews (decision 36)", () => {
     const open = JSON.parse(await handleTool(ctx, "mira", "s", "review_findings", {}));
     expect(open.findings.map((f: any) => [f.id, f.severity, f.area])).toEqual([["F-1", "should-fix", "tests"], ["F-2", "nit", "docs"]]);
     await expect(submit(ctx, sid)).rejects.toThrow(/already posted at abcdef1/);
+  });
+
+  it("labels the PR with the risk band and what happens next, keeping other labels", async () => {
+    const { ctx, fakes, gh } = setup({ labels: ["ai/kind:bugfix", "ai/risk:low", "ai/decision:needs-changes", "bug"] });
+    const sid = await startCheck(ctx, fakes);
+    expect(await submit(ctx, sid, [SHOULD])).toMatch(/Posted review: \S+ and labelled it ai\/risk:medium, ai\/decision:needs-review\. Nothing blocking/);
+    expect(gh.pr.labels.sort()).toEqual(["ai/decision:needs-review", "ai/kind:bugfix", "ai/risk:medium", "bug"]);
+  });
+
+  it("labels a blocking review needs-changes", async () => {
+    const { ctx, fakes, gh } = setup();
+    const sid = await startCheck(ctx, fakes);
+    await submit(ctx, sid, [{ ...SHOULD, severity: "blocking", area: "correctness" }]);
+    expect(gh.pr.labels).toEqual(["ai/risk:medium", "ai/decision:needs-changes"]);
+  });
+
+  it("still records the review when GitHub refuses the labels", async () => {
+    const { ctx, fakes, gh } = setup();
+    gh.rejectLabels = true;
+    const sid = await startCheck(ctx, fakes);
+    expect(await submit(ctx, sid)).toMatch(/Posted review: \S+ but couldn't label it \(GitHub GET \/labels: 403/);
+    expect((await ctx.db.latestReview(T))?.url).toMatch(/^https:\/\/github.com\//);
   });
 
   it("says a blocking review rules out the merge", async () => {

@@ -7,7 +7,7 @@ import type { Decision } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import {
-  checklist, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, type PrFacts, type ReviewFinding,
+  checklist, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
 } from "./review";
 import { ADA_TOOLS, COMMON_TOOLS, MIRA_TOOLS, OTTO_TOOLS, VERA_TOOLS } from "./toolDefs";
 import { isTechWg } from "./vimeo";
@@ -490,7 +490,7 @@ async function submitReview(ctx: Ctx, sessionId: string, input: Input): Promise<
     summary: `Review of ${f.target}: ${verdict.replace("_", " ")}`,
     rationale: `${findings.length} confirmed finding${findings.length === 1 ? "" : "s"} at ${f.sha.slice(0, 7)} (${f.risk} risk).`,
     risk: "low",
-    payload: { sha: f.sha, body, comments },
+    payload: { sha: f.sha, body, comments, labels: reviewLabels(f.risk, verdict) },
     session_id: sessionId,
   });
   const r = await runAuto(ctx, d, "posted automatically after the gateway's checks (decision 36)");

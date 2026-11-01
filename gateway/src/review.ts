@@ -350,6 +350,17 @@ const VERDICT_LINE: Record<Review["verdict"], string> = {
   approve: "No problems found.",
 };
 
+/**
+ * Labels the gateway sets on a PR when it posts a review (decision 38), from facts it
+ * worked out itself. Mira sets the PR's ai/kind:* label in triage; nothing else here
+ * touches it.
+ */
+export const GATEWAY_LABEL = /^ai\/(risk|decision):/;
+
+export function reviewLabels(risk: Risk, verdict: Review["verdict"]): string[] {
+  return [`ai/risk:${risk}`, `ai/decision:${verdict === "request_changes" ? "needs-changes" : "needs-review"}`];
+}
+
 /** The review as GitHub gets it: a summary body and inline comments for findings with a line. */
 export function renderReview(sha: string, summary: string, findings: ReviewFinding[]) {
   const verdict = verdictOf(findings);

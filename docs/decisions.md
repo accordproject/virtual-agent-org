@@ -246,3 +246,15 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Triage stays on Claude's fast tier. The owner is watching its cost over the next few
   weeks; if that is high, a head-to-head trial of Jev and the fast tier on about 100
   labelled PRs, comparing accuracy and cost per PR, is the next step.
+
+**38. PR labels** · RESOLVED: Mira labels the kind; the gateway labels risk and decision
+
+- PRs carry the `ai/kind:*`, `ai/risk:*` and `ai/decision:*` labels that already exist
+  on the repos in scope.
+- Mira sets one `ai/kind:*` label on each new PR in her triage pass, with her own GitHub
+  tools.
+- The gateway sets `ai/risk:*` (its risk band) and `ai/decision:*` (`needs-changes` when
+  a review has blocking findings, otherwise `needs-review`) each time it posts a review,
+  replacing its own earlier labels. A model never sets these, so they always match what
+  the gateway enforces (decisions 35 and 37).
+- A label GitHub refuses doesn't stop the review being posted; the result says so.
