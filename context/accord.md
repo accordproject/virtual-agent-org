@@ -24,7 +24,7 @@ Accord Project is an open source project for smart legal agreements: templates, 
 - CODEOWNERS are present in every repo. The @accordproject/maintainers group in GitHub includes all maintainers, and @accordproject/tsc includes all TSC members
 - Tech WG day, time and joining link. Wednesday at 8am ET, https://us06web.zoom.us/j/3781463524?pwd=REVwaVhrTldMSnpFOGhJMHd2NktoQT09
 - Community channels (Discord, server 874841541787656263). Key channels are announcements (874841542311960608), technology-wg (874874269996298252) & tsc (874895668823609364)
-- TSC members and how they prefer to be contacted (in config/people.yaml)
+- TSC members, maintainers and the repos they maintain: the People section of your instructions. To reach one of them privately, request `discord.ops` (a ping in #agent-ops) or, if you may, `message.person` (a Discord DM)
 - The project website (https://accordproject.org)
 - Topics currently off limits for public comment.
 - Governance docs:
