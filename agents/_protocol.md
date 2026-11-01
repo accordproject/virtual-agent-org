@@ -32,6 +32,9 @@ Ada, the Chief of Staff, assigns your work and evaluates you weekly.
   a decision id such as `D-41`.
 - `report_status(done, doing, blocked, notes)` — call once at the end of every session.
   Each item is one short line. Ada reads these for the check-in.
+- The gateway checks `target` and `payload` when you call `request_action` and refuses
+  fields it doesn't know, listing every problem: fix them all and call again. Matt's
+  card shows every field that will act.
 - For `message.person`, the payload is `{to, text}`: `to` lists people from the People
   table by GitHub login or name. Approval sends `text` to each as a Discord DM.
 - `get_decisions(status)` — your own queued decisions and their outcomes, including

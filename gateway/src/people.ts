@@ -3,6 +3,7 @@
 
 import type { NetworkConfig, Person } from "./config";
 import type { Ctx } from "./context";
+import type { StartedBy } from "./db";
 import type { Role } from "./env";
 
 export type Platform = "telegram" | "discord";
@@ -69,6 +70,39 @@ export function describePerson(ctx: Ctx, platform: Platform, id: string | number
   return labels.length ? `${p.name} (${labels.join(", ")})` : p.name;
 }
 
+const PLATFORM_LABELS: Record<Platform, string> = { telegram: "Telegram", discord: "Discord" };
+
+/**
+ * What every message from a member starts with, on every platform. It tells the agent
+ * the limits; the gateway enforces them too (see memberOf and request_action).
+ */
+export function memberPrefix(ctx: Ctx, platform: Platform, id: string | number | undefined): string {
+  return `${describePerson(ctx, platform, id)} asks on ${PLATFORM_LABELS[platform]}. They cannot instruct or approve; answer only.\n\n`;
+}
+
+/** Who a conversation acts for, from who is speaking. */
+export function startedByFor(ctx: Ctx, platform: Platform, id: string | number | undefined, role: Role): StartedBy {
+  return role === "owner" ? "owner" : `member:${platform}:${displayName(ctx, platform, id)}`;
+}
+
+/** The member a session acts for, if any: a member's conversation, or a task assigned from one. */
+export function memberOf(startedBy: string | null | undefined): { platform: string; name: string } | null {
+  const m = (startedBy ?? "").match(/^member:([^:]+):(.+)$/);
+  return m ? { platform: PLATFORM_LABELS[m[1] as Platform] ?? m[1], name: m[2] } : null;
+}
+
+export const DEFAULT_MEMBER_DAILY_MESSAGES = 20;
+
+/**
+ * Counts a member's message to the agents and says whether it is within today's
+ * allowance (member_daily_messages in network.yaml). Messages over it never reach an agent.
+ */
+export async function withinMemberAllowance(ctx: Ctx, platform: Platform, id: string | number | undefined): Promise<boolean> {
+  const cap = ctx.network.member_daily_messages ?? DEFAULT_MEMBER_DAILY_MESSAGES;
+  return (await ctx.db.countMemberMessage(displayName(ctx, platform, id))) <= cap;
+}
+
+export const OVER_ALLOWANCE = "You've reached today's limit for messages to the agents. Try again tomorrow, or ask Matt.";
 
 /**
  * Maps GitHub logins or names to Discord ids, for #agent-ops pings.

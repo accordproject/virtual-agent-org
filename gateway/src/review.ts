@@ -3,9 +3,11 @@
 // text of every review it posts. Models return findings; code decides and acts.
 
 import type { ReviewConfig } from "./config";
+import type { Risk } from "./risk";
 import type { Ctx } from "./context";
 import type { Review } from "./db";
-import type { OpenPull, PrDetail, RepoRef, WorkflowRun } from "./github";
+import type { GitHub, OpenPull, PrDetail, RepoRef, WorkflowRun } from "./github";
+import { workflowRisks, workflowWarnings } from "./workflows";
 
 /** Used when network.json predates config/review.yaml. Mirrors that file. */
 export const DEFAULT_REVIEW: ReviewConfig = {
@@ -29,7 +31,7 @@ export const reviewConfig = (ctx: Ctx): ReviewConfig => ctx.network.review ?? DE
 
 export const SEVERITIES = ["blocking", "should-fix", "nit"] as const;
 export type Severity = (typeof SEVERITIES)[number];
-export type Risk = "low" | "medium" | "high";
+export type { Risk } from "./risk";
 
 const FIRST_TIME = ["FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE", "MANNEQUIN"];
 const TRUSTED = ["OWNER", "MEMBER", "COLLABORATOR"];
@@ -73,10 +75,35 @@ const CI_SENSITIVE = [
   /(^|\/)(Dockerfile[^/]*|docker-compose[^/]*|Makefile|Taskfile[^/]*|Justfile)$/,
   /(^|\/)[^/]+\.(sh|bash|ps1|bat|cmd)$/,
   /(^|\/)\.husky\//,
+  // JVM and Python builds, and the test runners' own configuration.
+  /(^|\/)(pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradlew(\.bat)?|gradle-wrapper\.(properties|jar))$/,
+  /(^|\/)(conftest\.py|tox\.ini|noxfile\.py|setup\.cfg)$/,
+  // Config that tools load and run as code: tsconfig, and jest/vitest/eslint/webpack-style *.config.* files.
+  /(^|\/)tsconfig[^/]*\.json$/,
+  /(^|\/)[^/]+\.config\.(js|cjs|mjs|ts|cts|mts)$/,
+  // What gets checked out or installed before anything runs.
+  /(^|\/)(\.gitmodules|\.nvmrc|\.node-version|\.tool-versions)$/,
+  /(^|\/)\.devcontainer\//,
 ];
 
 export function ciSensitivePaths(files: string[]): string[] {
   return [...new Set(files.filter((f) => CI_SENSITIVE.some((re) => re.test(f))))];
+}
+
+/**
+ * Why approving fork PRs' CI in this repo isn't safe without Matt, from its workflows
+ * on the default branch (decision 20): pull_request_target or workflow_run triggers,
+ * runners that aren't GitHub-hosted, or secrets in pull_request workflows. Empty when
+ * it is safe. Fails closed: workflows it can't read are a reason.
+ */
+export async function ciApprovalRisks(gh: Pick<GitHub, "workflowFiles">, ref: RepoRef): Promise<string[]> {
+  let files: { path: string; text: string }[];
+  try {
+    files = await gh.workflowFiles(ref);
+  } catch (e) {
+    return [`couldn't read the repo's workflows (${e instanceof Error ? e.message : String(e)})`];
+  }
+  return files.flatMap((f) => [...workflowRisks(f.text), ...workflowWarnings(f.text)].map((r) => `${f.path}: ${r}`));
 }
 
 /** Files that tell reviewers, human or agent, what to do. A PR changing them is reviewed against the base branch's copy. */

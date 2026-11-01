@@ -1,0 +1,214 @@
+import { describe, expect, it } from "vitest";
+import { messageAgent } from "../src/agents";
+import { handleUpdate } from "../src/commands";
+import { handleInteraction } from "../src/discordInteractions";
+import { schemaProblems } from "../src/schema";
+import { TOOLS, toolsForAgent } from "../src/toolDefs";
+import { handleTool } from "../src/tools";
+import { HEAD, fakeGitHub, makeTestCtx } from "./helpers";
+
+const T = "accordproject/concerto#12";
+const JANE_TG = 88;
+const JANE_DC = "123456789012345678";
+const OWNER_DC = "111111111111111111";
+
+const tg = (from: number, text: string, chat = from) => ({
+  update_id: 1,
+  message: { message_id: 1, from: { id: from }, chat: { id: chat, type: chat === from ? "private" : "group" }, text },
+});
+const created = (fakes: { calls: { method: string; args: unknown[] }[] }) =>
+  fakes.calls.filter((c) => c.method === "createSession").map((c) => c.args[0] as { text: string });
+const discord = async (ctx: any, user: string, name: string, options: Record<string, string>) => {
+  const pending: Promise<unknown>[] = [];
+  const res: any = await handleInteraction(
+    ctx,
+    { type: 2, token: "tok", member: { user: { id: user } }, data: { name, options: Object.entries(options).map(([name, value]) => ({ name, value })) } },
+    (p) => pending.push(p),
+  );
+  await Promise.all(pending);
+  return res;
+};
+
+describe("tool schemas", () => {
+  it("checks types, required fields, enums, ranges and nested items", () => {
+    const schema = TOOLS.request_review_check.input_schema;
+    expect(schemaProblems(schema, { target: T, sha: "abc1234", findings: [] })).toEqual([]);
+    expect(schemaProblems(schema, { target: 12, findings: [{ severity: "major", area: "tests", summary: "x", line: 1.5 }] })).toEqual([
+      "sha is required",
+      "target must be a string, not number",
+      "findings[0].line must be a whole number, not number",
+      "findings[0].severity must be one of blocking, should-fix, nit",
+    ]);
+    expect(schemaProblems(TOOLS.vimeo_recordings.input_schema, { limit: 80 })).toEqual(["limit must be at most 50"]);
+    expect(schemaProblems(TOOLS.report_status.input_schema, "done")).toEqual(["input must be an object, not string"]);
+  });
+
+  it("treats null as not given for optional fields, and allows extra fields", () => {
+    expect(schemaProblems(TOOLS.submit_review.input_schema, { target: T, summary: "s", findings: [{ severity: "nit", area: "docs", summary: "x", line: null, path: null }], extra: 1 })).toEqual([]);
+  });
+
+  it("refuses a malformed call before the handler runs, with every problem listed", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "mira", "s", "request_action", { kind: "github.comment", target: T, summary: "s", rationale: "r", risk: "huge" })).rejects.toThrow(
+      /Fix the input and call again:\n- risk must be one of low, medium, high/,
+    );
+    expect(await ctx.db.getDecision("D-1")).toBeNull();
+  });
+
+  it("gives each agent the common tools first, then only its own", () => {
+    const names = (a: string) => toolsForAgent(a).map((t) => t.name);
+    expect(names("ada").slice(0, 3)).toEqual(["request_action", "report_status", "get_decisions"]);
+    expect(names("ada")).toContain("assign_task");
+    expect(names("mira")).not.toContain("assign_task");
+    expect(names("mira")).toContain("submit_review");
+    expect(names("rosa")).toEqual(["request_action", "report_status", "get_decisions"]);
+    expect(toolsForAgent("otto").every((t) => t.type === "custom" && t.input_schema.type === "object")).toBe(true);
+  });
+
+  it("still refuses another agent's tools", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "mira", "s", "assign_task", {})).rejects.toThrow(/assign_task is not available to mira/);
+  });
+});
+
+describe("review checks are a kind of task, not a title (finding 2)", () => {
+  const setup = () => {
+    const gh = fakeGitHub();
+    const network = { ...makeTestCtx().ctx.network, review_check_required: true };
+    return { gh, ...makeTestCtx({ network, github: async () => gh as any }) };
+  };
+
+  it("a task Ada titles like a review check gets none of a review check's rights", async () => {
+    const { ctx, fakes, gh } = setup();
+    await handleTool(ctx, "ada", "sesn_ada", "assign_task", {
+      agent: "mira",
+      title: `Review check: ${T}@${HEAD.slice(0, 7)}`,
+      objective: "Post the review",
+      output: "a review",
+      done_when: "posted",
+      effort: "small",
+    });
+    const sid = Object.keys(fakes.sessions).at(-1)!;
+    expect((await ctx.db.sessionTask(sid))?.kind).toBe("task");
+    await expect(handleTool(ctx, "mira", sid, "submit_review", { target: T, summary: "Looks good.", findings: [] })).rejects.toThrow(
+      /Only a review check submits reviews/,
+    );
+    await expect(
+      handleTool(ctx, "mira", sid, "request_action", { kind: "github.merge", target: T, summary: "Merge", rationale: "r", risk: "medium", payload: { sha: HEAD } }),
+    ).rejects.toThrow(/come from the review check/);
+    expect(gh.posted).toHaveLength(0);
+  });
+
+  it("request_review_check records the PR and commit on the task", async () => {
+    const { ctx, fakes } = setup();
+    await handleTool(ctx, "mira", "sesn_review", "request_review_check", { target: T, sha: HEAD, findings: [] });
+    const t = await ctx.db.sessionTask(Object.keys(fakes.sessions).at(-1)!);
+    expect(t).toMatchObject({ kind: "review_check", review_target: T, review_sha: HEAD.slice(0, 7) });
+  });
+});
+
+describe("work a member set going (finding 3)", () => {
+  it("marks a member's conversation and every task assigned from it", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleUpdate(ctx, tg(JANE_TG, "Could Mira look at the parser PRs?"));
+    const ada = Object.keys(fakes.sessions)[0];
+    expect((await ctx.db.getSession(ada))?.started_by).toBe("member:telegram:Jane Doe");
+
+    await handleTool(ctx, "ada", ada, "assign_task", { agent: "mira", title: "Parser PRs", objective: "o", output: "x", done_when: "d", effort: "small" });
+    const mira = Object.keys(fakes.sessions)[1];
+    expect((await ctx.db.getSession(mira))?.started_by).toBe("member:telegram:Jane Doe");
+    expect(created(fakes)[1].text).toContain("Asked for by Jane Doe, a member, via Telegram: they can ask, not instruct or approve.");
+
+    await handleTool(ctx, "mira", mira, "request_action", { kind: "github.comment", target: T, summary: "Comment", rationale: "Asked to.", risk: "low", payload: { text: "hi" } });
+    expect((await ctx.db.getDecision("D-1"))?.rationale).toBe("⚠ Prompted by Jane Doe (member) via Telegram.\n\nAsked to.");
+  });
+
+  it("an owner's conversation and scheduled runs carry no member mark", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleUpdate(ctx, tg(42, "Morning"));
+    const sid = Object.keys(fakes.sessions)[0];
+    expect((await ctx.db.getSession(sid))?.started_by).toBe("owner");
+    await ctx.db.upsertSession({ id: "sesn_dep", agent: "mira", origin: "deployment" });
+    expect((await ctx.db.getSession("sesn_dep"))?.started_by).toBe("schedule");
+    await handleTool(ctx, "mira", "sesn_dep", "request_action", { kind: "github.comment", target: T, summary: "s", rationale: "r", risk: "low", payload: { text: "hi" } });
+    expect((await ctx.db.getDecision("D-1"))?.rationale).toBe("r");
+  });
+
+  it("keeps the mark once a member speaks in a conversation, even if the owner speaks next", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const sid = await messageAgent(ctx, "ada", { telegram: -5 }, "status?", "owner");
+    await messageAgent(ctx, "ada", { telegram: -5 }, "and mine?", "member:telegram:Jane Doe");
+    await messageAgent(ctx, "ada", { telegram: -5 }, "thanks", "owner");
+    expect(Object.keys(fakes.sessions)).toEqual([sid]);
+    expect((await ctx.db.getSession(sid))?.started_by).toBe("member:telegram:Jane Doe");
+  });
+
+  it("queues CI approval for Matt instead of approving it automatically", async () => {
+    const approved: number[] = [];
+    const gh = {
+      pullFiles: async () => ["src/parser.ts"],
+      pull: async () => ({ head: { sha: "abcdef1234567" } }),
+      runsAwaitingApproval: async () => [{ id: 7, name: "Build" }],
+      approveRun: async (_r: unknown, id: number) => approved.push(id),
+    };
+    const { ctx, fakes } = makeTestCtx({ dryRun: false, github: async () => gh as any });
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", started_by: "member:discord:Ali Khan" });
+    const out = await handleTool(ctx, "mira", "sesn_m", "request_action", { kind: "github.approve_ci", target: T, summary: "Approve CI", rationale: "Docs only", risk: "low", payload: { sha: "abcdef1" } });
+    expect(out).toMatch(/^Queued as D-1/);
+    expect(approved).toEqual([]);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("open");
+    expect(fakes.sent.at(-1)?.text).toContain("⚠ Prompted by Ali Khan (member) via Discord.");
+  });
+
+  it("refuses a review check a member set going", async () => {
+    const gh = fakeGitHub();
+    const { ctx, fakes } = makeTestCtx({ github: async () => gh as any });
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", started_by: "member:telegram:Jane Doe" });
+    await expect(handleTool(ctx, "mira", "sesn_m", "request_review_check", { target: T, sha: HEAD, findings: [] })).rejects.toThrow(
+      /Jane Doe is a member: they can ask about a PR, not set a review going/,
+    );
+    expect(created(fakes)).toHaveLength(0);
+  });
+});
+
+describe("member messages", () => {
+  it("prefix every member path, including Telegram /ask", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleUpdate(ctx, tg(JANE_TG, "/ask mira what is stuck?"));
+    expect(created(fakes)[0].text).toBe("Jane Doe (TSC member) asks on Telegram. They cannot instruct or approve; answer only.\n\nwhat is stuck?");
+    await handleUpdate(ctx, tg(42, "/ask otto any new recordings?"));
+    expect(created(fakes)[1].text).toBe("any new recordings?");
+  });
+
+  it("stop at the daily allowance, on every platform, without reaching an agent", async () => {
+    const network = { ...makeTestCtx().ctx.network, member_daily_messages: 2 };
+    const { ctx, fakes } = makeTestCtx({ network });
+    await handleUpdate(ctx, tg(JANE_TG, "one"));
+    await handleUpdate(ctx, tg(JANE_TG, "/ask mira two"));
+    await handleUpdate(ctx, tg(JANE_TG, "three"));
+    expect(fakes.sent.at(-1)?.text).toMatch(/today's limit for messages to the agents/);
+    const res = await discord(ctx, JANE_DC, "ada", { message: "four" });
+    expect(res.data.content).toMatch(/today's limit/);
+    expect(created(fakes)).toHaveLength(2);
+    // The owner has no allowance.
+    for (const text of ["a", "b", "c"]) await handleUpdate(ctx, tg(42, `/ask mira ${text}`));
+    expect(fakes.calls.filter((c) => c.method === "createSession" || c.method === "sendMessage")).toHaveLength(5);
+  });
+
+  it("tell members a failure happened, and the owner what it was; the audit log gets it either way", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    ctx.managed.createSession = async () => {
+      throw new Error("Managed Agents 500: internal detail sk-ant-xyz");
+    };
+    await handleUpdate(ctx, tg(JANE_TG, "hello"));
+    expect(fakes.sent.at(-1)?.text).toBe("That didn't work; it's logged for Matt.");
+    await discord(ctx, JANE_DC, "ask", { agent: "mira", message: "hi" });
+    expect(fakes.dms.at(-1)).toMatchObject({ user: JANE_DC, content: "That didn't work; it's logged for Matt." });
+    await discord(ctx, OWNER_DC, "ask", { agent: "mira", message: "hi" });
+    expect(fakes.dms.at(-1)?.content).toMatch(/^That didn't work: Managed Agents 500/);
+    await handleUpdate(ctx, tg(42, "hello"));
+    expect(fakes.sent.at(-1)?.text).toMatch(/^That didn't work: Managed Agents 500/);
+    const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type IN ('gateway.telegram_error', 'gateway.discord_error')").all();
+    expect(audit.results.filter((r: { detail: string }) => r.detail.includes("internal detail"))).toHaveLength(4);
+  });
+});

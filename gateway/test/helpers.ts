@@ -87,7 +87,12 @@ export interface FakePr {
   /** The repo's own labels. */
   repoLabels: string[];
   runs: { id: number; workflow_id: number; event: string; status: string; conclusion: string | null }[] | null;
+  /** The repo's workflow files on the default branch; null makes reading them fail. */
+  workflows: { path: string; text: string }[] | null;
 }
+
+/** An ordinary CI workflow: fork PRs' CI is safe to approve. */
+export const SAFE_WORKFLOW = { path: ".github/workflows/ci.yml", text: "on: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n" };
 
 /** A fake GitHub client for the gateway's PR reads and writes. Records reviews and merges. */
 export function fakeGitHub(pr: Partial<FakePr> = {}) {
@@ -108,6 +113,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     labels: [],
     repoLabels: ["ai/kind:bugfix", "ai/kind:docs", "ai/kind:feature", "ai/risk:low", "bug", "dependencies"],
     runs: [{ id: 1, workflow_id: 10, event: "pull_request", status: "completed", conclusion: "success" }],
+    workflows: [SAFE_WORKFLOW],
     ...pr,
   };
   const posted: { commit_id: string; body: string; comments: { path: string; line: number; body: string }[] }[] = [];
@@ -137,6 +143,10 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
       commits: { nodes: [{ commit: { statusCheckRollup: p.rollup ? { state: p.rollup } : null } }] },
     }),
     pullFiles: async () => p.files,
+    workflowFiles: async () => {
+      if (!p.workflows) throw new Error("GitHub GraphQL: Resource not accessible by integration");
+      return p.workflows;
+    },
     runsAt: async () => (p.runs ? p.runs.map((r) => ({ name: `wf${r.workflow_id}`, ...r })) : null),
     openPulls: async () => [],
     createReview: async (_r: unknown, review: (typeof posted)[number]) => {

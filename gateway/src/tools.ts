@@ -1,27 +1,20 @@
 // Handlers for the custom tools agents call. The gateway is the enforcement point:
 // it checks who may call what before doing anything.
 
+import { ActionInvalid, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, startSession } from "./agents";
 import { cap, type Ctx } from "./context";
-import type { Decision } from "./db";
+import type { Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
+import { memberOf } from "./people";
 import {
-  GATEWAY_LABEL, KIND_LABELS, checklist, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
+  GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
 } from "./review";
-import { ADA_TOOLS, COMMON_TOOLS, MIRA_TOOLS, OTTO_TOOLS, VERA_TOOLS } from "./toolDefs";
+import { maxRisk, toRisk, type Risk } from "./risk";
+import { schemaProblems } from "./schema";
+import { TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
 import { isTechWg } from "./vimeo";
-
-const RISK_ORDER = ["low", "medium", "high"];
-const maxRisk = (a: string, b: string) => (RISK_ORDER.indexOf(a) >= RISK_ORDER.indexOf(b) ? a : b);
-
-const OWNERS: Record<string, string | undefined> = {
-  ...Object.fromEntries(COMMON_TOOLS.map((t) => [t.name, undefined])),
-  ...Object.fromEntries(ADA_TOOLS.map((t) => [t.name, "ada"])),
-  ...Object.fromEntries(VERA_TOOLS.map((t) => [t.name, "vera"])),
-  ...Object.fromEntries(OTTO_TOOLS.map((t) => [t.name, "otto"])),
-  ...Object.fromEntries(MIRA_TOOLS.map((t) => [t.name, "mira"])),
-};
 
 export class ToolError extends Error {}
 
@@ -34,191 +27,201 @@ const s = (v: unknown, field: string, required = true): string => {
 };
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String).filter(Boolean) : []);
 
+/** One tool call: who made it, from which session, with what input (already checked against the tool's schema). */
+interface Call {
+  agent: string;
+  sessionId: string;
+  input: Input;
+}
+
+type Handler = (ctx: Ctx, call: Call) => Promise<string>;
+
 export async function handleTool(ctx: Ctx, agent: string, sessionId: string, name: string, input: Input): Promise<string> {
-  if (!(name in OWNERS)) throw new ToolError(`Unknown tool ${name}`);
-  const owner = OWNERS[name];
-  if (owner && owner !== agent) throw new ToolError(`${name} is not available to ${agent}`);
+  if (!isToolName(name)) throw new ToolError(`Unknown tool ${name}`);
+  const spec: ToolSpec = TOOLS[name];
+  if (spec.owner && spec.owner !== agent) throw new ToolError(`${name} is not available to ${agent}`);
 
   const status = await ctx.db.agentStatus(agent);
   if (status === "stopped" || status === "revoked") {
     throw new ToolError(`You have been ${status} by the owner. Stop work and end the session.`);
   }
 
-  switch (name) {
-    case "request_action":
-      return requestAction(ctx, agent, sessionId, input);
-
-    case "request_review_check":
-      return requestReviewCheck(ctx, sessionId, input);
-
-    case "submit_review":
-      return submitReview(ctx, sessionId, input);
-
-    case "pr_facts": {
-      const ref = prRef(ctx, input.target);
-      const f = await prFacts(ctx, ref);
-      const review = await ctx.db.latestReview(f.target);
-      return JSON.stringify({
-        ...f,
-        files: f.files.slice(0, 200),
-        last_review: review ? { id: review.id, sha: review.sha, verdict: review.verdict, at_head: review.sha === f.sha, url: review.url } : null,
-        merge_checks: checklist(mergeChecks(f, f.sha, review?.sha === f.sha ? review : null)),
-        review_areas: reviewConfig(ctx).areas,
-      });
-    }
-
-    case "label_pr":
-      return labelPr(ctx, agent, sessionId, input);
-
-    case "pr_queue": {
-      const repo = s(input.repo, "repo");
-      const ref = parseTarget(repo);
-      if (!ref || ref.number) throw new ToolError("repo must be owner/name, e.g. accordproject/concerto");
-      if (!inScope(ctx, ref)) throw new ToolError(`${repo} is not in the configured repos`);
-      const name = `${ref.owner}/${ref.repo}`;
-      const gh = await ctx.github();
-      const [pulls, reviewed] = await Promise.all([gh.openPulls(ref), ctx.db.reviewedHeads(name)]);
-      return JSON.stringify(queueFrom(name, pulls, reviewed));
-    }
-
-    case "review_findings": {
-      const status = input.status === "all" ? "all" : "open";
-      const repo = s(input.repo, "repo", false) || undefined;
-      const days = typeof input.days === "number" && input.days > 0 ? Math.floor(input.days) : undefined;
-      const [findings, stats] = await Promise.all([ctx.db.listFindings({ open: status === "open", repo, days }), ctx.db.reviewStats(days ?? 90)]);
-      return JSON.stringify({ stats, findings });
-    }
-
-    case "record_finding_outcome": {
-      const id = s(input.id, "id");
-      const outcome = s(input.outcome, "outcome");
-      if (!["acted", "dismissed"].includes(outcome)) throw new ToolError("outcome must be acted or dismissed");
-      if (!(await ctx.db.setFindingOutcome(id, outcome, s(input.note, "note", false) || undefined))) throw new ToolError(`No finding ${id}`);
-      return `${id.toUpperCase()}: ${outcome}.`;
-    }
-
-    case "record_review_outcome": {
-      const target = s(input.target, "target");
-      const outcome = s(input.outcome, "outcome");
-      if (!["merged", "closed", "reverted", "follow_up"].includes(outcome)) throw new ToolError("outcome must be merged, closed, reverted or follow_up");
-      const ref = prRef(ctx, target);
-      if (!(await ctx.db.setReviewOutcome(`${ref.owner}/${ref.repo}#${ref.number}`, outcome, s(input.note, "note", false) || undefined))) {
-        throw new ToolError(`${target} has no posted review`);
-      }
-      return `Recorded ${outcome} for ${target}.`;
-    }
-
-    case "report_status":
-      await ctx.db.addStatus({
-        agent,
-        session_id: sessionId,
-        done: list(input.done),
-        doing: list(input.doing),
-        blocked: list(input.blocked),
-        notes: typeof input.notes === "string" ? input.notes : undefined,
-      });
-      return "Status recorded.";
-
-    case "get_decisions": {
-      const status = (input.status as "open" | "decided" | "all") ?? "all";
-      const ds = await ctx.db.listDecisions({ status, agent });
-      return JSON.stringify(
-        ds.map((d) => ({ id: d.id, kind: d.kind, target: d.target, summary: d.summary, status: d.status, note: d.note, result: d.result })),
-      );
-    }
-
-    case "assign_task":
-      return assignTask(ctx, input);
-
-    case "get_status": {
-      const who = typeof input.agent === "string" && input.agent ? input.agent.toLowerCase() : undefined;
-      const [statuses, tasks, controls] = await Promise.all([
-        ctx.db.latestStatuses(who),
-        ctx.db.openTasks(who),
-        ctx.db.allAgentStatuses(),
-      ]);
-      const active = Object.values(ctx.network.agents)
-        .filter((a) => a.phase <= ctx.network.current_phase)
-        .map((a) => a.name);
-      return JSON.stringify({ active_agents: active, controls, statuses, open_tasks: tasks });
-    }
-
-    case "get_scorecard": {
-      const sc = await ctx.db.getScorecard(typeof input.period === "string" ? input.period : undefined);
-      return sc ? JSON.stringify(sc) : "No scorecard yet.";
-    }
-
-    case "list_decisions": {
-      const ds = await ctx.db.listDecisions({ status: (input.status as "open" | "decided" | "all") ?? "open" });
-      return JSON.stringify(
-        ds.map((d) => ({
-          id: d.id, agent: d.agent, kind: d.kind, summary: d.summary, risk: d.risk, status: d.status, note: d.note, created_at: d.created_at,
-        })),
-      );
-    }
-
-    case "record_evaluation": {
-      const target = s(input.agent, "agent").toLowerCase();
-      if (!ctx.network.agents[target]) throw new ToolError(`No agent called ${target}`);
-      await ctx.db.putEvaluation({
-        agent: target,
-        week: s(input.week, "week"),
-        scores: input.scores,
-        evidence: s(input.evidence, "evidence"),
-        proposal: typeof input.proposal === "string" ? input.proposal : undefined,
-      });
-      return `Evaluation for ${target} recorded.`;
-    }
-
-    case "send_to_matt": {
-      const text = s(input.text, "text");
-      const row = await ctx.db.getSession(sessionId);
-      if (row?.chat_id || row?.discord_user) {
-        // Matt is already in this conversation and gets her reply: sending as well duplicates it.
-        throw new ToolError("You're in a conversation: Matt gets your reply. Put this in your reply instead of using send_to_matt.");
-      }
-      await ctx.tg.send(ctx.ownerChatId, text);
-      return "Sent.";
-    }
-
-    case "vimeo_recordings": {
-      const limit = typeof input.limit === "number" ? input.limit : 15;
-      const videos = await ctx.vimeo().recent(limit);
-      return JSON.stringify(
-        videos.map((v) => ({
-          ...v,
-          description: v.description ? v.description.slice(0, 300) : null,
-          tech_wg: isTechWg(v.name),
-          processed: !!v.description,
-        })),
-      );
-    }
-
-    case "vimeo_transcript": {
-      const id = s(input.video_id, "video_id");
-      const offset = typeof input.offset === "number" && input.offset > 0 ? Math.floor(input.offset) : 0;
-      const text = await ctx.vimeo().transcript(id);
-      const PAGE = 60_000;
-      let end = Math.min(offset + PAGE, text.length);
-      if (end < text.length) end = text.lastIndexOf("\n", end) > offset ? text.lastIndexOf("\n", end) : end;
-      return JSON.stringify({
-        video_id: id,
-        total_chars: text.length,
-        offset,
-        next_offset: end < text.length ? end + 1 : null,
-        text: text.slice(offset, end),
-      });
-    }
-
-    case "write_scorecard": {
-      const period = s(input.period, "period");
-      if (!input.scorecard || typeof input.scorecard !== "object") throw new ToolError("scorecard must be an object");
-      await ctx.db.putScorecard(period, input.scorecard);
-      return `Scorecard ${period} stored.`;
-    }
-  }
-  throw new ToolError(`Unhandled tool ${name}`);
+  const problems = schemaProblems(spec.input_schema, input);
+  if (problems.length) throw new ToolError(`Fix the input and call again:\n- ${problems.join("\n- ")}`);
+  return HANDLERS[name](ctx, { agent, sessionId, input });
 }
+
+/** Every tool in toolDefs.ts has exactly one handler here; the type checker enforces it. */
+const HANDLERS: Record<ToolName, Handler> = {
+  request_action: (ctx, { agent, sessionId, input }) => requestAction(ctx, agent, sessionId, input),
+
+  request_review_check: (ctx, { sessionId, input }) => requestReviewCheck(ctx, sessionId, input),
+
+  submit_review: (ctx, { sessionId, input }) => submitReview(ctx, sessionId, input),
+
+  pr_facts: async (ctx, { input }) => {
+    const ref = prRef(ctx, input.target);
+    const f = await prFacts(ctx, ref);
+    const review = await ctx.db.latestReview(f.target);
+    return JSON.stringify({
+      ...f,
+      files: f.files.slice(0, 200),
+      last_review: review ? { id: review.id, sha: review.sha, verdict: review.verdict, at_head: review.sha === f.sha, url: review.url } : null,
+      merge_checks: checklist(mergeChecks(f, f.sha, review?.sha === f.sha ? review : null)),
+      review_areas: reviewConfig(ctx).areas,
+    });
+  },
+
+  label_pr: (ctx, { agent, sessionId, input }) => labelPr(ctx, agent, sessionId, input),
+
+  pr_queue: async (ctx, { input }) => {
+    const repo = s(input.repo, "repo");
+    const ref = parseTarget(repo);
+    if (!ref || ref.number) throw new ToolError("repo must be owner/name, e.g. accordproject/concerto");
+    if (!inScope(ctx, ref)) throw new ToolError(`${repo} is not in the configured repos`);
+    const name = `${ref.owner}/${ref.repo}`;
+    const gh = await ctx.github();
+    const [pulls, reviewed] = await Promise.all([gh.openPulls(ref), ctx.db.reviewedHeads(name)]);
+    return JSON.stringify(queueFrom(name, pulls, reviewed));
+  },
+
+  review_findings: async (ctx, { input }) => {
+    const status = input.status === "all" ? "all" : "open";
+    const repo = s(input.repo, "repo", false) || undefined;
+    const days = typeof input.days === "number" && input.days > 0 ? Math.floor(input.days) : undefined;
+    const [findings, stats] = await Promise.all([ctx.db.listFindings({ open: status === "open", repo, days }), ctx.db.reviewStats(days ?? 90)]);
+    return JSON.stringify({ stats, findings });
+  },
+
+  record_finding_outcome: async (ctx, { input }) => {
+    const id = s(input.id, "id");
+    const outcome = s(input.outcome, "outcome");
+    if (!["acted", "dismissed"].includes(outcome)) throw new ToolError("outcome must be acted or dismissed");
+    if (!(await ctx.db.setFindingOutcome(id, outcome, s(input.note, "note", false) || undefined))) throw new ToolError(`No finding ${id}`);
+    return `${id.toUpperCase()}: ${outcome}.`;
+  },
+
+  record_review_outcome: async (ctx, { input }) => {
+    const target = s(input.target, "target");
+    const outcome = s(input.outcome, "outcome");
+    if (!["merged", "closed", "reverted", "follow_up"].includes(outcome)) throw new ToolError("outcome must be merged, closed, reverted or follow_up");
+    const ref = prRef(ctx, target);
+    if (!(await ctx.db.setReviewOutcome(`${ref.owner}/${ref.repo}#${ref.number}`, outcome, s(input.note, "note", false) || undefined))) {
+      throw new ToolError(`${target} has no posted review`);
+    }
+    return `Recorded ${outcome} for ${target}.`;
+  },
+
+  report_status: async (ctx, { agent, sessionId, input }) => {
+    await ctx.db.addStatus({
+      agent,
+      session_id: sessionId,
+      done: list(input.done),
+      doing: list(input.doing),
+      blocked: list(input.blocked),
+      notes: typeof input.notes === "string" ? input.notes : undefined,
+    });
+    return "Status recorded.";
+  },
+
+  get_decisions: async (ctx, { agent, input }) => {
+    const status = (input.status as "open" | "decided" | "all") ?? "all";
+    const ds = await ctx.db.listDecisions({ status, agent });
+    return JSON.stringify(
+      ds.map((d) => ({ id: d.id, kind: d.kind, target: d.target, summary: d.summary, status: d.status, note: d.note, result: d.result })),
+    );
+  },
+
+  assign_task: (ctx, { sessionId, input }) => assignTask(ctx, sessionId, input),
+
+  get_status: async (ctx, { input }) => {
+    const who = typeof input.agent === "string" && input.agent ? input.agent.toLowerCase() : undefined;
+    const [statuses, tasks, controls] = await Promise.all([
+      ctx.db.latestStatuses(who),
+      ctx.db.openTasks(who),
+      ctx.db.allAgentStatuses(),
+    ]);
+    const active = Object.values(ctx.network.agents)
+      .filter((a) => a.phase <= ctx.network.current_phase)
+      .map((a) => a.name);
+    return JSON.stringify({ active_agents: active, controls, statuses, open_tasks: tasks });
+  },
+
+  get_scorecard: async (ctx, { input }) => {
+    const sc = await ctx.db.getScorecard(typeof input.period === "string" ? input.period : undefined);
+    return sc ? JSON.stringify(sc) : "No scorecard yet.";
+  },
+
+  list_decisions: async (ctx, { input }) => {
+    const ds = await ctx.db.listDecisions({ status: (input.status as "open" | "decided" | "all") ?? "open" });
+    return JSON.stringify(
+      ds.map((d) => ({
+        id: d.id, agent: d.agent, kind: d.kind, summary: d.summary, risk: d.risk, status: d.status, note: d.note, created_at: d.created_at,
+      })),
+    );
+  },
+
+  record_evaluation: async (ctx, { input }) => {
+    const target = s(input.agent, "agent").toLowerCase();
+    if (!ctx.network.agents[target]) throw new ToolError(`No agent called ${target}`);
+    await ctx.db.putEvaluation({
+      agent: target,
+      week: s(input.week, "week"),
+      scores: input.scores,
+      evidence: s(input.evidence, "evidence"),
+      proposal: typeof input.proposal === "string" ? input.proposal : undefined,
+    });
+    return `Evaluation for ${target} recorded.`;
+  },
+
+  send_to_matt: async (ctx, { sessionId, input }) => {
+    const text = s(input.text, "text");
+    const row = await ctx.db.getSession(sessionId);
+    if (row?.chat_id || row?.discord_user) {
+      // Matt is already in this conversation and gets her reply: sending as well duplicates it.
+      throw new ToolError("You're in a conversation: Matt gets your reply. Put this in your reply instead of using send_to_matt.");
+    }
+    await ctx.tg.send(ctx.ownerChatId, text);
+    return "Sent.";
+  },
+
+  vimeo_recordings: async (ctx, { input }) => {
+    const limit = typeof input.limit === "number" ? input.limit : 15;
+    const videos = await ctx.vimeo().recent(limit);
+    return JSON.stringify(
+      videos.map((v) => ({
+        ...v,
+        description: v.description ? v.description.slice(0, 300) : null,
+        tech_wg: isTechWg(v.name),
+        processed: !!v.description,
+      })),
+    );
+  },
+
+  vimeo_transcript: async (ctx, { input }) => {
+    const id = s(input.video_id, "video_id");
+    const offset = typeof input.offset === "number" && input.offset > 0 ? Math.floor(input.offset) : 0;
+    const text = await ctx.vimeo().transcript(id);
+    const PAGE = 60_000;
+    let end = Math.min(offset + PAGE, text.length);
+    if (end < text.length) end = text.lastIndexOf("\n", end) > offset ? text.lastIndexOf("\n", end) : end;
+    return JSON.stringify({
+      video_id: id,
+      total_chars: text.length,
+      offset,
+      next_offset: end < text.length ? end + 1 : null,
+      text: text.slice(offset, end),
+    });
+  },
+
+  write_scorecard: async (ctx, { input }) => {
+    const period = s(input.period, "period");
+    if (!input.scorecard || typeof input.scorecard !== "object") throw new ToolError("scorecard must be an object");
+    await ctx.db.putScorecard(period, input.scorecard);
+    return `Scorecard ${period} stored.`;
+  },
+};
+
 
 async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: Input): Promise<string> {
   const kind = s(input.kind, "kind");
@@ -226,23 +229,28 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   if (!allowed.includes(kind)) {
     throw new ToolError(`You may not request ${kind}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
-  const declared = typeof input.risk === "string" && RISK_ORDER.includes(input.risk) ? input.risk : "high";
-  const floor = ctx.network.action_kinds[kind]?.risk ?? "high";
+  const declared: Risk = toRisk(input.risk);
+  const floor = toRisk(ctx.network.action_kinds[kind]?.risk);
   if (kind === "github.merge" && agent === "mira" && ctx.network.review_check_required && !(await isReviewCheck(ctx, sessionId))) {
     throw new ToolError("Merge proposals come from the review check. Call request_review_check with your draft review instead.");
   }
   if (kind === "github.review") throw new ToolError("Reviews are posted with submit_review, from a review check.");
-  if (ctx.network.action_kinds[kind]?.auto && kind === "github.approve_ci" && declared !== "high") {
-    return autoApproveCi(ctx, agent, sessionId, input);
+  // Rule 5: a member may ask, not instruct. Work a member set going never runs an auto
+  // kind, and its cards say whose request it was.
+  const member = await sessionMember(ctx, sessionId);
+  // Finding 1: the payload is checked now, and the card and the executor both use the checked copy.
+  const n = validated(ctx, kind, input.target, input.payload);
+  if (ctx.network.action_kinds[kind]?.auto && kind === "github.approve_ci" && declared !== "high" && !member) {
+    return autoApproveCi(ctx, agent, sessionId, input, n);
   }
   let rationale = s(input.rationale, "rationale");
+  if (member) rationale = `⚠ Prompted by ${member.name} (member) via ${member.platform}.\n\n${rationale}`;
   let risk = maxRisk(declared, floor);
   let reviewId: string | undefined;
   if (kind === "github.merge") {
     // Decision 35: the gateway checks the PR itself, and refuses rather than queue a merge that can't go ahead.
-    const ref = prRef(ctx, input.target);
-    const payload = (input.payload && typeof input.payload === "object" ? input.payload : {}) as Input;
-    const sha = typeof payload.sha === "string" ? payload.sha : "";
+    const ref = prRef(ctx, n.target);
+    const sha = typeof n.payload.sha === "string" ? n.payload.sha : "";
     if (sha.length < 7) throw new ToolError("payload.sha is required: the head commit the review check reviewed");
     const f = await prFacts(ctx, ref);
     const review = await ctx.db.latestReview(f.target, f.sha);
@@ -257,16 +265,36 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   const d = await ctx.db.createDecision({
     agent,
     kind,
-    target: s(input.target, "target"),
+    target: n.target,
     summary: s(input.summary, "summary").slice(0, 200),
     rationale,
     risk,
-    payload: input.payload ?? {},
+    payload: n.payload,
     session_id: sessionId,
   });
   if (reviewId) await ctx.db.linkMerge(reviewId, d.id);
   await postDecision(ctx, d);
   return `Queued as ${d.id}. Do not wait for it: continue with other work. Check the outcome later with get_decisions.`;
+}
+
+/** The request as the gateway will run it, or a ToolError listing every problem. */
+function validated(ctx: Ctx, kind: string, target: unknown, payload: unknown): Normalised {
+  try {
+    return validateAction(ctx, kind, s(target, "target"), payload ?? {});
+  } catch (e) {
+    if (e instanceof ActionInvalid) throw new ToolError(`Not queued. Fix the request and call again:\n- ${e.problems.join("\n- ")}`);
+    throw e;
+  }
+}
+
+/** The member this session acts for, if a member's message set it going. */
+async function sessionMember(ctx: Ctx, sessionId: string) {
+  return memberOf((await ctx.db.getSession(sessionId))?.started_by);
+}
+
+/** Who a session acts for, for the sessions it starts in turn. */
+async function sessionStartedBy(ctx: Ctx, sessionId: string): Promise<StartedBy> {
+  return (await ctx.db.getSession(sessionId))?.started_by ?? "schedule";
 }
 
 function prRef(ctx: Ctx, target: unknown): Required<RepoRef> {
@@ -328,18 +356,14 @@ async function runAuto(ctx: Ctx, d: Decision, why: string) {
  * ahead when nothing in it changes what CI runs or installs. Otherwise it queues
  * the request for Matt as high risk. Either way there is a decision record.
  */
-async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: Input): Promise<string> {
-  const target = s(input.target, "target");
-  const ref = parseTarget(target);
-  if (!ref?.number) throw new ToolError("target must be a pull request, e.g. accordproject/concerto#123");
-  if (!inScope(ctx, ref)) throw new ToolError(`${ref.owner}/${ref.repo} is not in the configured repos`);
-  const payload = (input.payload && typeof input.payload === "object" ? input.payload : {}) as Input;
-  if (typeof payload.sha !== "string" || payload.sha.length < 7) {
-    throw new ToolError("payload.sha is required: the head commit you reviewed (at least 7 characters)");
-  }
+async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: Input, n: Normalised): Promise<string> {
+  const { target, payload } = n;
+  const ref = prRef(ctx, target);
   const gh = await ctx.github();
-  const files = await gh.pullFiles(ref as Required<typeof ref>);
+  const files = await gh.pullFiles(ref);
   const risky = ciSensitivePaths(files);
+  // Finding 4: what limits fork CI is how the repo's workflows run, not only which files changed.
+  const unsafe = await ciApprovalRisks(gh, ref);
   const base = {
     agent,
     kind: "github.approve_ci",
@@ -355,8 +379,13 @@ async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: 
     await postDecision(ctx, d);
     return `Queued for Matt as ${d.id}: the PR changes files CI runs or installs (${shown}). Continue with other work.`;
   }
+  if (unsafe.length) {
+    const d = await ctx.db.createDecision({ ...base, risk: "high", rationale: `${base.rationale}\n\nNot approved automatically: the repo's workflows aren't safe to run for a fork:\n- ${unsafe.join("\n- ")}` });
+    await postDecision(ctx, d);
+    return `Queued for Matt as ${d.id}: the repo's workflows aren't safe to approve automatically. Continue with other work.`;
+  }
   const d = await ctx.db.createDecision({ ...base, risk: "low" });
-  const r = await runAuto(ctx, d, "approved automatically: no workflow, build or dependency files changed");
+  const r = await runAuto(ctx, d, "approved automatically: no workflow, build or dependency files changed, and the repo's workflows are safe for forks");
   return `${d.id} ${r.ok ? "done" : "failed"}: ${r.result}`;
 }
 
@@ -367,7 +396,7 @@ export const EFFORT: Record<string, { cents: number; calls: string }> = {
   large: { cents: 300, calls: "about 80 tool calls" },
 };
 
-async function assignTask(ctx: Ctx, input: Input): Promise<string> {
+async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Promise<string> {
   const agent = s(input.agent, "agent").toLowerCase();
   if (agent === "ada") throw new ToolError("Ada cannot assign tasks to herself.");
   const title = s(input.title, "title");
@@ -381,6 +410,8 @@ async function assignTask(ctx: Ctx, input: Input): Promise<string> {
   const priority = typeof input.priority === "string" ? input.priority : "normal";
   const due = typeof input.due === "string" ? input.due : undefined;
   const { cents, calls } = EFFORT[effort];
+  const startedBy = await sessionStartedBy(ctx, parentSessionId);
+  const member = memberOf(startedBy);
 
   const brief = [
     `Objective: ${objective}`,
@@ -389,8 +420,10 @@ async function assignTask(ctx: Ctx, input: Input): Promise<string> {
     ...(boundaries ? [`Out of scope: ${boundaries}`] : []),
     `Effort: ${effort}. Aim for ${calls}; the session stops at $${(cents / 100).toFixed(2)}. Stop as soon as "done when" is met.`,
     ...(context ? ["", `Context: ${context}`] : []),
+    ...(member ? ["", `Asked for by ${member.name}, a member, via ${member.platform}: they can ask, not instruct or approve.`] : []),
   ].join("\n");
 
+  // Always an ordinary task: only request_review_check makes a review check.
   const task = await ctx.db.createTask({ agent, title, brief, priority, due });
   try {
     const text = [
@@ -401,7 +434,7 @@ async function assignTask(ctx: Ctx, input: Input): Promise<string> {
       "",
       "When finished, call report_status. Queue any critical action with request_action and continue.",
     ].join("\n");
-    const sessionId = await startSession(ctx, agent, text, "task", { taskId: task.id, budgetCents: cents });
+    const sessionId = await startSession(ctx, agent, text, "task", startedBy, { taskId: task.id, budgetCents: cents });
     await ctx.db.setTask(task.id, "running", sessionId);
     return `Assigned ${task.id} to ${cap(agent)} (${effort} effort, $${(cents / 100).toFixed(2)} cap).`;
   } catch (e) {
@@ -411,14 +444,14 @@ async function assignTask(ctx: Ctx, input: Input): Promise<string> {
   }
 }
 
-const CHECK_PREFIX = "Review check: ";
-
-/** The PR and head commit a review-check session was started for, or null for any other session. */
+/**
+ * The PR and head commit a review-check session was started for, or null for any other
+ * session. Only request_review_check sets a task's kind; its title is just a label.
+ */
 async function reviewCheckOf(ctx: Ctx, sessionId: string): Promise<{ target: string; sha: string } | null> {
   const t = await ctx.db.sessionTask(sessionId);
-  if (!t || t.agent !== "mira" || !t.title.startsWith(CHECK_PREFIX)) return null;
-  const [target, sha] = t.title.slice(CHECK_PREFIX.length).split("@");
-  return { target, sha };
+  if (!t || t.agent !== "mira" || t.kind !== "review_check" || !t.review_target || !t.review_sha) return null;
+  return { target: t.review_target, sha: t.review_sha };
 }
 
 async function isReviewCheck(ctx: Ctx, sessionId: string): Promise<boolean> {
@@ -444,6 +477,11 @@ const factsLine = (f: PrFacts) =>
  */
 async function requestReviewCheck(ctx: Ctx, sessionId: string, input: Input): Promise<string> {
   if (await isReviewCheck(ctx, sessionId)) throw new ToolError("You are the review check: finish the check yourself.");
+  const member = await sessionMember(ctx, sessionId);
+  if (member) {
+    // A review check posts publicly and alone may propose a merge: that is acting, not answering.
+    throw new ToolError(`${member.name} is a member: they can ask about a PR, not set a review going. Answer them, and leave the review to Mira's own triage.`);
+  }
   const ref = prRef(ctx, input.target);
   const sha = s(input.sha, "sha");
   if (sha.length < 7) throw new ToolError("sha must be at least 7 characters");
@@ -482,9 +520,9 @@ async function requestReviewCheck(ctx: Ctx, sessionId: string, input: Input): Pr
     ...(notes ? ["", `Notes from the draft: ${notes}`] : []),
   ].join("\n");
 
-  const task = await ctx.db.createTask({ agent: "mira", title: `${CHECK_PREFIX}${f.target}@${sha7}`, brief });
+  const task = await ctx.db.createTask({ agent: "mira", title: `Review check: ${f.target}@${sha7}`, brief, review: { target: f.target, sha: sha7 } });
   try {
-    const sid = await startSession(ctx, "mira", brief, "task", { taskId: task.id, budgetCents: large ? 300 : 150, ...(model ? { model } : {}) });
+    const sid = await startSession(ctx, "mira", brief, "task", await sessionStartedBy(ctx, sessionId), { taskId: task.id, budgetCents: large ? 300 : 150, ...(model ? { model } : {}) });
     await ctx.db.setTask(task.id, "running", sid);
     return `Review check ${task.id} started (${f.risk} risk${model ? ", deep tier" : ""}). Do not post this review or propose the merge yourself; move on.`;
   } catch (e) {
@@ -529,7 +567,7 @@ async function submitReview(ctx: Ctx, sessionId: string, input: Input): Promise<
     summary: `Review of ${f.target}: ${verdict.replace("_", " ")}`,
     rationale: `${findings.length} confirmed finding${findings.length === 1 ? "" : "s"} at ${f.sha.slice(0, 7)} (${f.risk} risk).`,
     risk: "low",
-    payload: { sha: f.sha, body, comments, labels: reviewLabels(f.risk, verdict) },
+    payload: validated(ctx, "github.review", f.target, { sha: f.sha, body, comments, labels: reviewLabels(f.risk, verdict) }).payload,
     session_id: sessionId,
   });
   const r = await runAuto(ctx, d, "posted automatically after the gateway's checks (decision 36)");

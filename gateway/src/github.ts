@@ -116,6 +116,22 @@ export class GitHub {
     return d.repository.pullRequest;
   }
 
+  /**
+   * The workflow files on the default branch, in one read. Throws when one can't be
+   * read in full, so a caller deciding whether CI is safe fails closed.
+   */
+  async workflowFiles(r: RepoRef): Promise<{ path: string; text: string }[]> {
+    const d = await this.graphql<{ repository: { object: { entries: WorkflowEntry[] } | null } | null }>(WORKFLOW_FILES, { owner: r.owner, repo: r.repo });
+    if (!d.repository) throw new Error(`${r.owner}/${r.repo} not found`);
+    const out: { path: string; text: string }[] = [];
+    for (const e of d.repository.object?.entries ?? []) {
+      if (e.type !== "blob" || !/\.ya?ml$/.test(e.name)) continue;
+      if (!e.object || e.object.isTruncated || e.object.text === null) throw new Error(`.github/workflows/${e.name} could not be read in full`);
+      out.push({ path: `.github/workflows/${e.name}`, text: e.object.text });
+    }
+    return out;
+  }
+
   /** The repo's open PRs, oldest first (up to 50). */
   async openPulls(r: RepoRef): Promise<OpenPull[]> {
     const d = await this.graphql<{ repository: { pullRequests: { nodes: OpenPull[] } } }>(OPEN_PULLS, { owner: r.owner, repo: r.repo });
@@ -276,6 +292,21 @@ const PR_DETAIL = `query($owner: String!, $repo: String!, $number: Int!) {
       latestOpinionatedReviews(first: 50) { nodes { state authorAssociation author { login } } }
       reviewThreads(first: 100) { totalCount nodes { isResolved } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    }
+  }
+}`;
+
+interface WorkflowEntry {
+  name: string;
+  type: string;
+  object: { text: string | null; isTruncated: boolean } | null;
+}
+
+// HEAD: is the default branch. A repo without workflows has no such tree (object is null).
+const WORKFLOW_FILES = `query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    object(expression: "HEAD:.github/workflows") {
+      ... on Tree { entries { name type object { ... on Blob { text isTruncated } } } }
     }
   }
 }`;

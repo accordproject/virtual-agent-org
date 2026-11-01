@@ -1,0 +1,192 @@
+import { describe, expect, it } from "vitest";
+import { approve, markDone, reject, stop } from "../src/controls";
+import { handleTool, ToolError } from "../src/tools";
+import { makeTestCtx } from "./helpers";
+
+describe("request_action", () => {
+  it("refuses kinds the agent may not request", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(
+      handleTool(ctx, "mira", "sesn_x", "request_action", {
+        kind: "github.release", target: "a/b#1", summary: "s", rationale: "r", risk: "low",
+      }),
+    ).rejects.toBeInstanceOf(ToolError);
+  });
+
+  it("queues, raises risk to the kind's floor, sends a card, and never blocks", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const out = await handleTool(ctx, "mira", "sesn_x", "request_action", {
+      kind: "linkedin.post", target: "accordproject/virtual-agent-org-sandbox#3", summary: "Merge docs fix", rationale: "CI green", risk: "low",
+    });
+    expect(out).toMatch(/^Queued as D-1\./);
+    const d = await ctx.db.getDecision("D-1");
+    expect(d?.risk).toBe("medium");
+    expect(fakes.sent[0].text).toContain("D-1 · Mira · linkedin.post");
+  });
+});
+
+describe("tool ownership and controls", () => {
+  it("keeps Ada's tools for Ada", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "mira", "s", "send_to_matt", { text: "hi" })).rejects.toThrow(/not available to mira/);
+  });
+
+  it("refuses to assign to an agent from a later phase", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "rosa", title: "t", objective: "o", output: "x", done_when: "d", effort: "small" })).rejects.toThrow(/phase 2/);
+  });
+
+  it("assigns a task by starting a session for the agent", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const out = await handleTool(ctx, "ada", "s", "assign_task", {
+      agent: "mira",
+      title: "Triage",
+      objective: "Clear the sandbox queue",
+      output: "a status report",
+      done_when: "every open PR has a response",
+      boundaries: "sandbox only",
+      effort: "small",
+    });
+    expect(out).toBe("Assigned T-1 to Mira (small effort, $0.30 cap).");
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.agentId).toBe("agent_mira");
+    expect(create.budgetCents).toBe(30);
+    expect(create.text).toContain("Task T-1");
+    expect(create.text).toContain("Done when: every open PR has a response");
+    expect(create.text).toContain("Out of scope: sandbox only");
+    expect(create.text).toMatch(/Aim for about 10 tool calls/);
+    expect((await ctx.db.openTasks("mira"))[0].status).toBe("running");
+  });
+
+  it("stop interrupts sessions, rejects open decisions, and blocks further tool use", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_live", agent: "mira", origin: "deployment" });
+    await handleTool(ctx, "mira", "sesn_live", "request_action", {
+      kind: "github.comment", target: "accordproject/virtual-agent-org-sandbox#1", summary: "s", rationale: "r", risk: "low", payload: { text: "t" },
+    });
+    const msg = await stop(ctx, "mira");
+    expect(msg).toContain("1 session(s) interrupted, 1 open decision(s) rejected");
+    expect(fakes.calls.some((c) => c.method === "pauseDeployment" && c.args[0] === "dep_mira")).toBe(true);
+    await expect(handleTool(ctx, "mira", "sesn_live", "report_status", { done: [], doing: [], blocked: [] })).rejects.toThrow(
+      /stopped/,
+    );
+  });
+});
+
+describe("approvals", () => {
+  const queue = async (ctx: any, kind: string, target: string, payload = {}) =>
+    handleTool(ctx, kind === "vimeo.publish" ? "otto" : "mira", "s", "request_action", {
+      kind, target, summary: "s", rationale: "r", risk: "low", payload,
+    });
+
+  it("executes GitHub actions in dry run only for in-scope repos", async () => {
+    const { ctx } = makeTestCtx();
+    await queue(ctx, "github.comment", "accordproject/virtual-agent-org-sandbox#3", { text: "Thanks!" });
+    expect(await approve(ctx, "D-1")).toContain("DRY RUN");
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
+    expect(await approve(ctx, "D-1")).toBe("D-1 is not open.");
+
+    // Out-of-scope targets are refused when requested, so nothing reaches the queue.
+    await expect(queue(ctx, "github.comment", "someone/else#1", { text: "Thanks!" })).rejects.toThrow(/not in the configured repos/);
+    expect(await ctx.db.getDecision("D-2")).toBeNull();
+  });
+
+  it("hands manual actions back to the owner until marked done", async () => {
+    const { ctx } = makeTestCtx();
+    await queue(ctx, "linkedin.post", "linkedin", { text: "Post text" });
+    expect(await approve(ctx, "D-1")).toContain("Mark done");
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("approved");
+    await markDone(ctx, "D-1");
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
+  });
+
+  it("denies a paused tool call on rejection, then accepts a later note", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const d = await ctx.db.createDecision({
+      agent: "mira", kind: "tool.confirm", target: "mcp__github__push", summary: "s", rationale: "r", risk: "high",
+      session_id: "sesn_9", tool_use_id: "evt_9",
+    });
+    await reject(ctx, d.id);
+    const conf = fakes.calls.find((c) => c.method === "sendToolConfirmation")!;
+    expect(conf.args.slice(0, 3)).toEqual(["sesn_9", "evt_9", false]);
+    expect(await reject(ctx, d.id, "Use a fork")).toBe(`Note added to ${d.id}.`);
+    expect((await ctx.db.getDecision(d.id))?.note).toBe("Use a fork");
+  });
+});
+
+describe("approval cards in one app", () => {
+  const queue = (ctx: any, kind: string, risk = "low", text = "hi") =>
+    handleTool(ctx, "mira", "s", "request_action", { kind, target: "accordproject/concerto#1", summary: "s", rationale: "r", risk, payload: { text } });
+  const one = (o: any = {}) => makeTestCtx({ network: { ...makeTestCtx().ctx.network, approvals_app: "discord" }, ...o });
+
+  it("sends Discord-approvable cards only to Discord", async () => {
+    const { ctx, fakes } = one();
+    await queue(ctx, "linkedin.post", "medium");
+    expect(fakes.dms).toHaveLength(1);
+    expect(fakes.sent).toHaveLength(0);
+  });
+
+  it("keeps high-risk cards on Telegram", async () => {
+    const { ctx, fakes } = one();
+    await queue(ctx, "linkedin.post", "high");
+    expect(fakes.dms).toHaveLength(0);
+    expect(fakes.sent).toHaveLength(1);
+  });
+
+  it("falls back to Telegram when Discord can't deliver", async () => {
+    const { ctx, fakes } = one();
+    ctx.dc = { dm: async () => { throw new Error("Discord down"); } } as any;
+    await queue(ctx, "linkedin.post", "medium");
+    expect(fakes.sent).toHaveLength(1);
+  });
+
+  it("still sends both with approvals_app: both", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await queue(ctx, "linkedin.post", "medium");
+    expect(fakes.dms).toHaveLength(1);
+    expect(fakes.sent).toHaveLength(1);
+  });
+
+  it("puts the full content in embeds instead of cutting it off", async () => {
+    const { ctx, fakes } = one();
+    const long = Array.from({ length: 100 }, (_, i) => `Line ${i}: ${"x".repeat(40)}`).join("\n"); // ~5,000 chars
+    await queue(ctx, "linkedin.post", "medium", long);
+    const dm = fakes.dms[0];
+    expect(dm.content.length).toBeLessThanOrEqual(2000);
+    expect(dm.content).not.toContain("Line 0");
+    const all = dm.embeds!.map((e) => e.description).join("\n");
+    expect(all).toContain("Line 0:");
+    expect(all).toContain("Line 99:");
+    expect(dm.embeds!.reduce((n, e) => n + e.description.length + (e.title?.length ?? 0), 0)).toBeLessThanOrEqual(6000);
+  });
+});
+
+describe("structured briefs (decision 1B)", () => {
+  it("requires the brief's fields and a valid effort", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "mira", title: "t", objective: "o", output: "x", effort: "small" })).rejects.toThrow(/done_when is required/);
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "mira", title: "t", objective: "o", output: "x", done_when: "d", effort: "huge" })).rejects.toThrow(/effort must be/);
+  });
+
+  it("sets the session budget from the effort", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleTool(ctx, "ada", "s", "assign_task", { agent: "otto", title: "t", objective: "o", output: "x", done_when: "d", effort: "large" });
+    expect((fakes.calls.find((c) => c.method === "createSession")!.args[0] as any).budgetCents).toBe(300);
+  });
+});
+
+describe("no duplicate replies in a conversation", () => {
+  it("refuses send_to_matt when Matt is already in the conversation", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_chat", agent: "ada", origin: "telegram", chat_id: 42 });
+    await expect(handleTool(ctx, "ada", "sesn_chat", "send_to_matt", { text: "Check-in" })).rejects.toThrow(/Matt gets your reply/);
+    expect(fakes.sent).toHaveLength(0);
+  });
+
+  it("still sends from scheduled runs", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_dep", agent: "ada", origin: "deployment" });
+    expect(await handleTool(ctx, "ada", "sesn_dep", "send_to_matt", { text: "Check-in" })).toBe("Sent.");
+    expect(fakes.sent).toHaveLength(1);
+  });
+});

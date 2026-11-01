@@ -22,16 +22,31 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   }
 
   const events = await ctx.managed.listEvents(sessionId);
-  for (const e of events) {
-    if (!(await ctx.db.claimEvent(e.id))) continue;
-    try {
-      await handleEvent(ctx, agent, sessionId, { chat_id: row?.chat_id ?? null, discord_user: row?.discord_user ?? null }, e);
-    } catch (err) {
-      // Let the sweeper retry this event later.
-      await ctx.db.releaseEvent(e.id);
-      await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.error", detail: String(err) });
+  // Skip what an earlier pass handled in full; event claims cover the rest.
+  const doneThrough = await ctx.db.eventsDoneThrough(sessionId);
+  const start = doneThrough ? events.findIndex((e) => e.id === doneThrough) + 1 : 0;
+  let through = doneThrough;
+  let contiguous = true;
+  for (const e of events.slice(start)) {
+    if (await ctx.db.claimEvent(e.id)) {
+      try {
+        await handleEvent(ctx, agent, sessionId, { chat_id: row?.chat_id ?? null, discord_user: row?.discord_user ?? null }, e);
+        await ctx.db.markEventDone(e.id);
+      } catch (err) {
+        // Let the sweeper retry this event later.
+        contiguous = false;
+        await ctx.db.releaseEvent(e.id);
+        await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.error", detail: String(err) });
+        continue;
+      }
+    } else if (contiguous && !(await ctx.db.claimSettled(e.id))) {
+      // Another pass may still be handling it, and release it if it fails: keep the
+      // bookmark before it until the claim is old enough to be settled.
+      contiguous = false;
     }
+    if (contiguous) through = e.id;
   }
+  if (through && through !== doneThrough) await ctx.db.setEventsDoneThrough(sessionId, through);
 
   const status = session.status === "idle" ? `idle:${session.stop_reason?.type ?? ""}` : session.status;
   await ctx.db.updateSession(sessionId, status, costCents(session));
@@ -39,7 +54,8 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   if (row?.task_id && session.status === "idle" && session.stop_reason?.type === "end_turn") {
     await ctx.db.setTask(row.task_id, "done");
   }
-  if (session.status === "idle" && session.stop_reason?.type === "budget_reached") {
+  // Tell Matt once, when the session first runs out, not on every later pass.
+  if (status === "idle:budget_reached" && row?.status !== "idle:budget_reached") {
     await ctx.tg.send(ctx.ownerChatId, `${cap(agent)} hit its session budget and paused (${sessionId}).`);
   }
 }
@@ -53,6 +69,12 @@ async function handleEvent(
 ) {
   switch (e.type) {
     case "agent.custom_tool_use": {
+      // A retry after a failed send resends the answer rather than running the tool again.
+      const stored = await ctx.db.toolResult(e.id);
+      if (stored !== null) {
+        await ctx.managed.sendToolResult(sessionId, e.id, stored);
+        return;
+      }
       await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: e.type, tool: e.name, detail: e.input });
       let result: string;
       try {
@@ -68,6 +90,7 @@ async function handleEvent(
             ? `Error: ${err.message}`
             : `Error: the gateway could not run ${e.name}: ${err instanceof Error ? err.message : String(err)}. Do not retry blindly; report it in your status.`;
       }
+      await ctx.db.saveToolResult(e.id, result);
       await ctx.managed.sendToolResult(sessionId, e.id, result);
       return;
     }
@@ -121,15 +144,29 @@ async function handleEvent(
   }
 }
 
-/** Safety net for missed webhooks: re-process sessions that are not finished. */
-export async function sweep(ctx: Ctx) {
-  const rows = await ctx.db.activeSessions();
+/** Sessions the sweeper processes per run, so a backlog can't exhaust the Worker's subrequests. */
+export const SWEEP_LIMIT = 40;
+
+/** Safety net for missed webhooks: re-process sessions that are not finished, least recently updated first. */
+export async function sweep(ctx: Ctx, limit = SWEEP_LIMIT) {
+  const rows = await ctx.db.sweepableSessions(limit);
   for (const r of rows) {
-    if (r.status.startsWith("idle:end_turn") || r.status === "terminated") continue;
     try {
       await processSession(ctx, r.id);
     } catch (err) {
       await ctx.db.audit({ agent: r.agent, session_id: r.id, event_type: "gateway.sweep_error", detail: String(err) });
     }
+  }
+}
+
+/** How long event claims and tool results are kept, and the audit log. */
+export const RETENTION = { eventDays: 14, auditDays: 365, staleSessionDays: 7 };
+
+/** The cron's tidying: idle sessions nobody touches go stale, and old rows are pruned. */
+export async function housekeeping(ctx: Ctx) {
+  const stale = await ctx.db.markStaleSessions(RETENTION.staleSessionDays);
+  const pruned = await ctx.db.prune(RETENTION.eventDays, RETENTION.auditDays);
+  if (stale || pruned.events || pruned.tool_results || pruned.audit) {
+    await ctx.db.audit({ event_type: "gateway.housekeeping", detail: { stale, ...pruned } });
   }
 }

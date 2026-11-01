@@ -68,7 +68,7 @@ export class Telegram {
     await this.call("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
-      text: text.slice(0, LIMIT),
+      text: text.length > LIMIT ? `${text.slice(0, LIMIT - 20)}\n… (cut short)` : text,
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: buttons ?? [] },
     });

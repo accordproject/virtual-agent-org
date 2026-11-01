@@ -78,6 +78,8 @@ export function validate(cfg = loadAll()): string[] {
     if (v.auto && !AUTO_KINDS.includes(k)) errs.push(`action kind ${k}: auto is only allowed for ${AUTO_KINDS.join(" and ")}`);
   }
   errs.push(...validateReview(review));
+  const cap = network.budgets.member_daily_messages;
+  if (cap !== undefined && !(Number.isInteger(cap) && cap >= 0)) errs.push("network.yaml: budgets.member_daily_messages must be a whole number, 0 or more");
 
   const repos = network.github.repos ?? [];
   if (!Array.isArray(repos)) errs.push("github.repos must be a list");
@@ -172,6 +174,7 @@ export function compile(cfg = loadAll()) {
     current_phase: network.network.current_phase,
     timezone: network.network.timezone,
     monthly_credit_usd: network.budgets.monthly_credit_usd,
+    member_daily_messages: network.budgets.member_daily_messages ?? 20,
     sandbox_repo: network.github.sandbox_repo,
     repos: network.github.repos ?? [],
     action_kinds: permissions.action_kinds,

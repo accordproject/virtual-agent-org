@@ -1,9 +1,22 @@
 import { cap, type Ctx } from "./context";
-import type { Decision, SessionRow } from "./db";
-import { decisionButtons, decisionCard, discordCard } from "./format";
+import type { Decision, SessionRow, StartedBy } from "./db";
+import { decisionButtons, decisionCard, discordCard, discordCardFits } from "./format";
 import { ManagedAgentsError } from "./managed";
+import { riskAtMost } from "./risk";
 
 export class AgentUnavailable extends Error {}
+
+/**
+ * What to tell someone whose request failed. The owner gets the error; anyone else a
+ * plain line, since errors can carry API responses. The full error always goes to the
+ * audit log. An unavailable agent is said plainly to everyone, as /status shows it anyway.
+ */
+export async function failureText(ctx: Ctx, owner: boolean, e: unknown, event: string, detail: Record<string, unknown> = {}): Promise<string> {
+  if (e instanceof AgentUnavailable) return e.message;
+  const error = e instanceof Error ? e.message : String(e);
+  await ctx.db.audit({ event_type: event, detail: { ...detail, error } });
+  return owner ? `That didn't work: ${error}` : "That didn't work; it's logged for Matt.";
+}
 
 /** Where an agent's replies go for a conversation someone started. */
 export type ReplyTo = { telegram: number } | { discord: string };
@@ -25,6 +38,7 @@ export async function startSession(
   agent: string,
   text: string,
   origin: SessionRow["origin"],
+  startedBy: StartedBy,
   opts: { chatId?: number; discordUser?: string; taskId?: string; budgetCents?: number; model?: string } = {},
 ): Promise<string> {
   await assertAvailable(ctx, agent);
@@ -49,13 +63,17 @@ export async function startSession(
     chat_id: opts.chatId,
     discord_user: opts.discordUser,
     task_id: opts.taskId,
+    started_by: startedBy,
   });
-  await ctx.db.audit({ agent, session_id: session.id, event_type: "gateway.session_started", detail: { origin, task: opts.taskId } });
+  await ctx.db.audit({ agent, session_id: session.id, event_type: "gateway.session_started", detail: { origin, task: opts.taskId, started_by: startedBy } });
   return session.id;
 }
 
-/** Sends a message to an agent, continuing a recent conversation in the same app if there is one. */
-export async function messageAgent(ctx: Ctx, agent: string, to: ReplyTo, text: string): Promise<string> {
+/**
+ * Sends a message to an agent, continuing a recent conversation in the same app if there is one.
+ * `startedBy` is who is speaking; a conversation a member has spoken in stays marked as theirs.
+ */
+export async function messageAgent(ctx: Ctx, agent: string, to: ReplyTo, text: string, startedBy: StartedBy): Promise<string> {
   await assertAvailable(ctx, agent);
   const found =
     "telegram" in to ? await ctx.db.recentChatSession(agent, to.telegram) : await ctx.db.recentDiscordSession(agent, to.discord);
@@ -66,6 +84,7 @@ export async function messageAgent(ctx: Ctx, agent: string, to: ReplyTo, text: s
     try {
       await ctx.managed.sendMessage(recent.id, text);
       await ctx.db.updateSession(recent.id, "running", recent.cost_cents);
+      await ctx.db.markMemberSession(recent.id, startedBy);
       return recent.id;
     } catch (e) {
       // The last conversation is paused or out of budget: start a fresh one.
@@ -74,8 +93,8 @@ export async function messageAgent(ctx: Ctx, agent: string, to: ReplyTo, text: s
     }
   }
   return "telegram" in to
-    ? startSession(ctx, agent, text, "telegram", { chatId: to.telegram })
-    : startSession(ctx, agent, text, "discord", { discordUser: to.discord });
+    ? startSession(ctx, agent, text, "telegram", startedBy, { chatId: to.telegram })
+    : startSession(ctx, agent, text, "discord", startedBy, { discordUser: to.discord });
 }
 
 /**
@@ -86,14 +105,13 @@ export function isWaitingSession(e: unknown): boolean {
   return e instanceof ManagedAgentsError && e.status === 400 && /waiting on responses|session budget reached/i.test(e.body);
 }
 
-const RISK_ORDER = ["none", "low", "medium", "high"];
-
-/** Whether the owner may approve this decision from Discord (decision 15B). */
-export function discordApprovable(ctx: Ctx, d: Pick<Decision, "kind" | "risk">): boolean {
+/**
+ * Whether the owner may approve this decision from Discord (decision 15B). A card whose
+ * content doesn't fit in Discord goes to Telegram, so nothing is approved unseen.
+ */
+export function discordApprovable(ctx: Ctx, d: Decision): boolean {
   if (d.kind === "tool.confirm") return false;
-  const max = ctx.network.discord_approval_max_risk ?? "none";
-  const risk = RISK_ORDER.indexOf(d.risk);
-  return risk > 0 && risk <= RISK_ORDER.indexOf(max);
+  return riskAtMost(d.risk, ctx.network.discord_approval_max_risk ?? "none") && discordCardFits(d);
 }
 
 /**

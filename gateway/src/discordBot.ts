@@ -123,11 +123,20 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
+/** How far an interaction's signed timestamp may be from now, so a captured request can't be replayed later. */
+const DISCORD_TOLERANCE_SECONDS = 5 * 60;
+
 /** Discord signs every interaction with Ed25519 over timestamp + raw body. */
-export async function verifyDiscord(publicKeyHex: string, headers: Headers, rawBody: string): Promise<boolean> {
+export async function verifyDiscord(
+  publicKeyHex: string,
+  headers: Headers,
+  rawBody: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<boolean> {
   const sig = headers.get("x-signature-ed25519");
   const ts = headers.get("x-signature-timestamp");
   if (!sig || !ts || !/^[0-9a-f]{128}$/i.test(sig) || !/^[0-9a-f]{64}$/i.test(publicKeyHex)) return false;
+  if (!/^\d+$/.test(ts) || Math.abs(nowSeconds - Number(ts)) > DISCORD_TOLERANCE_SECONDS) return false;
   try {
     const key = await crypto.subtle.importKey("raw", hexToBytes(publicKeyHex), { name: "Ed25519" }, false, ["verify"]);
     return await crypto.subtle.verify("Ed25519", key, hexToBytes(sig), new TextEncoder().encode(ts + rawBody));

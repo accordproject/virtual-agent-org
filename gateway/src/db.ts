@@ -35,6 +35,10 @@ export interface Task {
   due: string | null;
   status: string;
   session_id: string | null;
+  /** review_check only when the gateway started it for one PR at one commit (decision 2A). */
+  kind: "task" | "review_check";
+  review_target: string | null;
+  review_sha: string | null;
   created_at: string;
 }
 
@@ -65,6 +69,12 @@ export interface Finding {
   created_at: string;
 }
 
+/**
+ * Who a session acts for. A member's conversation, and any task assigned from it,
+ * is member:<platform>:<name>; "unknown" marks conversations from before this was kept.
+ */
+export type StartedBy = "owner" | "schedule" | "unknown" | `member:${string}`;
+
 export interface SessionRow {
   id: string;
   agent: string;
@@ -74,6 +84,7 @@ export interface SessionRow {
   task_id: string | null;
   status: string;
   cost_cents: number;
+  started_by: StartedBy;
 }
 
 export class Db {
@@ -117,11 +128,29 @@ export class Db {
   async upsertSession(s: Partial<SessionRow> & { id: string; agent: string; origin: SessionRow["origin"] }) {
     await this.db
       .prepare(
-        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status, started_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
           "ON CONFLICT(id) DO NOTHING",
       )
-      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running")
+      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running", s.started_by ?? "schedule")
       .run();
+  }
+
+  /** Marks a conversation as a member's once one speaks in it; it stays marked. */
+  async markMemberSession(id: string, startedBy: StartedBy) {
+    if (!startedBy.startsWith("member:")) return;
+    await this.db.prepare("UPDATE sessions SET started_by = ? WHERE id = ? AND started_by NOT LIKE 'member:%'").bind(startedBy, id).run();
+  }
+
+  /** Counts one more message from a member today (UTC) and returns today's total. */
+  async countMemberMessage(person: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        "INSERT INTO member_messages (person, day, count) VALUES (?, date('now'), 1) " +
+          "ON CONFLICT(person, day) DO UPDATE SET count = count + 1 RETURNING count",
+      )
+      .bind(person)
+      .first<{ count: number }>();
+    return row?.count ?? 1;
   }
 
   getSession(id: string) {
@@ -272,12 +301,19 @@ export class Db {
 
   // ---- tasks --------------------------------------------------------------
 
-  async createTask(t: { agent: string; title: string; brief: string; priority?: string; due?: string }): Promise<Task> {
+  async createTask(t: {
+    agent: string;
+    title: string;
+    brief: string;
+    priority?: string;
+    due?: string;
+    review?: { target: string; sha: string };
+  }): Promise<Task> {
     const seq = await this.next("task");
     const id = `T-${seq}`;
     await this.db
-      .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null)
+      .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : "task", t.review?.target ?? null, t.review?.sha ?? null)
       .run();
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
   }
@@ -502,5 +538,78 @@ export class Db {
       .first<{ kind: string; ref: string; chat_id: number }>();
     if (row) await this.db.prepare("DELETE FROM pending_replies WHERE message_id = ?").bind(messageId).run();
     return row;
+  }
+
+  // ---- runtime: tool results, sweeping and retention ------------------------
+
+  /** The answer already given to a custom tool call, if any. */
+  async toolResult(eventId: string): Promise<string | null> {
+    const row = await this.db.prepare("SELECT result FROM tool_results WHERE event_id = ?").bind(eventId).first<{ result: string }>();
+    return row?.result ?? null;
+  }
+
+  async saveToolResult(eventId: string, result: string) {
+    await this.db.prepare("INSERT OR REPLACE INTO tool_results (event_id, result) VALUES (?, ?)").bind(eventId, result).run();
+  }
+
+  async markEventDone(eventId: string) {
+    await this.db.prepare("UPDATE processed_events SET done = 1 WHERE event_id = ?").bind(eventId).run();
+  }
+
+  /** True when a claimed event is handled, or was claimed long enough ago that whoever claimed it has finished or released it. */
+  async claimSettled(eventId: string, minutes = 5): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS ok FROM processed_events WHERE event_id = ? AND (done = 1 OR ts < datetime('now', ?))")
+      .bind(eventId, `-${minutes} minutes`)
+      .first<{ ok: number }>();
+    return !!row;
+  }
+
+  /** The last event of a session handled along with every event before it. */
+  async eventsDoneThrough(sessionId: string): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT events_done_through FROM sessions WHERE id = ?")
+      .bind(sessionId)
+      .first<{ events_done_through: string | null }>();
+    return row?.events_done_through ?? null;
+  }
+
+  async setEventsDoneThrough(sessionId: string, eventId: string) {
+    await this.db.prepare("UPDATE sessions SET events_done_through = ? WHERE id = ?").bind(eventId, sessionId).run();
+  }
+
+  /**
+   * Sessions the sweeper should look at, least recently updated first. Finished,
+   * spent and stale sessions are left out; a webhook still wakes any of them.
+   */
+  async sweepableSessions(limit: number): Promise<SessionRow[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT * FROM sessions WHERE status NOT IN ('terminated', 'done', 'stale', 'idle:end_turn', 'idle:budget_reached') " +
+          "ORDER BY updated_at ASC, rowid ASC LIMIT ?",
+      )
+      .bind(limit)
+      .all<SessionRow>();
+    return results;
+  }
+
+  /** Marks idle sessions nobody has touched for `days` as stale. Returns how many. */
+  async markStaleSessions(days: number): Promise<number> {
+    const r = await this.db
+      .prepare("UPDATE sessions SET status = 'stale' WHERE status LIKE 'idle:%' AND updated_at < datetime('now', ?)")
+      .bind(`-${days} days`)
+      .run();
+    return r.meta?.changes ?? 0;
+  }
+
+  /** Deletes event claims and tool results older than `eventDays`, and audit rows older than `auditDays`. */
+  async prune(eventDays: number, auditDays: number): Promise<{ events: number; tool_results: number; audit: number }> {
+    const del = async (sql: string, days: number) =>
+      (await this.db.prepare(sql).bind(`-${days} days`).run()).meta?.changes ?? 0;
+    return {
+      events: await del("DELETE FROM processed_events WHERE ts < datetime('now', ?)", eventDays),
+      tool_results: await del("DELETE FROM tool_results WHERE created_at < datetime('now', ?)", eventDays),
+      audit: await del("DELETE FROM audit WHERE ts < datetime('now', ?)", auditDays),
+    };
   }
 }

@@ -36,7 +36,7 @@ export function loadSpecs(): Record<string, Spec> {
 export interface NetworkYaml {
   network: { name: string; timezone: string; current_phase: number; schedules_enabled?: boolean };
   github: { org: string; sandbox_repo: string; repos: string[] };
-  budgets: { monthly_credit_usd: number };
+  budgets: { monthly_credit_usd: number; member_daily_messages?: number };
   agents: Record<string, number>;
 }
 export interface ModelsYaml {

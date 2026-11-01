@@ -288,3 +288,49 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   agreed list, and labels the repo doesn't already have. Adding a kind removes the old
   one, so a PR has one kind at most. Each change is in the audit log.
 - Issues still use her GitHub tools, since the gateway doesn't label issues.
+
+**42. Approval cards show what will run** · DEFAULT: each action kind checks its own payload
+
+- A card used to show the agent's summary and one text field, while the gateway acted
+  on other fields: who a message goes to, a file's content, a release tag. The two
+  could differ.
+- Each action kind now has one spec that checks the payload when the agent asks,
+  describes it for the card and runs it. Unknown fields are refused, and the card shows
+  every field that will run. The payload is checked again just before it runs.
+- A card too long to show in full in Discord goes to Telegram instead.
+
+**43. Review checks are marked by kind** · RESOLVED: not by task title
+
+- The gateway used to recognise a review check (decision 2A) by its task title, which
+  any assigned task could copy.
+- A task's kind and the PR and commit it checks are now stored with the task, and only
+  the gateway's own review-check request sets them.
+
+**44. Work a member sets going** · DEFAULT: marked, never automatic, and capped
+
+- People in `people.yaml` may ask but not instruct (rule 5). Until now that was only an
+  instruction in the agent's prompt.
+- Each session records who started it, and sessions it starts in turn inherit that.
+  A decision from work a member started says so at the top of its card.
+- Such work never runs an `auto` kind: a CI approval goes to the owner. It cannot start
+  a review check.
+- Each member may send 20 messages a day across both apps (`budgets.member_daily_messages`
+  in `network.yaml`). Members see a plain message when something fails; the detail goes
+  to the audit log.
+
+**45. Automatic CI approval checks the repo's workflows** · DEFAULT
+
+- Approving a fork's CI runs the PR's code, so what limits the risk is how the repo's
+  workflows run, not only which files changed.
+- `github.approve_ci` runs automatically only if no workflow uses `pull_request_target`
+  or a self-hosted runner, the workflows can be read, and the PR changes no build,
+  dependency or CI files (a longer list than before). Otherwise it goes to the owner as
+  high risk. `repo:add` warns about the same things.
+
+**46. How long the gateway keeps records** · DEFAULT
+
+- Event claims and stored tool answers are kept for 14 days and the audit log for 365
+  days. Sessions idle for 7 days are marked stale and no longer swept, and each sweep
+  handles at most 40 sessions.
+- A tool call's answer is stored before it is sent, so a retry resends it instead of
+  acting twice.
