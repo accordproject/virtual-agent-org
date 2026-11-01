@@ -6,7 +6,8 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILTIN_TOOLS, ROOT, loadAll } from "./lib";
+import { BUILTIN_TOOLS, ROOT, loadAll, readText } from "./lib";
+import { REPOS_MARKER, REPO_RE } from "./repos";
 
 export const PERSON_ROLES = ["owner", "tsc_member", "maintainer"];
 
@@ -42,6 +43,11 @@ export function validate(cfg = loadAll()): string[] {
     // Only kinds the gateway has its own safety checks for may skip the owner.
     if (v.auto && k !== "github.approve_ci") errs.push(`action kind ${k}: auto is only allowed for github.approve_ci`);
   }
+
+  const repos = network.github.repos ?? [];
+  if (!Array.isArray(repos)) errs.push("github.repos must be a list");
+  else for (const r of repos) if (!REPO_RE.test(String(r))) errs.push(`github.repos: "${r}" should be owner/name`);
+  if (!readText("context/accord.md").includes(REPOS_MARKER)) errs.push(`context/accord.md: keep the line ${REPOS_MARKER}; deploy fills in the repos there`);
 
   const seenIds = new Set<string>();
   for (const [i, p] of (people.people ?? []).entries()) {

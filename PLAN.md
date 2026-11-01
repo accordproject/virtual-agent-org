@@ -239,6 +239,7 @@ Twenty-two decisions; twenty-one settled. Updated 1 November: only decision 10 (
 **3. GitHub access for agents on the real Accord repos** · RESOLVED: A
 
 - **Decision:** widen each agent's existing fine-grained token to the in-scope repos, after a short note to the other org owners.
+- **What changed:** decision 23 replaced the per-repo token lists with all repos.
 
 **4. Who merges** · DEFAULT A
 
@@ -331,6 +332,15 @@ Twenty-two decisions; twenty-one settled. Updated 1 November: only decision 10 (
 **22. How Mira reviews PRs** · RESOLVED: A
 
 - **Decision:** review is its own scheduled pass (weekdays 10:00 and 15:00, up to three PRs). Mira drafts findings with severity and confidence after reading the repo's AGENTS.md and CONTRIBUTING.md, then hands the draft to a fresh session that verifies each finding, posts only confirmed ones, and alone may propose the merge (`review_check_required`). PRs over 200 changed lines are checked on the deep tier. Triage records whether maintainers act on each finding; on Fridays Mira turns repeated lessons into an AGENTS.md update PR (`github.docs_pr`, approval-gated, then normal maintainer review), so every reviewer benefits.
+
+**23. Which repos the agents' tokens cover** · RESOLVED: C
+
+- **Decision:** read-only tokens (Vera, Otto) cover all Accord Project repos; tokens that can write (Mira now, Rosa later) list only the repos in scope, so direct writes stay within `github.repos` in `config/network.yaml`. Adding a repo is `npm run repo:add`, which checks the GitHub side and reminds you which tokens to edit. Wrong if a read-only agent's token turns out to have write permissions.
+- **What changed:** you first chose all repos for every token (A); the threat analysis and decision 24 (GitHub tool left open) moved it to C on 1 November.
+
+**24. Whether agents' GitHub tool may write directly** · RESOLVED: B
+
+- **Decision:** the GitHub MCP tool stays open (`always_allow`); agents' direct writes are limited by their tokens and instructions, not by the tool configuration. So rule 2 isn't enforced for direct GitHub comments and new issues, only by the agents' specs. Reason: agents are to become more autonomous in a later phase.
 
 ## Changes since the plan (1 November)
 

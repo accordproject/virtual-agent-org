@@ -7,8 +7,9 @@ servers:
   github:
     url: https://api.githubcopilot.com/mcp/
     token_env: <AGENT>_GITHUB_TOKEN
-    # Phase 0: fine-grained personal access tokens scoped to the sandbox repo only.
-    # Phase 1: per-agent GitHub App tokens (decision 3), rotated by the gateway.
+    # Fine-grained personal access tokens from mttrbrts-agent (decision 12), one per
+    # agent. Read-only tokens cover all accordproject repos; tokens that can write
+    # (mode read_plus_triage) list only the repos in scope (decision 23).
   vimeo:
     url: ""            # TODO: Vimeo MCP server URL; leave empty to skip
     token_env: <AGENT>_VIMEO_TOKEN

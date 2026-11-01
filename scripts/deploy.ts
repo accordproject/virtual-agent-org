@@ -16,6 +16,7 @@ import { ManagedClient } from "../gateway/src/managed";
 import { toolsForAgent } from "../gateway/src/toolDefs";
 import { compile, validate } from "./compile";
 import { ROOT, loadAll, readText } from "./lib";
+import { renderContext } from "./repos";
 
 const DRY = process.argv.includes("--dry-run");
 const ROTATE = process.argv.includes("--rotate-credentials");
@@ -128,6 +129,12 @@ async function ensureEnvironment() {
   if (env) state.environment_id = env.id;
 }
 
+/** context/accord.md with the repos in scope filled in from config/network.yaml. */
+function sharedContext(): string {
+  const { repos, sandbox_repo } = cfg.network.github;
+  return renderContext(readText("context/accord.md"), repos ?? [], sandbox_repo);
+}
+
 async function ensureSharedMemory() {
   if (!state.shared_memory_store_id) {
     const store = await step("create shared memory store", {}, () =>
@@ -138,7 +145,7 @@ async function ensureSharedMemory() {
   // Creates the file the first time and replaces its content on later deploys.
   if (state.shared_memory_store_id) {
     const r = await step("write /context/accord.md", {}, () =>
-      client.upsertMemory(state.shared_memory_store_id!, "/context/accord.md", readText("context/accord.md")),
+      client.upsertMemory(state.shared_memory_store_id!, "/context/accord.md", sharedContext()),
     );
     if (r) console.log(`  ${r.updated ? "updated" : "created"} ${r.id}`);
   }

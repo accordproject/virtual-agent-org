@@ -80,11 +80,14 @@ npm run deploy:agents:dry   # show what deploy would change
 npm run deploy:agents       # sync agents, prompts, tools and schedules to Managed Agents
 npm run gateway:deploy      # compile, then deploy the Worker
 npm run discord:commands    # re-register Discord slash commands
+npm run repo:add owner/name # check a repo's GitHub setup, then add it to network.yaml
 cd gateway && npm run migrate   # apply D1 migrations (remote)
 ```
 
 - **Changed an agent spec, `_protocol.md`, models or schedules?** Run `deploy:agents`.
 - **Changed gateway code or `permissions.yaml`?** Run `gateway:deploy`. Do both when in doubt.
+- **Added a repo?** `repo:add` edits `network.yaml`; after the PR merges, run `gateway:deploy`
+  and `deploy:agents` (the agents' list of repos is filled into `context/accord.md` at deploy).
 - **Changed `deployed.json`?** `deploy:agents` writes it, and the gateway bundles it, so
   deploy the gateway afterwards.
 - **Audit log:**

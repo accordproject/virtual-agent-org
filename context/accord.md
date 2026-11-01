@@ -15,12 +15,9 @@ Accord Project is an open source project for smart legal agreements: templates, 
   Prototype, Vocabulary Features, Concerto V4 Upgrade".
 - Community metrics baseline: https://mttrbrts.github.io/ap-stats/
 
-## Repos in scope (Phase 1)
+## Repos in scope
 
-- accordproject/concerto
-- accordproject/template-playground
-- accordproject/template-engine
-- accordproject/virtual-agent-org-sandbox (for testing the network itself)
+<!-- repos in scope: generated from config/network.yaml -->
 
 ## Reference information
 
