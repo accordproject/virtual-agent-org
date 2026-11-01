@@ -55,14 +55,18 @@ async function step<T>(label: string, payload: unknown, fn: () => Promise<T>): P
   return fn();
 }
 
+/** Where Managed Agents mounts memory stores in the sandbox, one directory per store name. */
+const MEMORY_MOUNT = "/mnt/memory";
+
 function systemPrompt(agent: string): string {
   const spec = cfg.specs[agent];
   const parts = [readText("agents/_protocol.md"), spec.body];
   if (agent === "ada") parts.push(readText("evaluation/rubric.md"));
   parts.push(
-    "## Shared context\n\nTwo memory stores are mounted in your sandbox. Your own, `" + agent + "-memory`, is " +
-      "read-write and holds your notes (see Memory between sessions). The shared one, `virtual-agent-org-shared`, " +
-      "is read-only and holds Accord Project context (/context/accord.md). Read both before your first task in a session.",
+    "## Shared context\n\nTwo memory stores are mounted in your sandbox, each under `" + MEMORY_MOUNT + "/<store name>/`. " +
+      "Your own is read-write and holds your notes (see Memory between sessions): `" + MEMORY_MOUNT + "/" + agent + "-memory/`, " +
+      "so your working notes are `" + MEMORY_MOUNT + "/" + agent + "-memory/notes/working.md`. The shared one is read-only and holds " +
+      "Accord Project context: `" + MEMORY_MOUNT + "/virtual-agent-org-shared/context/accord.md`. Read both before your first task in a session.",
   );
   parts.push(rosterSection());
   parts.push(`## Your configuration\n\nAgent: ${agent}. Requestable actions: ${cfg.permissions.agents[agent].requestable.join(", ") || "none"}.`);
