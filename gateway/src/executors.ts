@@ -5,7 +5,7 @@ import type { Decision } from "./db";
 import { payloadText, safeJson } from "./format";
 import { parseTarget, type RepoRef } from "./github";
 import { resolveMentions } from "./people";
-import { checklist, failed, mergeChecks, prFacts } from "./review";
+import { GATEWAY_LABEL, checklist, failed, mergeChecks, prFacts } from "./review";
 import { toSeconds, type Chapter } from "./vimeo";
 
 export { ciSensitivePaths } from "./review";
@@ -122,15 +122,27 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
         comments: Array.isArray(payload.comments) ? (payload.comments as { path: string; line: number; body: string }[]) : [],
       };
       if (!review.commit_id || !review.body) return { ok: false, result: "Payload needs sha and body" };
+      let posted: string;
       try {
         const r = await gh.createReview(needNumber(), review);
-        return { ok: true, result: `Posted review: ${r.html_url}` };
+        posted = `Posted review: ${r.html_url}`;
       } catch (e) {
         // A line outside the diff makes GitHub refuse the whole review: post the findings in the body instead.
         if (!review.comments.length || !String(e).includes(": 422")) throw e;
         const moved = review.comments.map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n\n/, ": ")}`).join("\n");
         const r = await gh.createReview(needNumber(), { ...review, body: review.body.replace(/\n---\n/, `\n${moved}\n\n---\n`), comments: [] });
-        return { ok: true, result: `Posted review: ${r.html_url} (findings in the summary; GitHub refused the inline comments)` };
+        posted = `Posted review: ${r.html_url} (findings in the summary; GitHub refused the inline comments)`;
+      }
+      const labels = Array.isArray(payload.labels) ? payload.labels.map(String).filter((l) => GATEWAY_LABEL.test(l)) : [];
+      if (!labels.length) return { ok: true, result: posted };
+      // The review is posted either way; a label GitHub refuses is reported, not fatal.
+      try {
+        const n = needNumber();
+        for (const old of (await gh.labels(n)).filter((l) => GATEWAY_LABEL.test(l) && !labels.includes(l))) await gh.removeLabel(n, old);
+        await gh.addLabels(n, labels);
+        return { ok: true, result: `${posted} and labelled it ${labels.join(", ")}` };
+      } catch (e) {
+        return { ok: true, result: `${posted} but couldn't label it (${e instanceof Error ? e.message : String(e)})` };
       }
     }
     case "github.close": {

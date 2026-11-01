@@ -83,6 +83,7 @@ export interface FakePr {
   reviews: { login: string; state: "APPROVED" | "CHANGES_REQUESTED"; association?: string }[];
   unresolved: number;
   rollup: string | null;
+  labels: string[];
   runs: { id: number; workflow_id: number; event: string; status: string; conclusion: string | null }[] | null;
 }
 
@@ -102,6 +103,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     reviews: [{ login: "samlee", state: "APPROVED" }],
     unresolved: 0,
     rollup: "SUCCESS",
+    labels: [],
     runs: [{ id: 1, workflow_id: 10, event: "pull_request", status: "completed", conclusion: "success" }],
     ...pr,
   };
@@ -112,6 +114,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     posted,
     merged,
     rejectInline: false,
+    rejectLabels: false,
     prDetail: async () => ({
       state: p.state,
       isDraft: p.draft,
@@ -137,6 +140,16 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
       if (gh.rejectInline && review.comments.length) throw new Error("GitHub POST /reviews: 422 Line could not be resolved");
       posted.push(review);
       return { html_url: `https://github.com/accordproject/concerto/pull/12#pullrequestreview-${posted.length}` };
+    },
+    labels: async () => {
+      if (gh.rejectLabels) throw new Error("GitHub GET /labels: 403 Resource not accessible by integration");
+      return [...p.labels];
+    },
+    addLabels: async (_r: unknown, names: string[]) => {
+      p.labels.push(...names.filter((n) => !p.labels.includes(n)));
+    },
+    removeLabel: async (_r: unknown, name: string) => {
+      p.labels = p.labels.filter((l) => l !== name);
     },
     merge: async (_r: unknown, method: string, sha?: string) => {
       merged.push({ method, sha });
