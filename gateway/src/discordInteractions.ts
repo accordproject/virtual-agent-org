@@ -7,10 +7,10 @@
 //
 // Discord needs an answer within 3 seconds, so slow work runs in `later`.
 
-import { AgentUnavailable, assertAvailable, discordApprovable, messageAgent, postDiscordCard } from "./agents";
+import { assertAvailable, discordApprovable, failureText, messageAgent, postDiscordCard } from "./agents";
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, stop } from "./controls";
-import { describePerson, roleFor } from "./people";
+import { OVER_ALLOWANCE, memberPrefix, roleFor, startedByFor, withinMemberAllowance } from "./people";
 import { toMessage } from "./discordBot";
 import { gatherStatus, queueMarkdown, statusCards } from "./status";
 
@@ -49,8 +49,8 @@ export async function handleInteraction(ctx: Ctx, i: Interaction, later: Later):
   const run = (work: () => Promise<unknown>) =>
     later(
       work().catch(async (e) => {
-        await ctx.db.audit({ event_type: "gateway.discord_error", detail: { user: userId, error: String(e) } });
-        await ctx.dc?.dm(userId, { content: `That didn't work: ${e instanceof Error ? e.message : String(e)}` }).catch(() => undefined);
+        const content = await failureText(ctx, owner, e, "gateway.discord_error", { user: userId });
+        await ctx.dc?.dm(userId, { content }).catch(() => undefined);
       }),
     );
 
@@ -66,7 +66,7 @@ function opt(i: Interaction, name: string): string {
 
 async function command(ctx: Ctx, i: Interaction, userId: string, owner: boolean, run: (w: () => Promise<unknown>) => void) {
   const name = i.data?.name ?? "";
-  const prefix = owner ? "" : `${describePerson(ctx, "discord", userId)} asks on Discord. They cannot instruct or approve; answer only.\n\n`;
+  const prefix = owner ? "" : memberPrefix(ctx, "discord", userId);
 
   switch (name) {
     case "ada":
@@ -77,10 +77,11 @@ async function command(ctx: Ctx, i: Interaction, userId: string, owner: boolean,
       try {
         await assertAvailable(ctx, agent); // fast check so the answer is immediate
       } catch (e) {
-        return reply(e instanceof AgentUnavailable ? e.message : String(e));
+        return reply(await failureText(ctx, owner, e, "gateway.discord_error", { user: userId, command: name }));
       }
+      if (!owner && !(await withinMemberAllowance(ctx, "discord", userId))) return reply(OVER_ALLOWANCE);
       run(async () => {
-        await messageAgent(ctx, agent, { discord: userId }, prefix + text);
+        await messageAgent(ctx, agent, { discord: userId }, prefix + text, startedByFor(ctx, "discord", userId, owner ? "owner" : "member"));
         if (name === "ask") await ctx.db.audit({ agent, event_type: "owner.direct_ask", detail: { by: owner ? "owner" : "member", via: "discord" } });
       });
       return reply(`Sent to ${cap(agent)}. Replies will arrive in your DMs.`);

@@ -2,6 +2,7 @@
   "current_phase": 1,
   "timezone": "Europe/London",
   "monthly_credit_usd": 200,
+  "member_daily_messages": 20,
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
   "repos": [
     "accordproject/concerto",

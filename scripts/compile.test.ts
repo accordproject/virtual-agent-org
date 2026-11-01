@@ -55,3 +55,10 @@ test("validate lets ada have file tools for her memory and nothing else", () => 
   assert.ok(withAda(["web_fetch"]).includes(err));
   assert.ok(withAda([], { github: { mode: "read" } }).includes(err));
 });
+
+test("compile carries the member message allowance, and validate checks it", () => {
+  const cfg = loadAll();
+  assert.equal(compile(cfg).member_daily_messages, 20);
+  const network = { ...cfg.network, budgets: { ...cfg.network.budgets, member_daily_messages: 2.5 } };
+  assert.ok(validate({ ...cfg, network }).includes("network.yaml: budgets.member_daily_messages must be a whole number, 0 or more"));
+});

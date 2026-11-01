@@ -68,6 +68,7 @@ export async function askAda(ctx: Ctx, id: string, to: ReplyTo): Promise<string>
     "ada",
     to,
     `Matt asks about ${id} (${d.agent}, ${d.kind}): "${d.summary}". Explain what it does, the evidence, the risks and your recommendation in a few lines.`,
+    "owner", // only the owner has the Ask Ada button
   );
   return `Asked Ada about ${id}.`;
 }
