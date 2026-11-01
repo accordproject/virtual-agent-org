@@ -5,68 +5,55 @@
 # anyone listed here, whatever their role, gets read-and-ask access
 # (ask Ada, /status, /queue) on the platforms where their id matches.
 #
+# Discord and Telegram ids are not kept here: this repo may be public. They live
+# in the git-ignored config/people.ids.yaml (see config/people.ids.example.yaml),
+# keyed by name, and `npm run people:ids` loads them into the gateway.
+#
 # Roles (one, or a list such as `role: [tsc_member, maintainer]`):
 #   owner        Matt (owner rights still come only from the secret above)
 #   tsc_member   Technical Steering Committee member
 #   maintainer   reviews and merges; add `maintains: [concerto, template-engine]`
 #                to say where, so Mira requests their review on those repos
 #
-# Ids:
-#   telegram: numeric user id (message the bot, then /whoami)
-#   discord:  numeric user id, quoted (Discord settings → Advanced → Developer Mode,
-#             then right-click the person → Copy User ID). Used from Phase 2.
-#   github:   login, for matching people across PRs, Discord and Telegram
+# github: login, for matching people across PRs, Discord and Telegram
 people:
   - name: Matt Roberts
     role: [owner, tsc_member, maintainer]
     github: mttrbrts
-    discord: "875116476460326916"
-    telegram: "9110211942"
   - name: Dan Selman
     role: [tsc_member, maintainer]
     maintains: [concerto, template-engine]
     github: dselman
-    discord: "708424790289023107"
   - name: Diana Lease
     role: [tsc_member, maintainer]
     github: dianalease
-    discord: "644711207995047946"
   - name: Niall Roche
     role: [tsc_member, maintainer]
     maintains: [apap]
     github: niallroche
-    discord: "718544324857561158"
   - name: Martin Halford
     role: [tsc_member]
     github: martinhalford
-    discord: "822966912844955688"
   - name: Jonathan Casey
     role: [tsc_member, maintainer]
     maintains: [concerto]
     github: jonathan-casey
-    discord: "928310212136402944"
   - name: Tom Brooke
     role: tsc_member
     github: tbrooke
-    discord: "491630050089893892"
   - name: Ertugrul Karademir
     role: maintainer
     maintains: [concerto, concerto-rust]
     github: ekarademir
-    discord: "1143502099448070156"
   - name: Jamie Shorten
     role: maintainer
     maintains: [concerto, concerto-rust, concerto-dotnet]
     github: jamieshorten
-    discord: "560186012781903922"
   - name: Sanket Shevkar
     role: maintainer
     maintains: [concerto, template-archive]
     github: sanketshevkar
-    discord: "703280494397358211"
   # - name: Jane Doe
   #   role: [tsc_member, maintainer]
   #   maintains: [concerto]
   #   github: janedoe
-  #   discord: "123456789012345678"
-  #   telegram: "123456789"

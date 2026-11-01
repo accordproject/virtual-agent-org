@@ -25,6 +25,9 @@ export interface Env {
   DISCORD_PUBLIC_KEY?: string; // hex, from the Developer Portal's General Information page
   DISCORD_BOT_TOKEN?: string;
   OWNER_DISCORD_ID?: string; // the only Discord account with owner rights; never from people.yaml
+  // JSON {"<name>": {"discord", "telegram"}} for people in people.yaml, set by `npm run people:ids`
+  // from the git-ignored config/people.ids.yaml. Grants nothing to names not in people.yaml.
+  PEOPLE_IDS?: string;
 
   // "true" until the Phase 0 gate: approved actions are logged, not executed
   DRY_RUN?: string;

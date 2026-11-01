@@ -4,6 +4,7 @@ import { DiscordBot } from "./discordBot";
 import type { Env } from "./env";
 import { GitHub } from "./github";
 import { ManagedClient } from "./managed";
+import { withPeopleIds } from "./people";
 import { Telegram } from "./telegram";
 import { Vimeo } from "./vimeo";
 
@@ -36,7 +37,7 @@ export function makeCtx(env: Env, overrides: Partial<Ctx> = {}): Ctx {
     db: new Db(env.DB),
     tg: new Telegram(env.TELEGRAM_BOT_TOKEN),
     managed: new ManagedClient(env.ANTHROPIC_API_KEY),
-    network: NETWORK,
+    network: withPeopleIds(NETWORK, env.PEOPLE_IDS),
     deployed: DEPLOYED,
     ownerChatId: Number(env.OWNER_TELEGRAM_ID),
     github: async () => {

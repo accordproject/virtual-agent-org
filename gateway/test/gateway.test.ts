@@ -6,7 +6,7 @@ import { processSession } from "../src/sessions";
 import { splitText } from "../src/telegram";
 import { handleTool, ToolError } from "../src/tools";
 import { sign, verifyWebhook } from "../src/webhookVerify";
-import { makeTestCtx } from "./helpers";
+import { NETWORK, makeTestCtx } from "./helpers";
 
 const SECRET = "whsec_" + btoa("0123456789abcdef0123456789abcdef");
 
@@ -279,6 +279,23 @@ describe("people", () => {
     expect(roleFor(ctx, "discord", "223456789012345678")).toBe("member"); // maintainers too
     expect(roleFor(ctx, "telegram", 999)).toBeNull();
     expect(displayName(ctx, "telegram", 88)).toBe("Jane Doe");
+  });
+
+  it("adds platform ids from the PEOPLE_IDS secret, by name", async () => {
+    const { withPeopleIds, roleFor, resolveMentions } = await import("../src/people");
+    const base = { ...NETWORK, people: [{ name: "Kim Park", roles: ["maintainer"], github: "kimpark" }] };
+    const network = withPeopleIds(base, JSON.stringify({ "Kim Park": { discord: "323456789012345678", telegram: 31 }, "Nobody": { telegram: "1" } }));
+    expect(network.people).toEqual([{ name: "Kim Park", roles: ["maintainer"], github: "kimpark", discord: "323456789012345678", telegram: "31" }]);
+    const { ctx } = makeTestCtx({ network });
+    expect(roleFor(ctx, "telegram", 31)).toBe("member");
+    expect(roleFor(ctx, "telegram", 1)).toBeNull(); // not in people.yaml, so the id grants nothing
+    expect(resolveMentions(ctx, ["@kimpark"]).ids).toEqual(["323456789012345678"]);
+  });
+
+  it("leaves people unchanged when PEOPLE_IDS is unset or not JSON", async () => {
+    const { withPeopleIds } = await import("../src/people");
+    expect(withPeopleIds(NETWORK, undefined)).toBe(NETWORK);
+    expect(withPeopleIds(NETWORK, "{not json")).toBe(NETWORK);
   });
 
   it("names TSC members to Ada and ignores group chatter", async () => {

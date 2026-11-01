@@ -63,7 +63,8 @@ Matt writes British English. Keep messages plain and short.
 | `config/permissions.yaml` | Action kinds (risk, executor, `auto`), what each agent may request, `approvals_app`, `review_check_required` |
 | `config/models.yaml` | Model tiers; specs name a tier, never a model id |
 | `config/schedules.yaml` | Scheduled deployments (cron, per-run budget, prompt) |
-| `config/people.yaml` | People, roles, maintained repos, platform ids |
+| `config/people.yaml` | People, roles, maintained repos, GitHub logins |
+| `config/people.ids.yaml` | Discord and Telegram ids by name; git-ignored, loaded into the `PEOPLE_IDS` secret |
 | `config/discord.yaml` | Channel ids the bot posts to |
 | `context/accord.md` | Shared read-only context, written to the shared memory store |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
@@ -80,12 +81,15 @@ npm run deploy:agents:dry   # show what deploy would change
 npm run deploy:agents       # sync agents, prompts, tools and schedules to Managed Agents
 npm run gateway:deploy      # compile, then deploy the Worker
 npm run discord:commands    # re-register Discord slash commands
+npm run people:ids          # load config/people.ids.yaml into the gateway's PEOPLE_IDS secret
 npm run repo:add owner/name # check a repo's GitHub setup, then add it to network.yaml
 cd gateway && npm run migrate   # apply D1 migrations (remote)
 ```
 
 - **Changed an agent spec, `_protocol.md`, models or schedules?** Run `deploy:agents`.
 - **Changed gateway code or `permissions.yaml`?** Run `gateway:deploy`. Do both when in doubt.
+- **Changed someone's Discord or Telegram id?** Edit `config/people.ids.yaml`, then run
+  `people:ids`. Never put ids in `people.yaml`; `npm test` rejects them.
 - **Added a repo?** `repo:add` edits `network.yaml`; after the PR merges, run `gateway:deploy`
   and `deploy:agents` (the agents' list of repos is filled into `context/accord.md` at deploy).
 - **Changed `deployed.json`?** `deploy:agents` writes it, and the gateway bundles it, so
@@ -108,8 +112,8 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
   throw.
 - **Generated files.** `network.json` and `deployed.json` are generated; regenerate
   them, don't hand-edit.
-- **Secrets.** Secrets live in Worker secrets (`wrangler secret put`), never in the
-  repo. `*.pem` is git-ignored.
+- **Secrets and personal data.** Secrets live in Worker secrets (`wrangler secret put`), never in
+  the repo. `*.pem` and `config/people.ids.yaml` are git-ignored. Write as if the repo is public.
 - **Agent specs.** Specs are instructions to a model: plain, specific, numbered steps,
   with the tool and payload shape named.
 - **Spec PRs.** Spec and permission changes go to Matt as PRs; agents can only

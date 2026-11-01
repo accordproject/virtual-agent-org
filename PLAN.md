@@ -342,6 +342,14 @@ Twenty-two decisions; twenty-one settled. Updated 1 November: only decision 10 (
 
 - **Decision:** the GitHub MCP tool stays open (`always_allow`); agents' direct writes are limited by their tokens and instructions, not by the tool configuration. So rule 2 isn't enforced for direct GitHub comments and new issues, only by the agents' specs. Reason: agents are to become more autonomous in a later phase.
 
+**25. Personal data before making this repo public** · RESOLVED: A
+
+- **Decision:** Discord and Telegram ids leave the repo. They live in the git-ignored `config/people.ids.yaml`, keyed by name, and `npm run people:ids` loads them into the gateway's `PEOPLE_IDS` secret; `people.yaml` keeps names, roles and GitHub logins. The repo is published with a single fresh first commit, so the ids in the current history never become public.
+
+**26. The Tech WG Zoom link in the shared context** · RESOLVED: B
+
+- **Decision:** the joining link, with its password, stays in `context/accord.md`; it is already public.
+
 ## Changes since the plan (1 November)
 
 - **Memory between sessions.** Each agent reads and rewrites `/notes/working.md` in its own memory store; chat history doesn't carry across sessions. A conversation moves to a fresh session at 80% of its budget.

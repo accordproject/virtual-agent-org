@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 
@@ -66,6 +66,10 @@ export interface PeopleYaml {
     telegram?: string | number;
   }[];
 }
+/** config/people.ids.yaml (git-ignored): platform ids by the person's name in people.yaml. */
+export type PeopleIdsYaml = Record<string, { discord?: string | number; telegram?: string | number }>;
+export const PEOPLE_IDS_PATH = "config/people.ids.yaml";
+
 export interface DiscordYaml {
   channels?: { announcements?: string | number; agent_ops?: string | number };
 }
@@ -82,6 +86,7 @@ export function loadAll() {
     schedules: readYaml<SchedulesYaml>("config/schedules.yaml"),
     mcp: readYaml<McpYaml>("config/mcp_servers.yaml"),
     people: readYaml<PeopleYaml>("config/people.yaml"),
+    peopleIds: existsSync(join(ROOT, PEOPLE_IDS_PATH)) ? (readYaml<PeopleIdsYaml>(PEOPLE_IDS_PATH) ?? {}) : {},
     discord: readYaml<DiscordYaml>("config/discord.yaml") ?? {},
     specs: loadSpecs(),
   };

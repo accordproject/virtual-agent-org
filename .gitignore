@@ -4,3 +4,6 @@ node_modules/
 *.pem
 .env
 
+
+# Platform ids for people.yaml, kept out of the repo (decision 25)
+config/people.ids.yaml

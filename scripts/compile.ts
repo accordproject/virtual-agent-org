@@ -23,7 +23,7 @@ export function fullRepo(repo: string, org: string): string {
 }
 
 export function validate(cfg = loadAll()): string[] {
-  const { network, models, permissions, schedules, mcp, specs, people, discord } = cfg;
+  const { network, models, permissions, schedules, mcp, specs, people, peopleIds, discord } = cfg;
   const errs: string[] = [];
 
   for (const [name, id] of Object.entries(discord.channels ?? {})) {
@@ -65,7 +65,16 @@ export function validate(cfg = loadAll()): string[] {
     }
     if (p.github && !/^[A-Za-z0-9-]{1,39}$/.test(p.github)) errs.push(`${who}: "${p.github}" is not a GitHub login`);
     for (const platform of ["discord", "telegram"] as const) {
-      const id = p[platform];
+      if (p[platform] !== undefined) errs.push(`${who}: move the ${platform} id to config/people.ids.yaml; ids stay out of the repo`);
+    }
+  }
+
+  // Platform ids live in the git-ignored config/people.ids.yaml, keyed by name.
+  const listed = new Set((people.people ?? []).map((p) => p.name));
+  for (const [who, ids] of Object.entries(peopleIds)) {
+    if (!listed.has(who)) errs.push(`config/people.ids.yaml: "${who}" is not a name in config/people.yaml`);
+    for (const platform of ["discord", "telegram"] as const) {
+      const id = ids?.[platform];
       if (id === undefined || id === "") continue;
       if (typeof id === "number" && platform === "discord") errs.push(`${who}: quote the Discord id, it is too long to be a number`);
       if (!/^\d{5,20}$/.test(String(id))) errs.push(`${who}: ${platform} id "${id}" should be digits only`);
@@ -124,7 +133,6 @@ export function validate(cfg = loadAll()): string[] {
 
 export function compile(cfg = loadAll()) {
   const { network, permissions, specs, people, discord } = cfg;
-  const clean = (v: string | number | undefined) => (v === undefined || v === "" ? undefined : String(v));
   return {
     current_phase: network.network.current_phase,
     timezone: network.network.timezone,
@@ -144,8 +152,6 @@ export function compile(cfg = loadAll()) {
       roles: rolesOf(p.role),
       ...(p.maintains?.length ? { maintains: p.maintains.map((r) => fullRepo(String(r), network.github.org)) } : {}),
       ...(p.github ? { github: p.github } : {}),
-      ...(clean(p.discord) ? { discord: clean(p.discord) } : {}),
-      ...(clean(p.telegram) ? { telegram: clean(p.telegram) } : {}),
     })),
     agents: Object.fromEntries(
       Object.keys(network.agents).map((n) => [

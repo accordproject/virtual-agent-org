@@ -43,6 +43,7 @@ npm ci && npm ci --prefix gateway
 npm test                     # config validation, type-check, gateway tests
 npm run deploy:agents:dry    # what deploy would change
 npm run repo:add owner/name  # check a repo is ready, then add it to the network
+npm run people:ids           # load people's Discord and Telegram ids into the gateway
 ```
 
 Changes to specs, permissions and models are pull requests. Ada proposes them;

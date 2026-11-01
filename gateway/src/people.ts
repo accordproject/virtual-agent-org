@@ -1,11 +1,38 @@
 // Who is speaking, on any platform. Owner rights come only from the
 // OWNER_TELEGRAM_ID and OWNER_DISCORD_ID secrets; people.yaml grants read-and-ask access.
 
-import type { Person } from "./config";
+import type { NetworkConfig, Person } from "./config";
 import type { Ctx } from "./context";
 import type { Role } from "./env";
 
 export type Platform = "telegram" | "discord";
+
+/**
+ * people.yaml with each person's platform ids added from the PEOPLE_IDS secret,
+ * JSON {"<name>": {"discord": "...", "telegram": "..."}}, loaded by `npm run people:ids`.
+ * The ids stay out of the repo; a name that isn't in people.yaml gets nothing.
+ */
+export function withPeopleIds(network: NetworkConfig, json: string | undefined): NetworkConfig {
+  if (!json) return network;
+  let ids: Record<string, { discord?: string | number; telegram?: string | number }>;
+  try {
+    ids = JSON.parse(json);
+  } catch {
+    console.error("PEOPLE_IDS is not valid JSON; people have no platform ids");
+    return network;
+  }
+  const str = (v: string | number | undefined) => (v === undefined || v === "" ? undefined : String(v));
+  return {
+    ...network,
+    people: (network.people ?? []).map((p) => {
+      const own = ids[p.name];
+      if (!own) return p;
+      const discord = str(own.discord) ?? p.discord;
+      const telegram = str(own.telegram) ?? p.telegram;
+      return { ...p, ...(discord ? { discord } : {}), ...(telegram ? { telegram } : {}) };
+    }),
+  };
+}
 
 export function findPerson(ctx: Ctx, platform: Platform, id: string | number | undefined): Person | undefined {
   if (id === undefined || id === "") return undefined;

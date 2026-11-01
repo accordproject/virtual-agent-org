@@ -91,9 +91,7 @@
         "tsc_member",
         "maintainer"
       ],
-      "github": "mttrbrts",
-      "discord": "875116476460326916",
-      "telegram": "9110211942"
+      "github": "mttrbrts"
     },
     {
       "name": "Dan Selman",
@@ -105,8 +103,7 @@
         "accordproject/concerto",
         "accordproject/template-engine"
       ],
-      "github": "dselman",
-      "discord": "708424790289023107"
+      "github": "dselman"
     },
     {
       "name": "Diana Lease",
@@ -114,8 +111,7 @@
         "tsc_member",
         "maintainer"
       ],
-      "github": "dianalease",
-      "discord": "644711207995047946"
+      "github": "dianalease"
     },
     {
       "name": "Niall Roche",
@@ -126,16 +122,14 @@
       "maintains": [
         "accordproject/apap"
       ],
-      "github": "niallroche",
-      "discord": "718544324857561158"
+      "github": "niallroche"
     },
     {
       "name": "Martin Halford",
       "roles": [
         "tsc_member"
       ],
-      "github": "martinhalford",
-      "discord": "822966912844955688"
+      "github": "martinhalford"
     },
     {
       "name": "Jonathan Casey",
@@ -146,16 +140,14 @@
       "maintains": [
         "accordproject/concerto"
       ],
-      "github": "jonathan-casey",
-      "discord": "928310212136402944"
+      "github": "jonathan-casey"
     },
     {
       "name": "Tom Brooke",
       "roles": [
         "tsc_member"
       ],
-      "github": "tbrooke",
-      "discord": "491630050089893892"
+      "github": "tbrooke"
     },
     {
       "name": "Ertugrul Karademir",
@@ -166,8 +158,7 @@
         "accordproject/concerto",
         "accordproject/concerto-rust"
       ],
-      "github": "ekarademir",
-      "discord": "1143502099448070156"
+      "github": "ekarademir"
     },
     {
       "name": "Jamie Shorten",
@@ -179,8 +170,7 @@
         "accordproject/concerto-rust",
         "accordproject/concerto-dotnet"
       ],
-      "github": "jamieshorten",
-      "discord": "560186012781903922"
+      "github": "jamieshorten"
     },
     {
       "name": "Sanket Shevkar",
@@ -191,8 +181,7 @@
         "accordproject/concerto",
         "accordproject/template-archive"
       ],
-      "github": "sanketshevkar",
-      "discord": "703280494397358211"
+      "github": "sanketshevkar"
     }
   ],
   "agents": {
