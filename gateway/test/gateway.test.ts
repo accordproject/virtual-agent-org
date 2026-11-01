@@ -366,9 +366,10 @@ describe("discord bot (decision 15B)", () => {
     const body = '{"type":1}';
     const sig = Buffer.from(await crypto.subtle.sign("Ed25519", kp.privateKey, new TextEncoder().encode("1700000000" + body))).toString("hex");
     const h = (s: string) => new Headers({ "x-signature-ed25519": s, "x-signature-timestamp": "1700000000" });
-    expect(await verifyDiscord(pub, h(sig), body)).toBe(true);
-    expect(await verifyDiscord(pub, h(sig), body + " ")).toBe(false);
-    expect(await verifyDiscord(pub, h("00".repeat(64)), body)).toBe(false);
+    const now = 1700000000;
+    expect(await verifyDiscord(pub, h(sig), body, now)).toBe(true);
+    expect(await verifyDiscord(pub, h(sig), body + " ", now)).toBe(false);
+    expect(await verifyDiscord(pub, h("00".repeat(64)), body, now)).toBe(false);
   });
 
   it("answers pings and turns away people who aren't listed", async () => {

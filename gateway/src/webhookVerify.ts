@@ -22,7 +22,8 @@ function bytesToB64(bytes: ArrayBuffer): string {
   return btoa(s);
 }
 
-function timingSafeEqual(a: string, b: string): boolean {
+/** Compares two strings without leaking, through timing, how much of them matches. */
+export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let r = 0;
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);

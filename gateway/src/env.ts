@@ -36,3 +36,15 @@ export interface Env {
 /** Access level in the gateway. Only the OWNER_TELEGRAM_ID secret makes an owner;
  *  everyone listed in people.yaml is a member (ask Ada, /status, /queue). */
 export type Role = "owner" | "member";
+
+const REQUIRED = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "OWNER_TELEGRAM_ID", "ANTHROPIC_API_KEY", "ANTHROPIC_WEBHOOK_SECRET"] as const;
+
+/**
+ * The required secrets that are missing or malformed, by name only, never value.
+ * Empty when the gateway can run; otherwise every route fails closed.
+ */
+export function checkEnv(env: Partial<Env>): string[] {
+  const problems: string[] = REQUIRED.filter((k) => !env[k]?.trim()).map((k) => `${k} is not set`);
+  if (env.OWNER_TELEGRAM_ID?.trim() && !/^\d+$/.test(env.OWNER_TELEGRAM_ID.trim())) problems.push("OWNER_TELEGRAM_ID is not a numeric Telegram id");
+  return problems;
+}

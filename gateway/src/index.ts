@@ -2,10 +2,11 @@ import { handleUpdate } from "./commands";
 import { verifyDiscord } from "./discordBot";
 import { handleInteraction, type Interaction } from "./discordInteractions";
 import { makeCtx } from "./context";
-import type { Env } from "./env";
-import { processSession, sweep } from "./sessions";
+import { Db } from "./db";
+import { checkEnv, type Env } from "./env";
+import { housekeeping, processSession, sweep } from "./sessions";
 import type { TgUpdate } from "./telegram";
-import { verifyWebhook } from "./webhookVerify";
+import { timingSafeEqual, verifyWebhook } from "./webhookVerify";
 
 interface WebhookPayload {
   type: string;
@@ -17,10 +18,16 @@ export default {
   async fetch(req: Request, env: Env, exec: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
 
-    if (req.method === "GET" && url.pathname === "/health") return new Response("ok");
+    // Fail closed while a required secret is missing: no route runs half-configured.
+    const problems = checkEnv(env);
+    if (req.method === "GET" && url.pathname === "/health") {
+      return problems.length ? new Response(`misconfigured:\n${problems.join("\n")}`, { status: 503 }) : new Response("ok");
+    }
+    if (problems.length) return new Response("gateway misconfigured", { status: 503 });
 
     if (req.method === "POST" && url.pathname === "/telegram") {
-      if (req.headers.get("x-telegram-bot-api-secret-token") !== env.TELEGRAM_WEBHOOK_SECRET) {
+      const token = req.headers.get("x-telegram-bot-api-secret-token");
+      if (!token || !timingSafeEqual(token, env.TELEGRAM_WEBHOOK_SECRET)) {
         return new Response("forbidden", { status: 403 });
       }
       const update = (await req.json()) as TgUpdate;
@@ -71,7 +78,17 @@ export default {
   },
 
   async scheduled(_event: ScheduledController, env: Env, exec: ExecutionContext) {
+    const problems = checkEnv(env);
+    if (problems.length) {
+      exec.waitUntil(new Db(env.DB).audit({ event_type: "gateway.misconfigured", detail: { problems } }));
+      return;
+    }
     const ctx = makeCtx(env);
-    exec.waitUntil(sweep(ctx));
+    exec.waitUntil(
+      (async () => {
+        await housekeeping(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.housekeeping_error", detail: String(e) }));
+        await sweep(ctx);
+      })(),
+    );
   },
 };
