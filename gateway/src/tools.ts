@@ -7,7 +7,7 @@ import type { Decision } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import {
-  checklist, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
+  GATEWAY_LABEL, KIND_LABELS, checklist, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
 } from "./review";
 import { ADA_TOOLS, COMMON_TOOLS, MIRA_TOOLS, OTTO_TOOLS, VERA_TOOLS } from "./toolDefs";
 import { isTechWg } from "./vimeo";
@@ -66,6 +66,9 @@ export async function handleTool(ctx: Ctx, agent: string, sessionId: string, nam
         review_areas: reviewConfig(ctx).areas,
       });
     }
+
+    case "label_pr":
+      return labelPr(ctx, agent, sessionId, input);
 
     case "pr_queue": {
       const repo = s(input.repo, "repo");
@@ -271,6 +274,42 @@ function prRef(ctx: Ctx, target: unknown): Required<RepoRef> {
   if (!ref?.number) throw new ToolError("target must be a pull request, e.g. accordproject/concerto#123");
   if (!inScope(ctx, ref)) throw new ToolError(`${ref.owner}/${ref.repo} is not in the configured repos`);
   return ref as Required<RepoRef>;
+}
+
+/**
+ * Mira's labels, one by one, so the gateway's ai/risk:* and ai/decision:* labels
+ * survive (decision 41). A PR keeps one kind at most, and only labels the repo
+ * already has go on, since GitHub would otherwise create them.
+ */
+async function labelPr(ctx: Ctx, agent: string, sessionId: string, input: Input): Promise<string> {
+  const ref = prRef(ctx, input.target);
+  const target = `${ref.owner}/${ref.repo}#${ref.number}`;
+  const add = [...new Set(list(input.add))];
+  const remove = [...new Set(list(input.remove))];
+  if (!add.length && !remove.length) throw new ToolError("give add or remove, or both");
+  const theirs = [...add, ...remove].filter((l) => GATEWAY_LABEL.test(l));
+  if (theirs.length) throw new ToolError(`${theirs.join(", ")}: ai/risk:* and ai/decision:* are set by the gateway when it posts a review`);
+  const kinds = add.filter((l) => l.startsWith("ai/kind:"));
+  const bad = kinds.find((l) => !KIND_LABELS.includes(l));
+  if (bad) throw new ToolError(`${bad} is not a kind; use one of ${KIND_LABELS.join(", ")}`);
+  if (kinds.length > 1) throw new ToolError("a PR has one ai/kind:* label at most");
+  const gh = await ctx.github();
+  const own = add.filter((l) => !l.startsWith("ai/kind:"));
+  if (own.length) {
+    const known = new Set(await gh.repoLabels(ref));
+    const missing = own.find((l) => !known.has(l));
+    if (missing) throw new ToolError(`${missing} is not a label in ${ref.owner}/${ref.repo}; use the repo's own labels`);
+  }
+  if (ctx.dryRun) return `DRY RUN: would ${[add.length && `add ${add.join(", ")}`, remove.length && `remove ${remove.join(", ")}`].filter(Boolean).join(" and ")} on ${target}`;
+
+  const current = await gh.labels(ref);
+  const drop = current.filter((l) => remove.includes(l) || (kinds.length && l.startsWith("ai/kind:") && !kinds.includes(l)));
+  for (const l of drop) await gh.removeLabel(ref, l);
+  const added = add.filter((l) => !current.includes(l));
+  if (added.length) await gh.addLabels(ref, added);
+  const now = [...current.filter((l) => !drop.includes(l)), ...added];
+  await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.labelled", detail: { target, added, removed: drop } });
+  return `${target} labels: ${now.join(", ") || "none"}`;
 }
 
 /** Runs an auto action kind at once, keeping a decision record and an audit entry like any other. */

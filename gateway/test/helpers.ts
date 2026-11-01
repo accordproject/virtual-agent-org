@@ -84,6 +84,8 @@ export interface FakePr {
   unresolved: number;
   rollup: string | null;
   labels: string[];
+  /** The repo's own labels. */
+  repoLabels: string[];
   runs: { id: number; workflow_id: number; event: string; status: string; conclusion: string | null }[] | null;
 }
 
@@ -104,6 +106,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     unresolved: 0,
     rollup: "SUCCESS",
     labels: [],
+    repoLabels: ["ai/kind:bugfix", "ai/kind:docs", "ai/kind:feature", "ai/risk:low", "bug", "dependencies"],
     runs: [{ id: 1, workflow_id: 10, event: "pull_request", status: "completed", conclusion: "success" }],
     ...pr,
   };
@@ -151,6 +154,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     removeLabel: async (_r: unknown, name: string) => {
       p.labels = p.labels.filter((l) => l !== name);
     },
+    repoLabels: async () => [...p.repoLabels],
     merge: async (_r: unknown, method: string, sha?: string) => {
       merged.push({ method, sha });
       return { merged: true, sha: "feedface00" };

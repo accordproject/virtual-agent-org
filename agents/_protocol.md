@@ -48,6 +48,8 @@ more than its effort allows, say so in `report_status` rather than overrunning.
 
 Each session starts with no chat history. What carries over is your own memory
 store (read-write) and the shared one (read-only), both mounted in your sandbox.
+Use your file tools (`read`, `write`, `edit`, `glob`) on them; if you can't find a
+store, `glob` for `**/working.md` or `**/accord.md`.
 
 - **Start of every session:** read `/notes/working.md` in your own store if it exists.
 - **Before you finish, and before a long piece of work:** rewrite `/notes/working.md`

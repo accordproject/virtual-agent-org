@@ -357,6 +357,9 @@ const VERDICT_LINE: Record<Review["verdict"], string> = {
  */
 export const GATEWAY_LABEL = /^ai\/(risk|decision):/;
 
+/** The kinds Mira may give a PR, one at a time, through label_pr (decision 41). */
+export const KIND_LABELS = ["docs", "typo", "bugfix", "feature", "refactor", "deps", "ci/build", "test", "spam", "unclear"].map((k) => `ai/kind:${k}`);
+
 export function reviewLabels(risk: Risk, verdict: Review["verdict"]): string[] {
   return [`ai/risk:${risk}`, `ai/decision:${verdict === "request_changes" ? "needs-changes" : "needs-review"}`];
 }

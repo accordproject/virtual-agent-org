@@ -52,52 +52,53 @@ action_kinds:
 
 agents:
   ada:
-    # No external tools at all. Internal tools only (see gateway custom tools).
+    # No external tools at all. Internal tools only (see gateway custom tools), plus
+    # file tools for her own memory store (decision 40).
     mcp_servers: []
-    builtin_tools: []
+    builtin_tools: [read, write, edit, glob]
     requestable: [spec.change, other, discord.ops]
   mira:
     mcp_servers:
       github: { mode: read_plus_triage }   # read, label, assign, request review via her own GitHub App
-    builtin_tools: [web_fetch]
+    builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [github.merge, github.close, github.comment, github.release, github.approve_ci, github.docs_pr, discord.ops]
   vera:
     mcp_servers:
       github: { mode: read }
-    builtin_tools: [bash, web_fetch]       # bash for computing metrics in her sandbox
+    builtin_tools: [read, write, edit, glob, bash, web_fetch]       # bash for computing metrics in her sandbox
     requestable: []
   otto:
     mcp_servers:
       vimeo:  { mode: read }
       github: { mode: read }
-    builtin_tools: [web_fetch]
+    builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [vimeo.publish, discord.announce, github.comment, message.person, discord.ops]
   rosa:
     mcp_servers:
       github: { mode: read_plus_triage }
-    builtin_tools: [web_fetch]
+    builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [github.comment, discord.announce, message.person]
   juno:
     mcp_servers:
       github: { mode: read }
       wordpress: { mode: draft_only }
-    builtin_tools: [web_fetch]
+    builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [wordpress.publish, linkedin.post, github.comment]
   sage:
     mcp_servers: {}
-    builtin_tools: [web_search, web_fetch]
+    builtin_tools: [read, write, edit, glob, web_search, web_fetch]
     requestable: []
   kit:
     mcp_servers:
       github: { mode: read }
-    builtin_tools: [bash, web_fetch, web_search]
+    builtin_tools: [read, write, edit, glob, bash, web_fetch, web_search]
     requestable: [github.comment, other, discord.ops]
   felix:
     mcp_servers:
       github: { mode: read }
-    builtin_tools: [bash, web_fetch]
+    builtin_tools: [read, write, edit, glob, bash, web_fetch]
     requestable: [github.release, github.comment]
   nell:
     mcp_servers: {}
-    builtin_tools: [web_search, web_fetch]
+    builtin_tools: [read, write, edit, glob, web_search, web_fetch]
     requestable: [email.send, message.person]

@@ -44,3 +44,14 @@ test("compile passes the review settings to the gateway", () => {
   assert.ok(out.review.risk.high_paths.includes(".github/**"));
   assert.ok(out.action_kinds["github.review"].auto);
 });
+
+test("validate lets ada have file tools for her memory and nothing else", () => {
+  const cfg = loadAll();
+  const withAda = (builtin_tools: string[], mcp_servers: object = []) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, ada: { ...cfg.permissions.agents.ada, builtin_tools, mcp_servers } } } } as typeof cfg);
+  const err = "ada must have no MCP servers and no built-in tools other than read, write, edit, glob";
+  assert.ok(!withAda(["read", "write", "edit", "glob"]).includes(err));
+  assert.ok(withAda(["read", "bash"]).includes(err));
+  assert.ok(withAda(["web_fetch"]).includes(err));
+  assert.ok(withAda([], { github: { mode: "read" } }).includes(err));
+});

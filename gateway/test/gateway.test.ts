@@ -1383,3 +1383,51 @@ describe("message.person as a Discord DM", () => {
     expect(r.manual).toBe(true);
   });
 });
+
+describe("labelling PRs (decision 41)", () => {
+  const T = "accordproject/concerto#12";
+  const setup = (pr: Partial<FakePr> = {}, dryRun = false) => {
+    const gh = fakeGitHub(pr);
+    return { gh, ...makeTestCtx({ dryRun, github: async () => gh as any }) };
+  };
+  const label = (ctx: any, input: object) => handleTool(ctx, "mira", "s", "label_pr", { target: T, ...input });
+
+  it("adds labels one by one, keeping the gateway's labels", async () => {
+    const { ctx, gh } = setup({ labels: ["ai/risk:low", "ai/decision:needs-review"] });
+    expect(await label(ctx, { add: ["ai/kind:bugfix", "bug"] })).toBe(`${T} labels: ai/risk:low, ai/decision:needs-review, ai/kind:bugfix, bug`);
+    expect(gh.pr.labels).toEqual(["ai/risk:low", "ai/decision:needs-review", "ai/kind:bugfix", "bug"]);
+    const audit = await (ctx.db as any).db.prepare("SELECT agent, detail FROM audit WHERE event_type = 'gateway.labelled'").all();
+    expect(audit.results).toMatchObject([{ agent: "mira" }]);
+  });
+
+  it("replaces the kind, so a PR has one at most", async () => {
+    const { ctx, gh } = setup({ labels: ["ai/kind:docs", "ai/risk:low"] });
+    await label(ctx, { add: ["ai/kind:feature"] });
+    expect(gh.pr.labels).toEqual(["ai/risk:low", "ai/kind:feature"]);
+    await expect(label(ctx, { add: ["ai/kind:docs", "ai/kind:bugfix"] })).rejects.toThrow(/one ai\/kind/);
+  });
+
+  it("removes labels and ignores ones the PR doesn't have", async () => {
+    const { ctx, gh } = setup({ labels: ["bug", "ai/kind:docs"] });
+    await label(ctx, { remove: ["bug", "dependencies"] });
+    expect(gh.pr.labels).toEqual(["ai/kind:docs"]);
+    await expect(label(ctx, {})).rejects.toThrow(/add or remove/);
+  });
+
+  it("refuses the gateway's labels, unknown kinds and labels the repo doesn't have", async () => {
+    const { ctx, gh } = setup({ labels: ["ai/risk:low"] });
+    await expect(label(ctx, { add: ["ai/risk:high"] })).rejects.toThrow(/set by the gateway/);
+    await expect(label(ctx, { remove: ["ai/decision:needs-review"] })).rejects.toThrow(/set by the gateway/);
+    await expect(label(ctx, { add: ["ai/kind:chore"] })).rejects.toThrow(/ai\/kind:chore is not a kind/);
+    await expect(label(ctx, { add: ["wontfix"] })).rejects.toThrow(/wontfix is not a label in accordproject\/concerto/);
+    expect(gh.pr.labels).toEqual(["ai/risk:low"]);
+  });
+
+  it("is Mira's, needs a PR in scope, and writes nothing in a dry run", async () => {
+    const { ctx, gh } = setup({}, true);
+    await expect(handleTool(ctx, "otto", "s", "label_pr", { target: T, add: ["bug"] })).rejects.toThrow(/not available to otto/);
+    await expect(label(ctx, { target: "someone/else#1", add: ["bug"] })).rejects.toThrow(/not in the configured repos/);
+    expect(await label(ctx, { add: ["bug"] })).toBe(`DRY RUN: would add bug on ${T}`);
+    expect(gh.pr.labels).toEqual([]);
+  });
+});

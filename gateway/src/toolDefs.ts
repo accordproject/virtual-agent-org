@@ -214,6 +214,22 @@ const prTarget = str("The PR, e.g. accordproject/concerto#123");
 export const MIRA_TOOLS: CustomToolDef[] = [
   {
     type: "custom",
+    name: "label_pr",
+    description:
+      "Add or remove labels on one PR without touching its other labels. Adding an ai/kind:* label replaces the PR's old kind. " +
+      "Only ai/kind:* and labels the repo already has; ai/risk:* and ai/decision:* are the gateway's. Returns the PR's labels.",
+    input_schema: {
+      type: "object",
+      properties: {
+        target: prTarget,
+        add: strList("Labels to add, e.g. [\"ai/kind:bugfix\", \"bug\"]. Optional"),
+        remove: strList("Labels to remove. Optional"),
+      },
+      required: ["target"],
+    },
+  },
+  {
+    type: "custom",
     name: "pr_facts",
     description:
       "Facts about one PR, computed by the gateway: head sha, size, files, risk band and why, author and the tone to use, CI state, " +
