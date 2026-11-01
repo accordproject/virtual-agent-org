@@ -116,6 +116,7 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
   the repo. `*.pem` and `config/people.ids.yaml` are git-ignored. Write as if the repo is public.
 - **Agent specs.** Specs are instructions to a model: plain, specific, numbered steps,
   with the tool and payload shape named.
+- **Commits** carry a DCO sign-off (`git commit -s`) whose name and email match the author.
 - **Spec PRs.** Spec and permission changes go to Matt as PRs; agents can only
   propose them.
 

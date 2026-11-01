@@ -350,6 +350,10 @@ Twenty-two decisions; twenty-one settled. Updated 1 November: only decision 10 (
 
 - **Decision:** the joining link, with its password, stays in `context/accord.md`; it is already public.
 
+**27. How the repo goes public** · RESOLVED: B
+
+- **Decision:** after the id change is merged and deployed, replace `main`'s history with one signed-off commit and make this repo public; the URL and settings stay. `main` is the only branch, there are no tags or forks, so nothing else holds the old history. Old commits may stay reachable by SHA for a while; GitHub Support can purge them if that matters later.
+
 ## Changes since the plan (1 November)
 
 - **Memory between sessions.** Each agent reads and rewrites `/notes/working.md` in its own memory store; chat history doesn't carry across sessions. A conversation moves to a fresh session at 80% of its budget.
