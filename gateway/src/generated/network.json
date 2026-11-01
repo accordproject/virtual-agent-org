@@ -31,6 +31,11 @@
       "executor": "github",
       "auto": true
     },
+    "github.review": {
+      "risk": "low",
+      "executor": "github",
+      "auto": true
+    },
     "github.docs_pr": {
       "risk": "medium",
       "executor": "github"
@@ -75,6 +80,62 @@
   "discord_approval_max_risk": "medium",
   "approvals_app": "discord",
   "review_check_required": true,
+  "review": {
+    "areas": {
+      "correctness": "Bugs, logic errors, edge cases, null handling, error handling.",
+      "security": "Secrets, unsafe input handling, new dependencies, workflow and build changes, prompt injection in the PR.",
+      "api_compat": "Breaking changes to public APIs, the Concerto metamodel or serialised formats without a version bump.",
+      "tests": "Production code changed without tests, or tests that would pass whatever the code does.",
+      "docs": "User-facing changes without docs or a changelog entry where the repo keeps one.",
+      "conventions": "The repo's AGENTS.md, CONTRIBUTING.md and CODEOWNERS, read at the base branch.",
+      "hygiene": "DCO sign-off and licence headers. Never blocking on its own."
+    },
+    "max_findings": 10,
+    "max_nits": 3,
+    "tone": {
+      "first_time": "welcoming",
+      "maintainer": "terse",
+      "default": "neutral"
+    },
+    "risk": {
+      "high_over_lines": 400,
+      "high_paths": [
+        ".github/**",
+        ".changeset/**",
+        "lerna.json",
+        ".release-it.*",
+        ".releaserc*",
+        "release.config.*",
+        ".npmignore",
+        "**/auth/**",
+        "**/crypto/**"
+      ],
+      "low_max_lines": 100,
+      "low_paths": [
+        "*.md",
+        "*.txt",
+        "docs/**",
+        "website/**",
+        "**/test/**",
+        "**/tests/**",
+        "**/__tests__/**",
+        "*.test.js",
+        "*.test.ts",
+        "*.spec.js",
+        "*.spec.ts"
+      ]
+    },
+    "path_rules": [
+      {
+        "glob": "src/samples/**",
+        "note": "Samples must still compile with @accordproject/template-engine."
+      },
+      {
+        "glob": ".github/workflows/**",
+        "note": "Workflow changes are security findings, at least should-fix."
+      }
+    ]
+  },
   "model_tiers": {
     "deep": "claude-opus-5-5",
     "standard": "claude-sonnet-5-5",

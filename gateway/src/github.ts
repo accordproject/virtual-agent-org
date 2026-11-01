@@ -103,6 +103,45 @@ export class GitHub {
     );
   }
 
+  async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const r = await this.call<{ data?: T; errors?: { message: string }[] }>("POST", "/graphql", { query, variables });
+    if (r.errors?.length || !r.data) throw new Error(`GitHub GraphQL: ${r.errors?.map((e) => e.message).join("; ") ?? "no data"}`);
+    return r.data;
+  }
+
+  /** What a merge decision needs to know about a PR, in one read. */
+  async prDetail(r: Required<RepoRef>): Promise<PrDetail> {
+    const d = await this.graphql<{ repository: { pullRequest: PrDetail | null } }>(PR_DETAIL, { owner: r.owner, repo: r.repo, number: r.number });
+    if (!d.repository.pullRequest) throw new Error(`${r.owner}/${r.repo}#${r.number} is not a pull request`);
+    return d.repository.pullRequest;
+  }
+
+  /** The repo's open PRs, oldest first (up to 50). */
+  async openPulls(r: RepoRef): Promise<OpenPull[]> {
+    const d = await this.graphql<{ repository: { pullRequests: { nodes: OpenPull[] } } }>(OPEN_PULLS, { owner: r.owner, repo: r.repo });
+    return d.repository.pullRequests.nodes;
+  }
+
+  /** Every workflow run at a commit, or null when GitHub has more than one page of them. */
+  async runsAt(r: RepoRef, sha: string): Promise<WorkflowRun[] | null> {
+    const res = await this.call<{ total_count: number; workflow_runs: WorkflowRun[] }>(
+      "GET",
+      `/repos/${r.owner}/${r.repo}/actions/runs?head_sha=${sha}&per_page=100`,
+    );
+    const runs = res.workflow_runs ?? [];
+    return res.total_count > runs.length ? null : runs;
+  }
+
+  /** A review that only comments: the agents never approve or request changes as a reviewer. */
+  createReview(r: Required<RepoRef>, p: { commit_id: string; body: string; comments: { path: string; line: number; body: string }[] }) {
+    return this.call<{ html_url: string }>("POST", `/repos/${r.owner}/${r.repo}/pulls/${r.number}/reviews`, {
+      commit_id: p.commit_id,
+      body: p.body,
+      event: "COMMENT",
+      comments: p.comments.map((c) => ({ ...c, side: "RIGHT" })),
+    });
+  }
+
   /** Changed file paths in a PR (up to 3,000, GitHub's own limit). */
   async pullFiles(r: Required<RepoRef>): Promise<string[]> {
     const out: string[] = [];
@@ -166,6 +205,71 @@ export class GitHub {
     });
   }
 }
+
+export interface PrDetail {
+  state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
+  title: string;
+  createdAt: string;
+  headRefOid: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  mergeStateStatus: string;
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  authorAssociation: string;
+  author: { login: string } | null;
+  latestOpinionatedReviews: { nodes: { state: string; authorAssociation: string; author: { login: string } | null }[] };
+  reviewThreads: { totalCount: number; nodes: { isResolved: boolean }[] };
+  commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+}
+
+export interface OpenPull {
+  number: number;
+  title: string;
+  isDraft: boolean;
+  createdAt: string;
+  headRefOid: string;
+  additions: number;
+  deletions: number;
+  authorAssociation: string;
+  author: { login: string } | null;
+  reviewDecision: string | null;
+  commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+}
+
+export interface WorkflowRun {
+  id: number;
+  name: string;
+  workflow_id: number;
+  event: string;
+  status: string; // queued | in_progress | completed | action_required | waiting | ...
+  conclusion: string | null;
+}
+
+const PR_DETAIL = `query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      state isDraft title createdAt headRefOid additions deletions changedFiles
+      mergeable mergeStateStatus reviewDecision authorAssociation author { login }
+      latestOpinionatedReviews(first: 50) { nodes { state authorAssociation author { login } } }
+      reviewThreads(first: 100) { totalCount nodes { isResolved } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    }
+  }
+}`;
+
+const OPEN_PULLS = `query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(states: OPEN, first: 50, orderBy: { field: CREATED_AT, direction: ASC }) {
+      nodes {
+        number title isDraft createdAt headRefOid additions deletions authorAssociation author { login } reviewDecision
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}`;
 
 const encodePath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
 

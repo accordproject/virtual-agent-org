@@ -16,7 +16,7 @@ agents:
     tasks:
       triage: fast            # label, route, first-response acknowledgement
       review: standard
-      check: deep             # fresh-session review check for PRs over 200 changed lines
+      check: deep             # fresh-session review check for PRs the gateway rates high risk (config/review.yaml)
   vera:
     default: fast
     tasks:

@@ -19,7 +19,8 @@ discord_approval_max_risk: medium
 approvals_app: discord
 
 # Decision 2A: Mira's merge proposals must come from a fresh review-check session,
-# never from the session that wrote the review.
+# never from the session that wrote the review. Whatever this says, the gateway checks
+# every github.merge itself before queuing it and again before running it (decision 35).
 review_check_required: true
 
 action_kinds:
@@ -31,6 +32,11 @@ action_kinds:
   # auto: runs without Matt, but the gateway itself refuses (and queues for Matt
   # instead) any PR that touches workflows, build scripts or dependency files.
   github.approve_ci:   { risk: low,    executor: github, auto: true }
+  # Posts a review check's confirmed findings as one comment-only review (decision 36).
+  # auto: no card. Only submit_review creates it, after the gateway checks the findings
+  # against the PR and refuses text that @mentions anyone but the author or talks about
+  # the agent network. Never requestable through request_action.
+  github.review:       { risk: low,    executor: github, auto: true }
   # Opens a PR updating AGENTS.md, CONTRIBUTING.md, REVIEWING.md or CLAUDE.md. The PR
   # then needs a maintainer's review like any other.
   github.docs_pr:      { risk: medium, executor: github }

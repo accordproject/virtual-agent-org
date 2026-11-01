@@ -24,9 +24,10 @@ feature easier.
    publishing, posting, emailing, messaging a named person, deleting, spending, and
    spec or permission changes all go through `request_action`, which queues a decision.
    The gateway executes it only after Matt approves.
-3. **Never go ahead by default** on anything that needs Matt's approval. The one
-   `auto` action kind is `github.approve_ci` (decision 20), and the gateway's own file
-   check sends risky PRs to Matt instead. Adding another `auto` kind is Matt's decision.
+3. **Never go ahead by default** on anything that needs Matt's approval. The `auto`
+   action kinds are `github.approve_ci` (decision 20), whose file check sends risky PRs
+   to Matt instead, and `github.review` (decision 36), which posts a review check's
+   findings after the gateway checks them. Adding another `auto` kind is Matt's decision.
 4. **Agents never block.** `request_action` returns a decision id at once.
 5. **Owner rights** come only from the `OWNER_TELEGRAM_ID` and `OWNER_DISCORD_ID`
    secrets. `config/people.yaml` grants read-and-ask access only.
@@ -65,6 +66,7 @@ Matt writes British English. Keep messages plain and short.
 | `config/network.yaml` | Phase, `schedules_enabled`, repos in scope, budgets |
 | `config/permissions.yaml` | Action kinds (risk, executor, `auto`), what each agent may request, `approvals_app`, `review_check_required` |
 | `config/models.yaml` | Model tiers; specs name a tier, never a model id |
+| `config/review.yaml` | How Mira reviews: areas, limits, tone, risk bands, path rules (decisions 35, 36) |
 | `config/schedules.yaml` | Scheduled deployments (cron, per-run budget, prompt) |
 | `config/people.yaml` | People, roles, maintained repos, GitHub logins |
 | `config/people.ids.yaml` | Discord and Telegram ids by name; git-ignored, loaded into the `PEOPLE_IDS` secret |
@@ -72,7 +74,7 @@ Matt writes British English. Keep messages plain and short.
 | `context/accord.md` | Shared read-only context, written to the shared memory store |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
 | `scripts/deploy.ts` | Creates or updates agents, vaults, memory stores and deployments; writes `deployed.json` |
-| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools, `executors.ts` approved actions, `agents.ts` sessions and cards, `sessions.ts` event processing |
+| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools, `executors.ts` approved actions, `review.ts` PR facts, risk and merge checks, `agents.ts` sessions and cards, `sessions.ts` event processing |
 | `gateway/test/` | vitest suite with an in-memory D1 and fakes for every external API |
 
 ## Commands
@@ -90,7 +92,8 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
 ```
 
 - **Changed an agent spec, `_protocol.md`, models or schedules?** Run `deploy:agents`.
-- **Changed gateway code or `permissions.yaml`?** Run `gateway:deploy`. Do both when in doubt.
+- **Changed gateway code, `permissions.yaml` or `review.yaml`?** Run `gateway:deploy`. Do both when in doubt.
+- **Added a migration?** Run `cd gateway && npm run migrate` before `gateway:deploy`.
 - **Changed someone's Discord or Telegram id?** Edit `config/people.ids.yaml`, then run
   `people:ids`. Never put ids in `people.yaml`; `npm test` rejects them.
 - **Added a repo?** `repo:add` edits `network.yaml`; after the PR merges, run `gateway:deploy`
@@ -136,11 +139,14 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
     (`managed.ts`);
   - `agent_with_overrides` on scheduled deployments (`deploy.ts`);
   - events-list pagination (`managed.ts`);
-  - the Vimeo texttrack `link` field (`vimeo.ts`).
+  - the Vimeo texttrack `link` field (`vimeo.ts`);
+  - the PR GraphQL query, including `latestOpinionatedReviews`, and the fallback when
+    GitHub refuses a review's inline comments (`github.ts`, `executors.ts`).
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
 - **Decision 10** (open): long-term funding for the API credits.
 - **Ada's self-improvement loop** (rejection notes → spec-change PRs tested against
-  past decisions) waits for about two weeks of real decisions.
+  past decisions) waits for about two weeks of real decisions. The `reviews` and
+  `review_findings` tables (decision 35) hold Mira's side of that evidence.
 - **D1 location.** The database is placed in Western Europe by location hint only.
   An EU jurisdiction would need a new database.

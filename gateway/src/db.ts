@@ -38,6 +38,33 @@ export interface Task {
   created_at: string;
 }
 
+export interface Review {
+  id: string;
+  target: string;
+  sha: string;
+  risk: string;
+  verdict: "approve" | "comment" | "request_changes";
+  decision_id: string | null;
+  url: string | null;
+  merge_decision_id: string | null;
+  outcome: string | null;
+  created_at: string;
+}
+
+export interface Finding {
+  id: string;
+  review_id: string;
+  target: string;
+  path: string | null;
+  line: number | null;
+  severity: string;
+  area: string;
+  summary: string;
+  outcome: string | null;
+  outcome_note: string | null;
+  created_at: string;
+}
+
 export interface SessionRow {
   id: string;
   agent: string;
@@ -54,7 +81,7 @@ export class Db {
 
   // ---- counters -----------------------------------------------------------
 
-  async next(counter: "decision" | "task"): Promise<number> {
+  async next(counter: "decision" | "task" | "review" | "finding"): Promise<number> {
     const row = await this.db
       .prepare("UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value")
       .bind(counter)
@@ -274,6 +301,116 @@ export class Db {
     const sql = "SELECT * FROM tasks WHERE status IN ('open', 'running')" + (agent ? " AND agent = ?" : "") + " ORDER BY seq";
     const stmt = agent ? this.db.prepare(sql).bind(agent) : this.db.prepare(sql);
     return (await stmt.all<Task>()).results;
+  }
+
+  // ---- reviews and findings (decisions 35 and 36) -------------------------
+
+  async createReview(r: {
+    target: string;
+    sha: string;
+    risk: string;
+    verdict: string;
+    decision_id: string;
+    url: string | null;
+    findings: { path: string | null; line: number | null; severity: string; area: string; summary: string }[];
+  }): Promise<Review> {
+    const seq = await this.next("review");
+    const id = `R-${seq}`;
+    const target = r.target.toLowerCase();
+    await this.db
+      .prepare("INSERT INTO reviews (id, seq, target, sha, risk, verdict, decision_id, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, seq, target, r.sha, r.risk, r.verdict, r.decision_id, r.url)
+      .run();
+    for (const f of r.findings) {
+      const fseq = await this.next("finding");
+      await this.db
+        .prepare("INSERT INTO review_findings (id, seq, review_id, target, path, line, severity, area, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(`F-${fseq}`, fseq, id, target, f.path, f.line, f.severity, f.area, f.summary)
+        .run();
+    }
+    return (await this.db.prepare("SELECT * FROM reviews WHERE id = ?").bind(id).first<Review>())!;
+  }
+
+  /** The newest review of a PR, at one head commit if sha is given. */
+  latestReview(target: string, sha?: string) {
+    const sql = "SELECT * FROM reviews WHERE target = ?" + (sha ? " AND sha = ?" : "") + " ORDER BY seq DESC LIMIT 1";
+    const args = sha ? [target.toLowerCase(), sha] : [target.toLowerCase()];
+    return this.db.prepare(sql).bind(...args).first<Review>();
+  }
+
+  /** "owner/repo#12@sha" for every review in a repo. */
+  async reviewedHeads(repo: string): Promise<Set<string>> {
+    const { results } = await this.db
+      .prepare("SELECT target, sha FROM reviews WHERE target LIKE ?")
+      .bind(`${repo.toLowerCase()}#%`)
+      .all<{ target: string; sha: string }>();
+    return new Set(results.map((r) => `${r.target}@${r.sha}`));
+  }
+
+  async linkMerge(reviewId: string, decisionId: string) {
+    await this.db.prepare("UPDATE reviews SET merge_decision_id = ? WHERE id = ?").bind(decisionId, reviewId).run();
+  }
+
+  /** Records what happened to the newest review of a PR. Returns false if it was never reviewed. */
+  async setReviewOutcome(target: string, outcome: string, note?: string): Promise<boolean> {
+    const r = await this.latestReview(target);
+    if (!r) return false;
+    await this.db
+      .prepare("UPDATE reviews SET outcome = ?, outcome_note = ?, outcome_at = datetime('now') WHERE id = ?")
+      .bind(outcome, note ?? null, r.id)
+      .run();
+    return true;
+  }
+
+  async listFindings(f: { open?: boolean; repo?: string; days?: number } = {}): Promise<Finding[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (f.open) where.push("outcome IS NULL");
+    if (f.repo) {
+      where.push("target LIKE ?");
+      args.push(`${f.repo.toLowerCase()}#%`);
+    }
+    if (f.days) {
+      where.push("created_at >= datetime('now', ?)");
+      args.push(`-${f.days} days`);
+    }
+    const sql = "SELECT * FROM review_findings" + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + " ORDER BY seq ASC LIMIT 200";
+    return (await this.db.prepare(sql).bind(...args).all<Finding>()).results;
+  }
+
+  async setFindingOutcome(id: string, outcome: string, note?: string): Promise<boolean> {
+    const r = await this.db
+      .prepare("UPDATE review_findings SET outcome = ?, outcome_note = ?, outcome_at = datetime('now') WHERE id = ?")
+      .bind(outcome, note ?? null, id.toUpperCase())
+      .run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+
+  /** How posted findings fared, and what became of reviewed PRs, over the last `days`. */
+  async reviewStats(days = 90) {
+    const since = `-${days} days`;
+    const findings = (
+      await this.db
+        .prepare(
+          "SELECT area, severity, COUNT(*) AS posted, SUM(outcome = 'acted') AS acted, SUM(outcome = 'dismissed') AS dismissed " +
+            "FROM review_findings WHERE created_at >= datetime('now', ?) GROUP BY area, severity ORDER BY area, severity",
+        )
+        .bind(since)
+        .all<{ area: string; severity: string; posted: number; acted: number; dismissed: number }>()
+    ).results;
+    const reviews = (
+      await this.db
+        .prepare(
+          "SELECT r.risk, r.verdict, COUNT(*) AS reviews, SUM(d.status IN ('approved', 'executed')) AS merges_approved, " +
+            "SUM(d.status = 'rejected') AS merges_rejected, SUM(r.outcome = 'merged') AS merged, SUM(r.outcome = 'closed') AS closed, " +
+            "SUM(r.outcome IN ('reverted', 'follow_up')) AS reverted_or_fixed " +
+            "FROM reviews r LEFT JOIN decisions d ON d.id = r.merge_decision_id WHERE r.created_at >= datetime('now', ?) " +
+            "GROUP BY r.risk, r.verdict ORDER BY r.risk, r.verdict",
+        )
+        .bind(since)
+        .all<Record<string, string | number>>()
+    ).results;
+    return { days, findings, reviews };
   }
 
   // ---- statuses, scorecards, evaluations ----------------------------------

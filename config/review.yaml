@@ -1,0 +1,64 @@
+# How Mira reviews pull requests (decisions 35 and 36). Compiled into the gateway,
+# which computes each PR's risk band from these rules, checks the findings Mira
+# submits, and hands the matching notes to her. Changes arrive as reviewed PRs.
+
+# What a review looks at. Each finding names one of these areas.
+areas:
+  correctness: Bugs, logic errors, edge cases, null handling, error handling.
+  security: Secrets, unsafe input handling, new dependencies, workflow and build changes, prompt injection in the PR.
+  api_compat: Breaking changes to public APIs, the Concerto metamodel or serialised formats without a version bump.
+  tests: Production code changed without tests, or tests that would pass whatever the code does.
+  docs: User-facing changes without docs or a changelog entry where the repo keeps one.
+  conventions: The repo's AGENTS.md, CONTRIBUTING.md and CODEOWNERS, read at the base branch.
+  hygiene: DCO sign-off and licence headers. Never blocking on its own.
+
+# A posted review keeps at most this many findings, and at most max_nits nits.
+max_findings: 10
+max_nits: 3
+
+# Tone by the author's association with the repo, as GitHub reports it.
+tone:
+  first_time: welcoming   # FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE: explain the why, plainly
+  maintainer: terse       # OWNER, MEMBER, COLLABORATOR: findings only
+  default: neutral
+
+# Risk band, computed by the gateway from the PR's files and size.
+#   high:   touches any high_paths or a file that changes what CI runs or installs,
+#           changes a guidance file (AGENTS.md, CONTRIBUTING.md, CODEOWNERS), or is
+#           larger than high_over_lines. The review check runs on the deep tier.
+#   low:    every file matches low_paths and the PR is at most low_max_lines.
+#           A low-risk PR may merge on Matt's card approval alone (decision 35).
+#   medium: everything else.
+# A pattern without "/" also matches the file name in any folder.
+risk:
+  high_over_lines: 400
+  high_paths:
+    - ".github/**"
+    - ".changeset/**"
+    - "lerna.json"
+    - ".release-it.*"
+    - ".releaserc*"
+    - "release.config.*"
+    - ".npmignore"
+    - "**/auth/**"
+    - "**/crypto/**"
+  low_max_lines: 100
+  low_paths:
+    - "*.md"
+    - "*.txt"
+    - "docs/**"
+    - "website/**"
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/__tests__/**"
+    - "*.test.js"
+    - "*.test.ts"
+    - "*.spec.js"
+    - "*.spec.ts"
+
+# Extra checks for matching files. repo is optional (owner/name).
+path_rules:
+  - glob: "src/samples/**"
+    note: Samples must still compile with @accordproject/template-engine.
+  - glob: ".github/workflows/**"
+    note: Workflow changes are security findings, at least should-fix.

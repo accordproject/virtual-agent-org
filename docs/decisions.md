@@ -111,7 +111,7 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 **20. Whether Mira's CI approvals need the owner** · RESOLVED: no, with gateway checks
 
 - After reviewing a fork PR, Mira approves its waiting CI runs (`github.approve_ci`,
-  the only `auto` action kind). The gateway sends the request to the owner as high
+  the first `auto` action kind; decision 36 added `github.review`). The gateway sends the request to the owner as high
   risk if the PR touches workflows, build scripts, dependency or lock files,
   Dockerfiles or shell scripts, and refuses if commits arrived after the review.
 - This assumes no in-scope repo uses `pull_request_target` or runners that aren't
@@ -130,6 +130,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   confirmed ones, and alone may propose the merge (`review_check_required`). PRs over
   200 changed lines are checked on the deep tier. Repeated lessons become AGENTS.md
   update PRs (`github.docs_pr`, approval-gated).
+- Decision 35 replaced the 200-line rule with the gateway's risk band, and decision 36
+  moved posting to the gateway.
 
 **23. Which repos the agents' tokens cover** · RESOLVED
 
@@ -199,3 +201,48 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   (decision 15).
 - Plain messages without a command would need a permanent connection to Discord,
   and Telegram already covers them.
+
+**35. What a merge needs** · RESOLVED: checks in the gateway; low risk needs no second review
+
+- The gateway checks every `github.merge` itself, when it is proposed and again just
+  before it runs. The PR must be open and not a draft. Its head must be the commit the
+  review check reviewed, and a review with nothing blocking must have been posted at
+  that head. CI must be green, with no runs waiting for approval, and GitHub must report
+  the PR mergeable. Nobody may have requested changes, and no threads may be unresolved.
+  Failed checks are returned to the agent rather than queued; the card lists the checks.
+- The gateway rates each PR low, medium or high risk from its files and size
+  (`config/review.yaml`). A medium- or high-risk PR also needs an approving review
+  from a maintainer other than its author. For a low-risk PR (only docs or tests, and
+  small), the owner's approval of the card is enough.
+- High-risk PRs get the review check on the deep tier and a high-risk card. This
+  replaces the 200-line rule in decision 22.
+- On repos whose branch protection requires an approving review, GitHub still refuses
+  a low-risk merge without one; the card says so.
+- Typed findings and their outcomes live in the gateway's database, so the share of
+  findings maintainers act on is computed, not estimated.
+
+**36. Who posts PR reviews** · RESOLVED: the gateway, as a second `auto` kind
+
+- The review check submits its confirmed findings with `submit_review`, and the gateway
+  posts them as one review that only comments: it never approves or requests changes.
+  This is the `github.review` action kind, which runs without a card, like
+  `github.approve_ci`.
+- Before posting, the gateway checks each finding against the PR's files and the limits
+  in `config/review.yaml`. It refuses text that @mentions anyone but the PR's author,
+  which could ping people or trigger a bot, and text about how the review was made.
+- Agents no longer post reviews through their own GitHub app.
+
+**37. Jev for PR triage** · RESOLVED: not now; watch costs first
+
+- A semantic classifier (TypeSafe's Jev) could answer the triage questions (a PR's
+  kind, risk and spam) that run on Claude's fast tier today. It has an HTTP API and a
+  TypeScript SDK, so the gateway could call it.
+- One blind run on 50 historical concerto PRs is the only evidence, and it is thin. Jev
+  matched 11 of 15 labels that a Claude model drew from maintainers' comments. Its
+  confidence did not track accuracy, and nobody compared its cost with Claude's.
+- Neither Jev nor Claude resists prompt injection, so the same rule applies to both:
+  a model's output may raise risk or route a PR to the owner, but never loosen a
+  check the gateway computes (decision 35).
+- Triage stays on Claude's fast tier. The owner is watching its cost over the next few
+  weeks; if that is high, a head-to-head trial of Jev and the fast tier on about 100
+  labelled PRs, comparing accuracy and cost per PR, is the next step.

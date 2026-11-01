@@ -73,6 +73,15 @@ export const PEOPLE_IDS_PATH = "config/people.ids.yaml";
 export interface DiscordYaml {
   channels?: { announcements?: string | number; agent_ops?: string | number };
 }
+/** config/review.yaml: how Mira reviews (decisions 35 and 36). */
+export interface ReviewYaml {
+  areas: Record<string, string>;
+  max_findings: number;
+  max_nits: number;
+  tone: { first_time: string; maintainer: string; default: string };
+  risk: { high_over_lines: number; high_paths: string[]; low_max_lines: number; low_paths: string[] };
+  path_rules?: { glob: string; note: string; repo?: string }[];
+}
 export interface McpYaml {
   servers: Record<string, { url: string; token_env: string }>;
   modes: Record<string, "always_allow" | "always_ask" | "auto">;
@@ -88,6 +97,7 @@ export function loadAll() {
     people: readYaml<PeopleYaml>("config/people.yaml"),
     peopleIds: existsSync(join(ROOT, PEOPLE_IDS_PATH)) ? (readYaml<PeopleIdsYaml>(PEOPLE_IDS_PATH) ?? {}) : {},
     discord: readYaml<DiscordYaml>("config/discord.yaml") ?? {},
+    review: readYaml<ReviewYaml>("config/review.yaml"),
     specs: loadSpecs(),
   };
 }
