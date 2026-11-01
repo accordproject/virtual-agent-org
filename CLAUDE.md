@@ -142,8 +142,6 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
   - the Vimeo texttrack `link` field (`vimeo.ts`);
   - the PR GraphQL query, including `latestOpinionatedReviews`, and the fallback when
     GitHub refuses a review's inline comments (`github.ts`, `executors.ts`).
-  - where memory stores are mounted in the sandbox; `_protocol.md` tells agents to
-    `glob` for their notes rather than naming a path (decision 40).
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
 - **Decision 10** (open): long-term funding for the API credits.

@@ -267,6 +267,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   only the agent's own sandbox and memory stores.
 - Ada gets these four and nothing else. The config check still refuses her any other
   built-in tool and any MCP server, so she still has no side effects.
+- Stores are mounted at `/mnt/memory/<store name>/`, confirmed by a test session. Each
+  agent's prompt gives the full paths to its notes and to the shared context.
 
 **41. How Mira labels PRs** · RESOLVED: through a gateway tool, one label at a time
 
