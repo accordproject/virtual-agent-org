@@ -7,7 +7,7 @@ export interface Env {
   OWNER_TELEGRAM_ID: string; // numeric user id; also the chat id for direct messages
   TSC_TELEGRAM_IDS?: string; // comma-separated numeric ids (Phase 3+)
 
-  // Claude Managed Agents (Console org linked to the Max plan)
+  // Claude Managed Agents (a Console organisation API key)
   ANTHROPIC_API_KEY: string;
   ANTHROPIC_WEBHOOK_SECRET: string; // whsec_...
 

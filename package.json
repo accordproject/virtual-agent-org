@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "description": "A virtual organisation of Claude agents that helps run the Accord Project, steered from Telegram.",
+  "license": "Apache-2.0",
   "scripts": {
     "check": "tsx scripts/compile.ts --check",
     "compile": "tsx scripts/compile.ts",

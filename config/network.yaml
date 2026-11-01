@@ -30,7 +30,7 @@ telegram:
       can: [ask, status, queue, comment]
 
 budgets:
-  # Monthly API credits from the linked Max 20x plan (USD). Credits do not roll over.
+  # Monthly API credit budget (USD).
   monthly_credit_usd: 200
   # Alert in Ada's check-in when forecast spend exceeds this share of credits.
   forecast_alert_ratio: 0.8

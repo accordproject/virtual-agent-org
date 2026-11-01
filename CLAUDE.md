@@ -1,7 +1,8 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in this repo. Read `PLAN.md` for the design and the
-decision history, and `README.md` for the layout.
+Guidance for Claude Code working in this repo. Read `ARCHITECTURE.md` for the design,
+`docs/decisions.md` for the decision history, and `README.md` for the layout. This repo
+is public: write as if anyone can read it.
 
 ## What this is
 
@@ -50,7 +51,8 @@ When you need a decision from Matt, don't write a narrative with a question in i
   the decision and say what changed.
 - Don't stop to ask unless you genuinely can't go on: do what you can on your
   recommendations, then list the decisions at the end.
-- Record settled decisions in `PLAN.md` (Decisions) and in the plan document.
+- Record settled decisions in `docs/decisions.md`, in neutral words with no personal
+  details, and in Matt's plan document.
 
 Matt writes British English. Keep messages plain and short.
 
@@ -58,6 +60,7 @@ Matt writes British English. Keep messages plain and short.
 
 | Path | What it is |
 | --- | --- |
+| `ARCHITECTURE.md`, `docs/` | Design, decision log (`decisions.md`) and setup guide for forks (`setup.md`) |
 | `agents/*.md` | One job spec per agent; `_protocol.md` is included in every agent's system prompt |
 | `config/network.yaml` | Phase, `schedules_enabled`, repos in scope, budgets |
 | `config/permissions.yaml` | Action kinds (risk, executor, `auto`), what each agent may request, `approvals_app`, `review_check_required` |
@@ -116,7 +119,8 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
   the repo. `*.pem` and `config/people.ids.yaml` are git-ignored. Write as if the repo is public.
 - **Agent specs.** Specs are instructions to a model: plain, specific, numbered steps,
   with the tool and payload shape named.
-- **Commits** carry a DCO sign-off (`git commit -s`) whose name and email match the author.
+- **Commits** use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:` …) and carry a
+  DCO sign-off (`git commit -s`) whose name and email match the author. PR titles use the same form.
 - **Spec PRs.** Spec and permission changes go to Matt as PRs; agents can only
   propose them.
 
@@ -135,7 +139,7 @@ cd gateway && npm run migrate   # apply D1 migrations (remote)
   - the Vimeo texttrack `link` field (`vimeo.ts`).
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
-- **Decision 10** (WHENEVER): how to pay after the Max 20x plan ends.
+- **Decision 10** (open): long-term funding for the API credits.
 - **Ada's self-improvement loop** (rejection notes → spec-change PRs tested against
   past decisions) waits for about two weeks of real decisions.
 - **D1 location.** The database is placed in Western Europe by location hint only.

@@ -41,7 +41,7 @@ const state: State = existsSync(STATE_PATH)
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 if (!apiKey && !DRY) {
-  console.error("Set ANTHROPIC_API_KEY (a key from the Console org linked to the Max plan).");
+  console.error("Set ANTHROPIC_API_KEY (a Claude Console API key with Managed Agents access).");
   process.exit(1);
 }
 const client = new ManagedClient(apiKey ?? "dry-run");
