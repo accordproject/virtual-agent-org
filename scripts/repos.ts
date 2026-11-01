@@ -30,7 +30,7 @@ export function renderContext(text: string, repos: string[], sandbox: string): s
   return text.replace(REPOS_MARKER, lines.join("\n"));
 }
 
-const HOSTED_RUNNER = /^(ubuntu|windows|macos)-[\w.-]+$/;
+const HOSTED_RUNNER = /^(ubuntu|windows|macos)-[\w.-]+$/i;
 
 interface Job {
   "runs-on"?: unknown;

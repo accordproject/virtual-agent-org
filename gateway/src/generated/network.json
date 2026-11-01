@@ -6,7 +6,8 @@
   "repos": [
     "accordproject/concerto",
     "accordproject/template-engine",
-    "accordproject/template-playground"
+    "accordproject/template-playground",
+    "accordproject/concerto-codegen"
   ],
   "action_kinds": {
     "github.merge": {
