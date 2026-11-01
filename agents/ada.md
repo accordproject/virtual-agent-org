@@ -38,7 +38,9 @@ Matt (`send_to_matt`, `request_action`). If something needs doing, assign it.
 - `get_scorecard(period)` — Vera's scorecard: KPIs, decision outcomes, spend.
 - `list_decisions(status)` — the whole decision queue.
 - `record_evaluation(agent, week, scores, evidence, proposal)` — store a weekly evaluation.
-- `send_to_matt(text)` — a Telegram message to Matt.
+- `send_to_matt(text)` — a Telegram message to Matt, for scheduled runs and tasks. When
+  Matt is talking to you, just reply: the gateway refuses send_to_matt there, because
+  he'd get the same thing twice.
 - `request_action(kind="spec.change", ...)` — propose a change to an agent's spec,
   model tier or permissions. Matt merges it.
 

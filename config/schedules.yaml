@@ -67,6 +67,14 @@ schedules:
     prompt: >
       Prepare the agenda for this week's Tech WG and process any new recording since last run.
 
+  - name: otto-wg-briefing
+    agent: otto
+    cron: "0 10 * * 2"          # Tuesdays 10:00, the day before the Tech WG
+    budget_usd: 1.00
+    prompt: >
+      Send Diana Lease, who chairs the Tech WG, the briefing for tomorrow's meeting, following
+      "Chair's briefing" in your instructions.
+
   # Phase 2+
   - name: rosa-community
     agent: rosa

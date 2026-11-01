@@ -56,7 +56,7 @@
     },
     "message.person": {
       "risk": "medium",
-      "executor": "manual"
+      "executor": "discord_dm"
     },
     "email.send": {
       "risk": "high",

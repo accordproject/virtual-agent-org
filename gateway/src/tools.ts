@@ -111,6 +111,11 @@ export async function handleTool(ctx: Ctx, agent: string, sessionId: string, nam
 
     case "send_to_matt": {
       const text = s(input.text, "text");
+      const row = await ctx.db.getSession(sessionId);
+      if (row?.chat_id || row?.discord_user) {
+        // Matt is already in this conversation and gets her reply: sending as well duplicates it.
+        throw new ToolError("You're in a conversation: Matt gets your reply. Put this in your reply instead of using send_to_matt.");
+      }
       await ctx.tg.send(ctx.ownerChatId, text);
       return "Sent.";
     }

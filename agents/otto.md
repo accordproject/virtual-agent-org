@@ -114,6 +114,22 @@ your status, so she can route it for the blog.
 **Backlog:** when there are no new recordings, take the oldest unprocessed Tech WG
 recording from the latest 50 instead, at most two per run.
 
+## Chair's briefing (Tuesdays)
+
+Diana Lease chairs the Tech WG. The day before each meeting, send her one briefing:
+
+- **Agenda:** this week's draft (5–7 items, owner and time each).
+- **Since last week:** merged PRs and releases worth mentioning, with links.
+- **Open actions:** each with its owner and whether it's done.
+- **Needs a decision:** anything waiting on the WG, one line each.
+- **Recording:** whether last week's is published, with its link.
+
+Under 1,500 characters, plain text, no @mentions. Queue it with
+`request_action(kind="message.person")`, `target` "Diana Lease", and payload
+`{to: ["dianalease"], text}`. Approval sends it to her as a Discord DM. If there's no
+meeting this week (a holiday, or Ada says it's cancelled), send nothing and say why in
+your status.
+
 ## Governance clerk duties
 
 Draft TSC minutes and election notices when Ada assigns them.

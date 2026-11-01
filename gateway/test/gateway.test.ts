@@ -964,3 +964,50 @@ describe("AGENTS.md lessons (github.docs_pr)", () => {
     expect(calls.at(-1)![2].body).toContain("needs a maintainer's review");
   });
 });
+
+describe("no duplicate replies in a conversation", () => {
+  it("refuses send_to_matt when Matt is already in the conversation", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_chat", agent: "ada", origin: "telegram", chat_id: 42 });
+    await expect(handleTool(ctx, "ada", "sesn_chat", "send_to_matt", { text: "Check-in" })).rejects.toThrow(/Matt gets your reply/);
+    expect(fakes.sent).toHaveLength(0);
+  });
+
+  it("still sends from scheduled runs", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_dep", agent: "ada", origin: "deployment" });
+    expect(await handleTool(ctx, "ada", "sesn_dep", "send_to_matt", { text: "Check-in" })).toBe("Sent.");
+    expect(fakes.sent).toHaveLength(1);
+  });
+});
+
+describe("message.person as a Discord DM", () => {
+  const run = async (to: unknown, network?: any) => {
+    const { executeDecision } = await import("../src/executors");
+    const base = makeTestCtx().ctx.network;
+    const { ctx, fakes } = makeTestCtx({
+      dryRun: false,
+      network: { ...base, action_kinds: { ...base.action_kinds, "message.person": { risk: "medium", executor: "discord_dm" } }, ...network },
+    });
+    const d = await ctx.db.createDecision({ agent: "otto", kind: "message.person", target: "Jane Doe", summary: "Briefing", rationale: "r", risk: "medium", payload: { to, text: "Agenda for tomorrow" } });
+    return { r: await executeDecision(ctx, d), fakes };
+  };
+
+  it("DMs people listed with a Discord id", async () => {
+    const { r, fakes } = await run(["janedoe"]);
+    expect(r).toEqual({ ok: true, result: "Sent a Discord DM to Jane Doe" });
+    expect(fakes.dms).toEqual([{ user: "123456789012345678", content: "Agenda for tomorrow" }]);
+  });
+
+  it("falls back to a manual send when someone can't be DMed", async () => {
+    const { r, fakes } = await run(["samlee"]);
+    expect(r.manual).toBe(true);
+    expect(r.result).toMatch(/Can't DM samlee/);
+    expect(fakes.dms).toHaveLength(0);
+  });
+
+  it("falls back to manual with no recipient", async () => {
+    const { r } = await run(undefined);
+    expect(r.manual).toBe(true);
+  });
+});

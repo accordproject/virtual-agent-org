@@ -38,7 +38,7 @@ export function validate(cfg = loadAll()): string[] {
   if (!["discord", "telegram", "both"].includes(app)) errs.push(`approvals_app must be discord, telegram or both, not "${app}"`);
 
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
-    if (!["github", "discord", "discord_ops", "vimeo", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
+    if (!["github", "discord", "discord_ops", "discord_dm", "vimeo", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
     // Only kinds the gateway has its own safety checks for may skip the owner.
     if (v.auto && k !== "github.approve_ci") errs.push(`action kind ${k}: auto is only allowed for github.approve_ci`);
   }

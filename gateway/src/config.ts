@@ -5,7 +5,7 @@ import deployed from "./generated/deployed.json";
 
 export interface ActionKind {
   risk: "low" | "medium" | "high";
-  executor: "github" | "discord" | "discord_ops" | "vimeo" | "manual";
+  executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual";
   /** Executed at once, without the owner, after the gateway's own safety checks. Only github.approve_ci. */
   auto?: boolean;
 }

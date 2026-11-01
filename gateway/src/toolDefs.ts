@@ -142,7 +142,9 @@ export const ADA_TOOLS: CustomToolDef[] = [
   {
     type: "custom",
     name: "send_to_matt",
-    description: "Send a Telegram message to Matt. Use for check-ins and anything he must read.",
+    // Only for scheduled runs and tasks; in a conversation the reply reaches Matt.
+    description:
+      "Send a Telegram message to Matt from a scheduled run or task (check-ins, anything he must read). Not in a conversation with him: there, your reply reaches him.",
     input_schema: {
       type: "object",
       properties: { text: str("Message text, plain text, under 3500 characters") },

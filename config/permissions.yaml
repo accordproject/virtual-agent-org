@@ -39,7 +39,7 @@ action_kinds:
   linkedin.post:       { risk: medium, executor: manual }   # decision 8: drafts go to Telegram, owner posts
   discord.announce:    { risk: medium, executor: discord }  # the bot posts to channels.announcements (config/discord.yaml)
   discord.ops:         { risk: low,    executor: discord_ops }  # the bot posts to channels.agent_ops; may ping people in people.yaml
-  message.person:      { risk: medium, executor: manual }   # any message to a named individual
+  message.person:      { risk: medium, executor: discord_dm }  # DM to people in people.yaml (payload.to: GitHub logins or names); manual if they have no Discord id
   email.send:          { risk: high,   executor: manual }
   spec.change:         { risk: high,   executor: manual }   # owner merges the PR in virtual-agent-org
   other:               { risk: high,   executor: manual }

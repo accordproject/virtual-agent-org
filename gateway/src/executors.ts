@@ -65,6 +65,21 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
     return { ok: true, result: `Posted to #agent-ops${who}` };
   }
 
+  if (kind.executor === "discord_dm") {
+    // A message to named people from people.yaml, sent as a Discord DM from the bot.
+    const payload = safeJson(d.payload);
+    const text = payloadText(payload);
+    if (!text) return { ok: false, result: "No message text in payload" };
+    const m = resolveMentions(ctx, payload.to);
+    if (m.missing.length || !m.ids.length || !ctx.dc) {
+      const why = !m.ids.length && !m.missing.length ? "No recipient in payload.to" : !ctx.dc ? "The Discord bot isn't set up" : `Can't DM ${m.missing.join(", ")}: not in people.yaml with a Discord id`;
+      return { ok: true, manual: true, result: `${why}. Copy the content above, send it, then tap Mark done.` };
+    }
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would DM ${m.names.join(", ")}` };
+    for (const id of m.ids) await ctx.dc.dm(id, { content: text });
+    return { ok: true, result: `Sent a Discord DM to ${m.names.join(", ")}` };
+  }
+
   if (kind.executor === "vimeo") return publishVimeo(ctx, safeJson(d.payload));
 
   const ref = parseTarget(d.target);

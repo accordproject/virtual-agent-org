@@ -79,6 +79,10 @@
     "otto-tech-wg": {
       "id": "depl_01A9j2gDPQrVXLjVPBDEgetg",
       "agent": "otto"
+    },
+    "otto-wg-briefing": {
+      "id": "depl_015q3zXTctvxizav9tnoctyN",
+      "agent": "otto"
     }
   },
   "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
