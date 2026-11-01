@@ -1,26 +1,47 @@
-// Custom tools the gateway executes on behalf of agents.
-// Used by scripts/deploy.ts to build each agent's tool list, and by the gateway
-// to validate input. Permission policies do not apply to custom tools: the gateway
-// is the enforcement point.
+// Custom tools the gateway executes on behalf of agents: one entry per tool, with
+// the agent that owns it. scripts/deploy.ts builds each agent's tool list from it;
+// the gateway checks input against the same schema and dispatches on the same names
+// (tools.ts must give every tool here a handler, and can't handle one that isn't).
+// Permission policies do not apply to custom tools: the gateway is the enforcement point.
+
+import type { Schema } from "./schema";
 
 export interface CustomToolDef {
   type: "custom";
   name: string;
   description: string;
-  input_schema: {
-    type: "object";
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
+  input_schema: Schema & { type: "object"; properties: Record<string, Schema> };
 }
 
-const str = (description: string) => ({ type: "string", description });
-const strList = (description: string) => ({ type: "array", items: { type: "string" }, description });
+export interface ToolSpec {
+  /** The only agent that may call it, or null for every agent. */
+  owner: string | null;
+  description: string;
+  input_schema: CustomToolDef["input_schema"];
+}
 
-export const COMMON_TOOLS: CustomToolDef[] = [
-  {
-    type: "custom",
-    name: "request_action",
+const str = (description: string): Schema => ({ type: "string", description });
+const strList = (description: string): Schema => ({ type: "array", items: { type: "string" }, description });
+
+const finding = (summary: string): Schema => ({
+  type: "object",
+  properties: {
+    path: str("File the finding is in, as the PR changes it; omit for the whole PR"),
+    line: { type: "integer", description: "Line in the PR's version of the file; omit if not tied to one line" },
+    severity: { type: "string", enum: ["blocking", "should-fix", "nit"] },
+    area: str("One of the review areas in config/review.yaml: correctness, security, api_compat, tests, docs, conventions, hygiene"),
+    summary: str(summary),
+  },
+  required: ["severity", "area", "summary"],
+});
+const draft = finding("What is wrong and why it matters, in one to three sentences");
+const draftFinding: Schema = { ...draft, properties: { ...draft.properties, confidence: { type: "string", enum: ["high", "medium"] } } };
+const prTarget = str("The PR, e.g. accordproject/concerto#123");
+
+export const TOOLS = {
+  // ---- every agent ----
+  request_action: {
+    owner: null,
     description:
       "Queue a critical action (merge, close, release, publish, post, email, message a person, delete, spend, spec change) for Matt to approve. Returns a decision id immediately; do not wait for the outcome, move on to other work.",
     input_schema: {
@@ -40,9 +61,8 @@ export const COMMON_TOOLS: CustomToolDef[] = [
       required: ["kind", "target", "summary", "rationale", "risk"],
     },
   },
-  {
-    type: "custom",
-    name: "report_status",
+  report_status: {
+    owner: null,
     description: "Report status once at the end of every session. Each item is one short line.",
     input_schema: {
       type: "object",
@@ -55,9 +75,8 @@ export const COMMON_TOOLS: CustomToolDef[] = [
       required: ["done", "doing", "blocked"],
     },
   },
-  {
-    type: "custom",
-    name: "get_decisions",
+  get_decisions: {
+    owner: null,
     description: "Your own queued decisions and their outcomes, including Matt's notes on rejections.",
     input_schema: {
       type: "object",
@@ -66,12 +85,10 @@ export const COMMON_TOOLS: CustomToolDef[] = [
       },
     },
   },
-];
 
-export const ADA_TOOLS: CustomToolDef[] = [
-  {
-    type: "custom",
-    name: "assign_task",
+  // ---- ada ----
+  assign_task: {
+    owner: "ada",
     description:
       "Start work for one agent with a structured brief. effort sets the session budget and how many tool calls the agent should use: " +
       "small (a lookup or one change, about 10 tool calls, $0.30), medium (a few items or a comparison, about 30 calls, $1), " +
@@ -93,30 +110,26 @@ export const ADA_TOOLS: CustomToolDef[] = [
       required: ["agent", "title", "objective", "output", "done_when", "effort"],
     },
   },
-  {
-    type: "custom",
-    name: "get_status",
+  get_status: {
+    owner: "ada",
     description: "Latest status reports and open tasks, for one agent or all.",
     input_schema: { type: "object", properties: { agent: str("Agent name; omit for all") } },
   },
-  {
-    type: "custom",
-    name: "get_scorecard",
+  get_scorecard: {
+    owner: "ada",
     description: "Vera's latest scorecard, or the one for a given period.",
     input_schema: { type: "object", properties: { period: str("e.g. 2026-W45; omit for latest") } },
   },
-  {
-    type: "custom",
-    name: "list_decisions",
+  list_decisions: {
+    owner: "ada",
     description: "The whole decision queue.",
     input_schema: {
       type: "object",
       properties: { status: { type: "string", enum: ["open", "decided", "all"] } },
     },
   },
-  {
-    type: "custom",
-    name: "record_evaluation",
+  record_evaluation: {
+    owner: "ada",
     description: "Store a weekly evaluation for one agent.",
     input_schema: {
       type: "object",
@@ -139,9 +152,8 @@ export const ADA_TOOLS: CustomToolDef[] = [
       required: ["agent", "week", "scores", "evidence"],
     },
   },
-  {
-    type: "custom",
-    name: "send_to_matt",
+  send_to_matt: {
+    owner: "ada",
     // Only for scheduled runs and tasks; in a conversation the reply reaches Matt.
     description:
       "Send a Telegram message to Matt from a scheduled run or task (check-ins, anything he must read). Not in a conversation with him: there, your reply reaches him.",
@@ -151,12 +163,10 @@ export const ADA_TOOLS: CustomToolDef[] = [
       required: ["text"],
     },
   },
-];
 
-export const VERA_TOOLS: CustomToolDef[] = [
-  {
-    type: "custom",
-    name: "write_scorecard",
+  // ---- vera ----
+  write_scorecard: {
+    owner: "vera",
     description: "Store a scorecard. JSON must follow evaluation/scorecard.schema.json.",
     input_schema: {
       type: "object",
@@ -167,12 +177,10 @@ export const VERA_TOOLS: CustomToolDef[] = [
       required: ["period", "scorecard"],
     },
   },
-];
 
-export const OTTO_TOOLS: CustomToolDef[] = [
-  {
-    type: "custom",
-    name: "vimeo_recordings",
+  // ---- otto ----
+  vimeo_recordings: {
+    owner: "otto",
     description:
       "Recent videos on the Accord Project Vimeo account, newest first: id, title, current description, date, length, link, who can view it, and whether it looks like a Tech WG recording.",
     input_schema: {
@@ -180,9 +188,8 @@ export const OTTO_TOOLS: CustomToolDef[] = [
       properties: { limit: { type: "integer", minimum: 1, maximum: 50, description: "How many, default 15" } },
     },
   },
-  {
-    type: "custom",
-    name: "vimeo_transcript",
+  vimeo_transcript: {
+    owner: "otto",
     description:
       "A recording's transcript as \"[mm:ss] text\" lines, in pages of about 60,000 characters. Call again with next_offset until it is null.",
     input_schema: {
@@ -194,27 +201,10 @@ export const OTTO_TOOLS: CustomToolDef[] = [
       required: ["video_id"],
     },
   },
-];
 
-const finding = (summary: string) => ({
-  type: "object",
-  properties: {
-    path: str("File the finding is in, as the PR changes it; omit for the whole PR"),
-    line: { type: "integer", description: "Line in the PR's version of the file; omit if not tied to one line" },
-    severity: { type: "string", enum: ["blocking", "should-fix", "nit"] },
-    area: str("One of the review areas in config/review.yaml: correctness, security, api_compat, tests, docs, conventions, hygiene"),
-    summary: str(summary),
-  },
-  required: ["severity", "area", "summary"],
-});
-const draft = finding("What is wrong and why it matters, in one to three sentences");
-const draftFinding = { ...draft, properties: { ...draft.properties, confidence: { type: "string", enum: ["high", "medium"] } } };
-const prTarget = str("The PR, e.g. accordproject/concerto#123");
-
-export const MIRA_TOOLS: CustomToolDef[] = [
-  {
-    type: "custom",
-    name: "label_pr",
+  // ---- mira ----
+  label_pr: {
+    owner: "mira",
     description:
       "Add or remove labels on one PR without touching its other labels. Adding an ai/kind:* label replaces the PR's old kind. " +
       "Only ai/kind:* and labels the repo already has; ai/risk:* and ai/decision:* are the gateway's. Returns the PR's labels.",
@@ -228,25 +218,22 @@ export const MIRA_TOOLS: CustomToolDef[] = [
       required: ["target"],
     },
   },
-  {
-    type: "custom",
-    name: "pr_facts",
+  pr_facts: {
+    owner: "mira",
     description:
       "Facts about one PR, computed by the gateway: head sha, size, files, risk band and why, author and the tone to use, CI state, " +
       "mergeability, approvals, changes requested, unresolved threads, path rules that apply, the last review and the merge checks as they stand.",
     input_schema: { type: "object", properties: { target: prTarget }, required: ["target"] },
   },
-  {
-    type: "custom",
-    name: "pr_queue",
+  pr_queue: {
+    owner: "mira",
     description:
       "A repo's open PRs in review order: first-time contributors first, then oldest, then green CI and small size. " +
       "Each says whether it is a draft and whether it was already reviewed at its current head.",
     input_schema: { type: "object", properties: { repo: str("owner/name, e.g. accordproject/concerto") }, required: ["repo"] },
   },
-  {
-    type: "custom",
-    name: "request_review_check",
+  request_review_check: {
+    owner: "mira",
     description:
       "Hand your draft findings on a PR to a fresh session, which checks each against the code, submits only confirmed ones, " +
       "and alone may propose the merge. Do not post the review or propose the merge yourself. Returns a task id.",
@@ -265,9 +252,8 @@ export const MIRA_TOOLS: CustomToolDef[] = [
       required: ["target", "sha", "findings"],
     },
   },
-  {
-    type: "custom",
-    name: "submit_review",
+  submit_review: {
+    owner: "mira",
     description:
       "Review check only. Submit the confirmed findings; the gateway checks them and the text, then posts one review on the PR " +
       "(a summary plus inline comments) and tells you whether anything is blocking. Public text: write only about the PR.",
@@ -281,9 +267,8 @@ export const MIRA_TOOLS: CustomToolDef[] = [
       required: ["target", "summary", "findings"],
     },
   },
-  {
-    type: "custom",
-    name: "review_findings",
+  review_findings: {
+    owner: "mira",
     description:
       "Posted findings and how they fared: by default those with no outcome yet. Also returns stats by area and severity " +
       "(posted, acted, dismissed) and by risk band (reviews, merge proposals approved or rejected, merged, closed, reverted).",
@@ -296,9 +281,8 @@ export const MIRA_TOOLS: CustomToolDef[] = [
       },
     },
   },
-  {
-    type: "custom",
-    name: "record_finding_outcome",
+  record_finding_outcome: {
+    owner: "mira",
     description: "Record what came of a posted finding: acted (code changed or the author agreed) or dismissed (someone disagreed, or it merged unchanged).",
     input_schema: {
       type: "object",
@@ -310,9 +294,8 @@ export const MIRA_TOOLS: CustomToolDef[] = [
       required: ["id", "outcome"],
     },
   },
-  {
-    type: "custom",
-    name: "record_review_outcome",
+  record_review_outcome: {
+    owner: "mira",
     description:
       "Record what happened to a reviewed PR that the gateway didn't merge itself: merged by a maintainer, closed, reverted, " +
       "or follow_up (a later PR fixed something it broke).",
@@ -326,12 +309,16 @@ export const MIRA_TOOLS: CustomToolDef[] = [
       required: ["target", "outcome"],
     },
   },
-];
+} satisfies Record<string, ToolSpec>;
 
+export type ToolName = keyof typeof TOOLS;
+
+export const isToolName = (name: string): name is ToolName => Object.hasOwn(TOOLS, name);
+
+/** The tools an agent may call, as Managed Agents takes them: the common ones first. */
 export function toolsForAgent(agent: string): CustomToolDef[] {
-  if (agent === "mira") return [...COMMON_TOOLS, ...MIRA_TOOLS];
-  if (agent === "ada") return [...COMMON_TOOLS, ...ADA_TOOLS];
-  if (agent === "vera") return [...COMMON_TOOLS, ...VERA_TOOLS];
-  if (agent === "otto") return [...COMMON_TOOLS, ...OTTO_TOOLS];
-  return [...COMMON_TOOLS];
+  return Object.entries(TOOLS as Record<string, ToolSpec>)
+    .filter(([, t]) => t.owner === null || t.owner === agent)
+    .sort(([, a], [, b]) => Number(a.owner !== null) - Number(b.owner !== null))
+    .map(([name, t]) => ({ type: "custom", name, description: t.description, input_schema: t.input_schema }));
 }

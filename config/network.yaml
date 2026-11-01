@@ -37,6 +37,9 @@ budgets:
   forecast_alert_ratio: 0.8
   # Vera flags any agent whose weekly spend exceeds this multiple of its trailing median.
   anomaly_spend_multiple: 1.5
+  # Messages each member (anyone in people.yaml but the owner) may send the agents per
+  # day, across Telegram and Discord. Over it, they're told to try tomorrow.
+  member_daily_messages: 20
 
 agents:
   # name: phase in which the agent is first deployed

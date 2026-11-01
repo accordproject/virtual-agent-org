@@ -35,6 +35,10 @@ export interface Task {
   due: string | null;
   status: string;
   session_id: string | null;
+  /** review_check only when the gateway started it for one PR at one commit (decision 2A). */
+  kind: "task" | "review_check";
+  review_target: string | null;
+  review_sha: string | null;
   created_at: string;
 }
 
@@ -65,6 +69,12 @@ export interface Finding {
   created_at: string;
 }
 
+/**
+ * Who a session acts for. A member's conversation, and any task assigned from it,
+ * is member:<platform>:<name>; "unknown" marks conversations from before this was kept.
+ */
+export type StartedBy = "owner" | "schedule" | "unknown" | `member:${string}`;
+
 export interface SessionRow {
   id: string;
   agent: string;
@@ -74,6 +84,7 @@ export interface SessionRow {
   task_id: string | null;
   status: string;
   cost_cents: number;
+  started_by: StartedBy;
 }
 
 export class Db {
@@ -117,11 +128,29 @@ export class Db {
   async upsertSession(s: Partial<SessionRow> & { id: string; agent: string; origin: SessionRow["origin"] }) {
     await this.db
       .prepare(
-        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status, started_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
           "ON CONFLICT(id) DO NOTHING",
       )
-      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running")
+      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running", s.started_by ?? "schedule")
       .run();
+  }
+
+  /** Marks a conversation as a member's once one speaks in it; it stays marked. */
+  async markMemberSession(id: string, startedBy: StartedBy) {
+    if (!startedBy.startsWith("member:")) return;
+    await this.db.prepare("UPDATE sessions SET started_by = ? WHERE id = ? AND started_by NOT LIKE 'member:%'").bind(startedBy, id).run();
+  }
+
+  /** Counts one more message from a member today (UTC) and returns today's total. */
+  async countMemberMessage(person: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        "INSERT INTO member_messages (person, day, count) VALUES (?, date('now'), 1) " +
+          "ON CONFLICT(person, day) DO UPDATE SET count = count + 1 RETURNING count",
+      )
+      .bind(person)
+      .first<{ count: number }>();
+    return row?.count ?? 1;
   }
 
   getSession(id: string) {
@@ -272,12 +301,19 @@ export class Db {
 
   // ---- tasks --------------------------------------------------------------
 
-  async createTask(t: { agent: string; title: string; brief: string; priority?: string; due?: string }): Promise<Task> {
+  async createTask(t: {
+    agent: string;
+    title: string;
+    brief: string;
+    priority?: string;
+    due?: string;
+    review?: { target: string; sha: string };
+  }): Promise<Task> {
     const seq = await this.next("task");
     const id = `T-${seq}`;
     await this.db
-      .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null)
+      .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : "task", t.review?.target ?? null, t.review?.sha ?? null)
       .run();
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
   }

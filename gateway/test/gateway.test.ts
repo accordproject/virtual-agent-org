@@ -501,16 +501,16 @@ describe("sessions that are waiting", () => {
     const { ManagedAgentsError } = await import("../src/managed");
     const { messageAgent } = await import("../src/agents");
     const { ctx, fakes } = makeTestCtx();
-    const first = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "hello");
+    const first = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "hello", "owner");
     (ctx.managed as any).sendMessage = async () => {
       throw new ManagedAgentsError(400, '{"error":{"message":"Invalid user.message event at events[0]: waiting on responses to events [sevt_1]"}}', "/sessions/x/events");
     };
-    const second = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "are you there?");
+    const second = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "are you there?", "owner");
     expect(second).not.toBe(first);
     expect(fakes.calls.filter((c) => c.method === "createSession")).toHaveLength(2);
     // and the next message continues the new session, not the paused one
     (ctx.managed as any).sendMessage = async (id: string) => fakes.calls.push({ method: "sendMessage", args: [id] });
-    await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "thanks");
+    await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "thanks", "owner");
     expect(fakes.calls.at(-1)).toEqual({ method: "sendMessage", args: [second] });
   });
 
@@ -518,11 +518,11 @@ describe("sessions that are waiting", () => {
     const { ManagedAgentsError } = await import("../src/managed");
     const { messageAgent } = await import("../src/agents");
     const { ctx } = makeTestCtx();
-    await messageAgent(ctx, "ada", { telegram: 42 }, "hello");
+    await messageAgent(ctx, "ada", { telegram: 42 }, "hello", "owner");
     (ctx.managed as any).sendMessage = async () => {
       throw new ManagedAgentsError(500, "boom", "/sessions/x/events");
     };
-    await expect(messageAgent(ctx, "ada", { telegram: 42 }, "again")).rejects.toThrow(/500/);
+    await expect(messageAgent(ctx, "ada", { telegram: 42 }, "again", "owner")).rejects.toThrow(/500/);
   });
 
   it("answers a tool call even when the gateway fails unexpectedly", async () => {
@@ -789,11 +789,11 @@ describe("sessions out of budget", () => {
     const { ManagedAgentsError } = await import("../src/managed");
     const { messageAgent } = await import("../src/agents");
     const { ctx, fakes } = makeTestCtx();
-    const first = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "hello");
+    const first = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "hello", "owner");
     (ctx.managed as any).sendMessage = async () => {
       throw new ManagedAgentsError(400, '{"error":{"message":"session budget reached: consumed list cost has met `budget.max_list_cost`"}}', "/sessions/x/events");
     };
-    const second = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "still there?");
+    const second = await messageAgent(ctx, "ada", { discord: "111111111111111111" }, "still there?", "owner");
     expect(second).not.toBe(first);
     expect(fakes.calls.filter((c) => c.method === "createSession")).toHaveLength(2);
   });
@@ -801,12 +801,12 @@ describe("sessions out of budget", () => {
   it("doesn't continue a conversation that has used most of its budget, or one known to be spent", async () => {
     const { messageAgent } = await import("../src/agents");
     const { ctx, fakes } = makeTestCtx(); // Ada's session budget in the fixture is 150 cents
-    const first = await messageAgent(ctx, "ada", { telegram: 42 }, "hello");
+    const first = await messageAgent(ctx, "ada", { telegram: 42 }, "hello", "owner");
     await ctx.db.updateSession(first, "idle:end_turn", 125); // 83% spent
-    const second = await messageAgent(ctx, "ada", { telegram: 42 }, "next");
+    const second = await messageAgent(ctx, "ada", { telegram: 42 }, "next", "owner");
     expect(second).not.toBe(first);
     await ctx.db.updateSession(second, "idle:budget_reached", 10);
-    const third = await messageAgent(ctx, "ada", { telegram: 42 }, "and again");
+    const third = await messageAgent(ctx, "ada", { telegram: 42 }, "and again", "owner");
     expect(third).not.toBe(second);
     expect(fakes.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
   });
@@ -971,8 +971,12 @@ describe("review check (decision 2A)", () => {
 
   it("refuses findings that don't fit the PR or the review areas", async () => {
     const { ctx } = setup();
-    await expect(check(ctx, "sesn_review", [{ path: "src/other.ts", line: 3, severity: "major", area: "style", summary: "x" }])).rejects.toThrow(
-      /severity must be one of[\s\S]*area must be one of[\s\S]*path src\/other.ts is not a file this PR changes/,
+    // The tool's schema catches a severity outside its enum before the gateway reads the findings.
+    await expect(check(ctx, "sesn_review", [{ severity: "major", area: "security", summary: "x" }])).rejects.toThrow(
+      /findings\[0\]\.severity must be one of blocking, should-fix, nit/,
+    );
+    await expect(check(ctx, "sesn_review", [{ path: "src/other.ts", line: 3, severity: "nit", area: "style", summary: "x" }])).rejects.toThrow(
+      /area must be one of[\s\S]*path src\/other.ts is not a file this PR changes/,
     );
   });
 

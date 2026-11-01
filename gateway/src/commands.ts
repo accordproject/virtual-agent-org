@@ -1,10 +1,10 @@
 // Telegram update handling: who is speaking, what they may do, and routing.
 
-import { AgentUnavailable, messageAgent, postDecision } from "./agents";
+import { failureText, messageAgent, postDecision } from "./agents";
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, resume, revoke, stop } from "./controls";
 import type { Role } from "./env";
-import { describePerson, roleFor } from "./people";
+import { OVER_ALLOWANCE, describePerson, memberPrefix, roleFor, startedByFor, withinMemberAllowance } from "./people";
 import { gatherStatus, statusPlain } from "./status";
 import type { TgMessage, TgUpdate } from "./telegram";
 
@@ -75,6 +75,20 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
   const can = (p: string) => PERMS[role].has(p);
   const reply = (text: string) => ctx.tg.send(m.chat.id, text, { replyTo: m.message_id });
   const text = m.text!.trim();
+  const owner = role === "owner";
+  const failed = async (e: unknown) =>
+    reply(await failureText(ctx, owner, e, "gateway.telegram_error", { from: m.from?.id, command: text.split(/\s/)[0] }));
+
+  /** Sends to an agent as whoever is speaking: a member's message is marked as theirs and counted. */
+  const toAgent = async (agent: string, body: string) => {
+    if (!owner && !(await withinMemberAllowance(ctx, "telegram", m.from?.id))) {
+      await reply(OVER_ALLOWANCE);
+      return false;
+    }
+    const prefix = owner ? "" : memberPrefix(ctx, "telegram", m.from?.id);
+    await messageAgent(ctx, agent, { telegram: m.chat.id }, prefix + body, startedByFor(ctx, "telegram", m.from?.id, role));
+    return true;
+  };
 
   // Replies to a force-reply prompt (e.g. a rejection note).
   if (m.reply_to_message && role === "owner") {
@@ -87,11 +101,10 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
 
   if (!text.startsWith("/")) {
     if (!can("instruct") && !can("ask")) return;
-    const prefix = role === "owner" ? "" : `${describePerson(ctx, "telegram", m.from?.id)} asks. They cannot instruct or approve; answer only.\n\n`;
     try {
-      await messageAgent(ctx, "ada", { telegram: m.chat.id }, prefix + text);
+      await toAgent("ada", text);
     } catch (e) {
-      await reply(e instanceof AgentUnavailable ? e.message : `Could not reach Ada: ${String(e)}`);
+      await failed(e);
     }
     return;
   }
@@ -141,7 +154,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
           await reply("Usage: /ask <agent> <text>");
           return;
         }
-        await messageAgent(ctx, agentArg, { telegram: m.chat.id }, args.slice(1).join(" "));
+        if (!(await toAgent(agentArg, args.slice(1).join(" ")))) return;
         await ctx.db.audit({ agent: agentArg, event_type: "owner.direct_ask", detail: { by: role } });
         return;
       }
@@ -169,7 +182,7 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
         await reply(`Unknown command. ${HELP}`);
     }
   } catch (e) {
-    await reply(e instanceof AgentUnavailable ? e.message : `Error: ${String(e)}`);
+    await failed(e);
   }
 }
 
