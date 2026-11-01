@@ -66,6 +66,10 @@ jobs:
   assert.deepEqual(workflowRisks(wf("ubuntu-latest, my-runner")), ["job build runs on my-runner, not a GitHub-hosted runner"]);
 });
 
+test("workflowRisks matches runner labels case-insensitively, as GitHub does", () => {
+  assert.deepEqual(workflowRisks("on: pull_request\njobs:\n  t:\n    runs-on: macOS-latest\n"), []);
+});
+
 test("workflowRisks passes an ordinary pull_request workflow", () => {
   assert.deepEqual(workflowRisks("on: [push, pull_request]\njobs:\n  t:\n    runs-on: ubuntu-latest\n"), []);
 });
