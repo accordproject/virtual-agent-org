@@ -6,6 +6,8 @@ import deployed from "./generated/deployed.json";
 export interface ActionKind {
   risk: "low" | "medium" | "high";
   executor: "github" | "discord" | "discord_ops" | "vimeo" | "manual";
+  /** Executed at once, without the owner, after the gateway's own safety checks. Only github.approve_ci. */
+  auto?: boolean;
 }
 
 export interface Person {
@@ -39,6 +41,12 @@ export interface NetworkConfig {
   discord_channels?: { announcements?: string; agent_ops?: string };
   /** Highest risk the owner may approve from Discord (decision 15B). Absent = Telegram only. */
   discord_approval_max_risk?: "none" | "low" | "medium";
+  /** Where approval cards go. discord: Discord-approvable cards go only to Discord. Absent = both. */
+  approvals_app?: "discord" | "telegram" | "both";
+  /** Merge proposals from Mira must come from a fresh review-check session (decision 2A). */
+  review_check_required?: boolean;
+  /** Model ids by tier, from models.yaml, for sessions the gateway starts on a stronger model. */
+  model_tiers?: Record<string, string>;
 }
 
 export interface DeployedAgent {

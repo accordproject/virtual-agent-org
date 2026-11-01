@@ -54,16 +54,28 @@ describe("tool ownership and controls", () => {
 
   it("refuses to assign to an agent from a later phase", async () => {
     const { ctx } = makeTestCtx();
-    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "rosa", title: "t", brief: "b" })).rejects.toThrow(/phase 2/);
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "rosa", title: "t", objective: "o", output: "x", done_when: "d", effort: "small" })).rejects.toThrow(/phase 2/);
   });
 
   it("assigns a task by starting a session for the agent", async () => {
     const { ctx, fakes } = makeTestCtx();
-    const out = await handleTool(ctx, "ada", "s", "assign_task", { agent: "mira", title: "Triage", brief: "Do it" });
-    expect(out).toBe("Assigned T-1 to Mira.");
+    const out = await handleTool(ctx, "ada", "s", "assign_task", {
+      agent: "mira",
+      title: "Triage",
+      objective: "Clear the sandbox queue",
+      output: "a status report",
+      done_when: "every open PR has a response",
+      boundaries: "sandbox only",
+      effort: "small",
+    });
+    expect(out).toBe("Assigned T-1 to Mira (small effort, $0.30 cap).");
     const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
     expect(create.agentId).toBe("agent_mira");
+    expect(create.budgetCents).toBe(30);
     expect(create.text).toContain("Task T-1");
+    expect(create.text).toContain("Done when: every open PR has a response");
+    expect(create.text).toContain("Out of scope: sandbox only");
+    expect(create.text).toMatch(/Aim for about 10 tool calls/);
     expect((await ctx.db.openTasks("mira"))[0].status).toBe("running");
   });
 
@@ -390,7 +402,7 @@ describe("discord bot (decision 15B)", () => {
     const res = await run(ctx, click(OWNER, "a:D-1"));
     expect(res).toEqual({ type: 6 });
     expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
-    expect(fakes.dcEdits.at(-1)?.content).toContain("Result: DRY RUN");
+    expect(fakes.dcEdits.at(-1)?.content).toContain("**Result:** DRY RUN");
     expect(fakes.dcEdits.at(-1)?.buttons).toEqual([]);
   });
 
@@ -727,5 +739,228 @@ describe("sessions out of budget", () => {
     const third = await messageAgent(ctx, "ada", { telegram: 42 }, "and again");
     expect(third).not.toBe(second);
     expect(fakes.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+});
+
+describe("approval cards in one app", () => {
+  const queue = (ctx: any, kind: string, risk = "low", text = "hi") =>
+    handleTool(ctx, "mira", "s", "request_action", { kind, target: "accordproject/concerto#1", summary: "s", rationale: "r", risk, payload: { text } });
+  const one = (o: any = {}) => makeTestCtx({ network: { ...makeTestCtx().ctx.network, approvals_app: "discord" }, ...o });
+
+  it("sends Discord-approvable cards only to Discord", async () => {
+    const { ctx, fakes } = one();
+    await queue(ctx, "github.merge", "medium");
+    expect(fakes.dms).toHaveLength(1);
+    expect(fakes.sent).toHaveLength(0);
+  });
+
+  it("keeps high-risk cards on Telegram", async () => {
+    const { ctx, fakes } = one();
+    await queue(ctx, "github.merge", "high");
+    expect(fakes.dms).toHaveLength(0);
+    expect(fakes.sent).toHaveLength(1);
+  });
+
+  it("falls back to Telegram when Discord can't deliver", async () => {
+    const { ctx, fakes } = one();
+    ctx.dc = { dm: async () => { throw new Error("Discord down"); } } as any;
+    await queue(ctx, "github.merge", "medium");
+    expect(fakes.sent).toHaveLength(1);
+  });
+
+  it("still sends both with approvals_app: both", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await queue(ctx, "github.merge", "medium");
+    expect(fakes.dms).toHaveLength(1);
+    expect(fakes.sent).toHaveLength(1);
+  });
+
+  it("puts the full content in embeds instead of cutting it off", async () => {
+    const { ctx, fakes } = one();
+    const long = Array.from({ length: 100 }, (_, i) => `Line ${i}: ${"x".repeat(40)}`).join("\n"); // ~5,000 chars
+    await queue(ctx, "linkedin.post", "medium", long);
+    const dm = fakes.dms[0];
+    expect(dm.content.length).toBeLessThanOrEqual(2000);
+    expect(dm.content).not.toContain("Line 0");
+    const all = dm.embeds!.map((e) => e.description).join("\n");
+    expect(all).toContain("Line 0:");
+    expect(all).toContain("Line 99:");
+    expect(dm.embeds!.reduce((n, e) => n + e.description.length + (e.title?.length ?? 0), 0)).toBeLessThanOrEqual(6000);
+  });
+});
+
+describe("CI approval for fork PRs", () => {
+  const fakeGh = (files: string[], head = "abcdef1234567", runs = [{ id: 7, name: "Build", html_url: "u" }]) => {
+    const approved: number[] = [];
+    const gh = {
+      pullFiles: async () => files,
+      pull: async () => ({ head: { sha: head, repo: { full_name: "fork/concerto" } }, base: { repo: { full_name: "accordproject/concerto" } }, state: "open" }),
+      runsAwaitingApproval: async () => runs,
+      approveRun: async (_r: unknown, id: number) => approved.push(id),
+    };
+    return { gh, approved };
+  };
+  const ask = (ctx: any, payload: unknown = { sha: "abcdef1" }, risk = "low") =>
+    handleTool(ctx, "mira", "s", "request_action", { kind: "github.approve_ci", target: "accordproject/concerto#12", summary: "Approve CI", rationale: "Reviewed: docs and a parser fix", risk, payload });
+
+  it("approves waiting runs at once when the PR changes no CI-sensitive files", async () => {
+    const { gh, approved } = fakeGh(["src/parser.ts", "test/parser.test.ts", "README.md"]);
+    const { ctx, fakes } = makeTestCtx({ dryRun: false, github: async () => gh as any });
+    const out = await ask(ctx);
+    expect(out).toMatch(/D-1 done: Approved 1 CI run \(Build\)/);
+    expect(approved).toEqual([7]);
+    expect(fakes.sent).toHaveLength(0);
+    expect(fakes.dms).toHaveLength(0);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
+  });
+
+  it.each([".github/workflows/ci.yml", "package.json", "packages/core/package-lock.json", "scripts/release.sh", "Cargo.toml", "src/Concerto.csproj", "Dockerfile"])(
+    "queues for Matt when the PR changes %s",
+    async (file) => {
+      const { gh, approved } = fakeGh(["src/a.ts", file]);
+      const { ctx, fakes } = makeTestCtx({ dryRun: false, github: async () => gh as any });
+      const out = await ask(ctx);
+      expect(out).toMatch(/Queued for Matt as D-1/);
+      expect(approved).toEqual([]);
+      const d = await ctx.db.getDecision("D-1");
+      expect(d?.risk).toBe("high");
+      expect(d?.rationale).toContain(file);
+      expect(fakes.sent).toHaveLength(1);
+    },
+  );
+
+  it("queues for Matt when Mira herself marks it high risk", async () => {
+    const { gh, approved } = fakeGh(["src/a.ts"]);
+    const { ctx } = makeTestCtx({ dryRun: false, github: async () => gh as any });
+    expect(await ask(ctx, { sha: "abcdef1" }, "high")).toMatch(/Queued as D-1/);
+    expect(approved).toEqual([]);
+  });
+
+  it("refuses when new commits arrived after the review", async () => {
+    const { gh, approved } = fakeGh(["src/a.ts"], "9999999aaaaaa");
+    const { ctx } = makeTestCtx({ dryRun: false, github: async () => gh as any });
+    expect(await ask(ctx)).toMatch(/failed: PR has new commits since the review/);
+    expect(approved).toEqual([]);
+  });
+
+  it("needs the reviewed sha and an in-scope PR", async () => {
+    const { gh } = fakeGh(["src/a.ts"]);
+    const { ctx } = makeTestCtx({ dryRun: false, github: async () => gh as any });
+    await expect(ask(ctx, {})).rejects.toThrow(/payload.sha is required/);
+    await expect(
+      handleTool(ctx, "mira", "s", "request_action", { kind: "github.approve_ci", target: "someone/else#1", summary: "s", rationale: "r", risk: "low", payload: { sha: "abcdef1" } }),
+    ).rejects.toThrow(/not in the configured repos/);
+  });
+});
+
+describe("structured briefs (decision 1B)", () => {
+  it("requires the brief's fields and a valid effort", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "mira", title: "t", objective: "o", output: "x", effort: "small" })).rejects.toThrow(/done_when is required/);
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { agent: "mira", title: "t", objective: "o", output: "x", done_when: "d", effort: "huge" })).rejects.toThrow(/effort must be/);
+  });
+
+  it("sets the session budget from the effort", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleTool(ctx, "ada", "s", "assign_task", { agent: "otto", title: "t", objective: "o", output: "x", done_when: "d", effort: "large" });
+    expect((fakes.calls.find((c) => c.method === "createSession")!.args[0] as any).budgetCents).toBe(300);
+  });
+});
+
+describe("review check (decision 2A)", () => {
+  const strict = () => {
+    const base = makeTestCtx().ctx.network;
+    return makeTestCtx({ network: { ...base, review_check_required: true, model_tiers: { deep: "claude-opus-5-5", standard: "claude-sonnet-5-5" } } });
+  };
+  const check = (ctx: any, sid: string, lines = 40) =>
+    handleTool(ctx, "mira", sid, "request_review_check", {
+      target: "accordproject/concerto#12",
+      sha: "abcdef1234",
+      changed_lines: lines,
+      draft: "src/a.ts:10 blocking high: null deref",
+    });
+  const merge = (ctx: any, sid: string) =>
+    handleTool(ctx, "mira", sid, "request_action", { kind: "github.merge", target: "accordproject/concerto#12", summary: "Merge", rationale: "r", risk: "medium" });
+
+  it("refuses merge proposals from the session that wrote the review", async () => {
+    const { ctx } = strict();
+    await expect(merge(ctx, "sesn_review")).rejects.toThrow(/come from the review check/);
+  });
+
+  it("starts a fresh session that may then propose the merge", async () => {
+    const { ctx, fakes } = strict();
+    const out = await check(ctx, "sesn_review");
+    expect(out).toMatch(/Review check T-1 started/);
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.agentId).toBe("agent_mira");
+    expect(create.text).toContain("treat it as claims to verify");
+    expect(create.text).toContain("null deref");
+    expect(create.model).toBeUndefined();
+    expect(create.budgetCents).toBe(150);
+    const checkSid = Object.keys(fakes.sessions)[0];
+    expect(await merge(ctx, checkSid)).toMatch(/Queued as D-1/);
+  });
+
+  it("uses the deep tier for large PRs", async () => {
+    const { ctx, fakes } = strict();
+    await check(ctx, "sesn_review", 650);
+    const create = fakes.calls.find((c) => c.method === "createSession")!.args[0] as any;
+    expect(create.model).toBe("claude-opus-5-5");
+    expect(create.budgetCents).toBe(300);
+  });
+
+  it("doesn't let a check start another check", async () => {
+    const { ctx, fakes } = strict();
+    await check(ctx, "sesn_review");
+    const checkSid = Object.keys(fakes.sessions)[0];
+    await expect(check(ctx, checkSid)).rejects.toThrow(/You are the review check/);
+  });
+
+  it("leaves merges alone when the rule is off", async () => {
+    const { ctx } = makeTestCtx();
+    expect(await merge(ctx, "sesn_any")).toMatch(/Queued as D-1/); // review_check_required off
+  });
+});
+
+describe("AGENTS.md lessons (github.docs_pr)", () => {
+  it("only writes guidance files", async () => {
+    const { isGuidanceFile } = await import("../src/executors");
+    expect(isGuidanceFile("AGENTS.md")).toBe(true);
+    expect(isGuidanceFile("packages/concerto-core/AGENTS.md")).toBe(true);
+    expect(isGuidanceFile("CONTRIBUTING.md")).toBe(true);
+    expect(isGuidanceFile("src/index.ts")).toBe(false);
+    expect(isGuidanceFile(".github/workflows/AGENTS.md.yml")).toBe(false);
+    expect(isGuidanceFile("../AGENTS.md")).toBe(false);
+  });
+
+  it("opens a PR on a new branch when approved", async () => {
+    const { executeDecision } = await import("../src/executors");
+    const calls: [string, string, any][] = [];
+    const { GitHub } = await import("../src/github");
+    const fetchImpl = (async (url: string, init: any) => {
+      const path = new URL(url).pathname + new URL(url).search;
+      calls.push([init.method, path, init.body ? JSON.parse(init.body) : undefined]);
+      const body =
+        path === "/repos/accordproject/concerto" ? { default_branch: "main" }
+        : path.startsWith("/repos/accordproject/concerto/git/ref/") ? { object: { sha: "base123" } }
+        : path.startsWith("/repos/accordproject/concerto/contents/") && init.method === "GET" ? { sha: "old456" }
+        : path.endsWith("/pulls") ? { html_url: "https://github.com/accordproject/concerto/pull/99", number: 99 }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const gh = new GitHub("t", fetchImpl);
+    const { ctx } = makeTestCtx({ dryRun: false, github: async () => gh });
+    const d = await ctx.db.createDecision({
+      agent: "mira", kind: "github.docs_pr", target: "accordproject/concerto", summary: "Lessons", rationale: "Two PRs missed X", risk: "medium",
+      payload: { path: "AGENTS.md", content: "# Agents\n\n## Reviewing\n- Check café metamodel versions", title: "Add review lessons" },
+    });
+    ctx.network = { ...ctx.network, action_kinds: { ...ctx.network.action_kinds, "github.docs_pr": { risk: "medium", executor: "github" } } };
+    const r = await executeDecision(ctx, d);
+    expect(r).toEqual({ ok: true, result: "Opened https://github.com/accordproject/concerto/pull/99" });
+    expect(calls.find((c) => c[1] === "/repos/accordproject/concerto/git/refs")?.[2]).toEqual({ ref: "refs/heads/agents/mira-d-1", sha: "base123" });
+    const put = calls.find((c) => c[0] === "PUT")!;
+    expect(put[2].sha).toBe("old456");
+    expect(Buffer.from(put[2].content, "base64").toString("utf8")).toContain("café");
+    expect(calls.at(-1)![2].body).toContain("needs a maintainer's review");
   });
 });

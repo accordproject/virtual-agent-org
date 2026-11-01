@@ -13,14 +13,23 @@ export interface DiscordButton {
   style: 1 | 2 | 3 | 4; // primary, secondary, success, danger
 }
 
+export interface DiscordEmbed {
+  title?: string;
+  description: string;
+  color?: number;
+}
+
 export interface DiscordPayload {
   content: string;
   buttons?: DiscordButton[];
+  /** Up to 10; each description up to 4,096 characters, 6,000 in total. */
+  embeds?: DiscordEmbed[];
 }
 
 export function toMessage(p: DiscordPayload) {
   return {
-    content: p.content.length > LIMIT ? `${p.content.slice(0, LIMIT - 30)}\n… (full text in Telegram)` : p.content,
+    content: p.content.length > LIMIT ? `${p.content.slice(0, LIMIT - 20)}\n… (cut short)` : p.content,
+    embeds: p.embeds ?? [],
     allowed_mentions: { parse: [] },
     components: p.buttons?.length ? [{ type: 1, components: p.buttons.map((b) => ({ type: 2, ...b })) }] : [],
   };
@@ -72,7 +81,7 @@ export class DiscordBot {
       const msg = await this.call<{ id: string }>(
         "POST",
         `/channels/${channelId}/messages`,
-        toMessage({ content: chunks[i], buttons: last ? p.buttons : undefined }),
+        toMessage({ content: chunks[i], buttons: last ? p.buttons : undefined, embeds: last ? p.embeds : undefined }),
       );
       messageId = msg.id;
     }

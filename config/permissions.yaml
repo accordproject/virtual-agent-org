@@ -13,12 +13,28 @@
 # One of: none, low, medium. Never high.
 discord_approval_max_risk: medium
 
+# Where approval cards go. discord: cards you can approve in Discord go only to
+# Discord (Telegram keeps high-risk cards and paused tool calls). telegram: Telegram
+# only. both: every Discord-approvable card in both apps.
+approvals_app: discord
+
+# Decision 2A: Mira's merge proposals must come from a fresh review-check session,
+# never from the session that wrote the review.
+review_check_required: true
+
 action_kinds:
   github.merge:        { risk: medium, executor: github }
   github.close:        { risk: low,    executor: github }
   github.comment:      { risk: low,    executor: github }   # public comment as the project bot
   github.release:      { risk: high,   executor: github }
-  vimeo.publish:       { risk: medium, executor: vimeo }    # title, description, chapters and (if asked) make public
+  # Approves "waiting for approval" CI runs on a fork PR after the agent's risk review.
+  # auto: runs without Matt, but the gateway itself refuses (and queues for Matt
+  # instead) any PR that touches workflows, build scripts or dependency files.
+  github.approve_ci:   { risk: low,    executor: github, auto: true }
+  # Opens a PR updating AGENTS.md, CONTRIBUTING.md, REVIEWING.md or CLAUDE.md. The PR
+  # then needs a maintainer's review like any other.
+  github.docs_pr:      { risk: medium, executor: github }
+  vimeo.publish:       { risk: medium, executor: vimeo }    # title, description and (if asked) make public
   wordpress.publish:   { risk: medium, executor: manual }
   linkedin.post:       { risk: medium, executor: manual }   # decision 8: drafts go to Telegram, owner posts
   discord.announce:    { risk: medium, executor: discord }  # the bot posts to channels.announcements (config/discord.yaml)
@@ -38,7 +54,7 @@ agents:
     mcp_servers:
       github: { mode: read_plus_triage }   # read, label, assign, request review via her own GitHub App
     builtin_tools: [web_fetch]
-    requestable: [github.merge, github.close, github.comment, github.release, discord.ops]
+    requestable: [github.merge, github.close, github.comment, github.release, github.approve_ci, github.docs_pr, discord.ops]
   vera:
     mcp_servers:
       github: { mode: read }

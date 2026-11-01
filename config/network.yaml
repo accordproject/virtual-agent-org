@@ -8,7 +8,7 @@ network:
   # github.repos stays empty, schedules stay off and the gateway stays in DRY_RUN.
   current_phase: 1
   # Scheduled runs (check-ins, triage passes). Off until the Phase 0 gate passes.
-  schedules_enabled: false
+  schedules_enabled: true
 
 github:
   org: accordproject

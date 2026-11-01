@@ -26,8 +26,25 @@ schedules:
     cron: "0 8,13,18 * * *"     # three passes a day
     budget_usd: 1.00
     prompt: >
-      Triage pass: first-respond to every new PR and issue, label and route, and propose
-      merges or closures that are ready.
+      Triage pass: first-respond to every new PR and issue, label and route, request
+      reviewers, approve CI for reviewed fork PRs, nudge, and propose closures. Update the
+      outcomes in /notes/review-ledger.md. Do not review code in this pass.
+
+  - name: mira-review
+    agent: mira
+    cron: "0 10,15 * * 1-5"     # weekdays, twice a day
+    budget_usd: 3.00
+    prompt: >
+      Review pass: review up to three PRs that are ready for review, oldest first, following
+      "Reviewing a PR" in your instructions, and hand each draft to request_review_check.
+
+  - name: mira-lessons
+    agent: mira
+    cron: "0 14 * * 5"          # Fridays 14:00, before Ada's evaluation
+    budget_usd: 1.50
+    prompt: >
+      Lessons pass: consolidate /notes/review-ledger.md into review lessons and, where a
+      lesson is ready, propose an update to that repo's AGENTS.md with github.docs_pr.
 
   - name: vera-daily
     agent: vera

@@ -13,7 +13,7 @@ export interface ExecResult {
   result: string;
 }
 
-function inScope(ctx: Ctx, r: RepoRef): boolean {
+export function inScope(ctx: Ctx, r: RepoRef): boolean {
   const full = `${r.owner}/${r.repo}`.toLowerCase();
   const allowed = [ctx.network.sandbox_repo, ...ctx.network.repos].filter(Boolean).map((s) => s.toLowerCase());
   return allowed.includes(full);
@@ -99,6 +99,33 @@ export async function executeDecision(ctx: Ctx, d: Decision): Promise<ExecResult
       const c = await gh.comment(needNumber(), body);
       return { ok: true, result: `Commented: ${c.html_url}` };
     }
+    case "github.approve_ci": {
+      const n = needNumber();
+      const pr = await gh.pull(n);
+      const want = typeof payload.sha === "string" ? payload.sha : "";
+      if (want && !pr.head.sha.startsWith(want)) {
+        return { ok: false, result: `PR has new commits since the review (head is ${pr.head.sha.slice(0, 7)}); review again` };
+      }
+      const runs = await gh.runsAwaitingApproval(ref, pr.head.sha);
+      if (!runs.length) return { ok: true, result: `No runs waiting for approval on ${pr.head.sha.slice(0, 7)}` };
+      for (const run of runs) await gh.approveRun(ref, run.id);
+      return { ok: true, result: `Approved ${runs.length} CI run${runs.length > 1 ? "s" : ""} (${runs.map((r) => r.name).join(", ")}) on ${pr.head.sha.slice(0, 7)}` };
+    }
+    case "github.docs_pr": {
+      const path = typeof payload.path === "string" ? payload.path.replace(/^\/+/, "") : "";
+      if (!isGuidanceFile(path)) return { ok: false, result: `docs_pr only writes AGENTS.md, CONTRIBUTING.md, REVIEWING.md or CLAUDE.md, not "${path}"` };
+      const content = typeof payload.content === "string" ? payload.content : "";
+      if (!content.trim()) return { ok: false, result: "No file content in payload" };
+      const title = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : `Update ${path} with review lessons`;
+      const pr = await gh.proposeFile(ref, {
+        path,
+        content: content.endsWith("\n") ? content : `${content}\n`,
+        branch: `agents/${d.agent}-${d.id.toLowerCase()}`,
+        title,
+        body: `${payloadText({ body: payload.body }) || d.rationale}\n\n---\nDrafted by an Accord Project agent (${d.id}); needs a maintainer's review like any other PR.`,
+      });
+      return { ok: true, result: `Opened ${pr.html_url}` };
+    }
     case "github.release": {
       const tag = payload.tag as string | undefined;
       if (!tag) return { ok: false, result: "No tag in payload" };
@@ -155,4 +182,27 @@ async function publishVimeo(ctx: Ctx, p: Record<string, unknown>): Promise<ExecR
     .filter(Boolean)
     .join("; ");
   return { ok: true, result: `${done}: ${video.link}${notes.length ? `\nNotes: ${notes.slice(0, 3).join("; ")}` : ""}` };
+}
+
+/**
+ * Paths that change what CI itself runs or installs. A PR touching any of these
+ * never has its CI approved without Matt (github.approve_ci is queued instead).
+ */
+const CI_SENSITIVE = [
+  /^\.github\//,
+  /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|\.npmrc|\.yarnrc(\.yml)?|lerna\.json|nx\.json)$/,
+  /(^|\/)(Cargo\.toml|Cargo\.lock|build\.rs|go\.mod|go\.sum|requirements[^/]*\.txt|pyproject\.toml|setup\.py|Gemfile(\.lock)?)$/,
+  /(^|\/)([^/]+\.(csproj|fsproj|sln|props|targets)|nuget\.config|global\.json)$/i,
+  /(^|\/)(Dockerfile[^/]*|docker-compose[^/]*|Makefile|Taskfile[^/]*|Justfile)$/,
+  /(^|\/)[^/]+\.(sh|bash|ps1|bat|cmd)$/,
+  /(^|\/)\.husky\//,
+];
+
+export function ciSensitivePaths(files: string[]): string[] {
+  return [...new Set(files.filter((f) => CI_SENSITIVE.some((re) => re.test(f))))];
+}
+
+/** The only files github.docs_pr may write: guidance for contributors and review agents. */
+export function isGuidanceFile(path: string): boolean {
+  return !path.split("/").includes("..") && /(^|\/)(AGENTS|CONTRIBUTING|REVIEWING|CLAUDE)\.md$/.test(path);
 }

@@ -34,8 +34,13 @@ export function validate(cfg = loadAll()): string[] {
   const maxRisk = permissions.discord_approval_max_risk ?? "none";
   if (!["none", "low", "medium"].includes(maxRisk)) errs.push(`discord_approval_max_risk must be none, low or medium, not "${maxRisk}"`);
 
+  const app = permissions.approvals_app ?? "both";
+  if (!["discord", "telegram", "both"].includes(app)) errs.push(`approvals_app must be discord, telegram or both, not "${app}"`);
+
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
     if (!["github", "discord", "discord_ops", "vimeo", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
+    // Only kinds the gateway has its own safety checks for may skip the owner.
+    if (v.auto && k !== "github.approve_ci") errs.push(`action kind ${k}: auto is only allowed for github.approve_ci`);
   }
 
   const seenIds = new Set<string>();
@@ -122,6 +127,9 @@ export function compile(cfg = loadAll()) {
     repos: network.github.repos ?? [],
     action_kinds: permissions.action_kinds,
     discord_approval_max_risk: permissions.discord_approval_max_risk ?? "none",
+    approvals_app: permissions.approvals_app ?? "both",
+    review_check_required: permissions.review_check_required ?? false,
+    model_tiers: cfg.models.tiers,
     discord_channels: Object.fromEntries(
       Object.entries(discord.channels ?? {}).filter(([, id]) => id !== undefined && id !== null && id !== "").map(([k, id]) => [k, String(id)]),
     ),

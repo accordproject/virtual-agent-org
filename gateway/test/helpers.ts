@@ -31,7 +31,7 @@ export const NETWORK: NetworkConfig = {
   timezone: "Europe/London",
   monthly_credit_usd: 200,
   sandbox_repo: "accordproject/virtual-agent-org-sandbox",
-  repos: [],
+  repos: ["accordproject/concerto"],
   action_kinds: {
     "github.merge": { risk: "medium", executor: "github" },
     "github.comment": { risk: "low", executor: "github" },
@@ -39,6 +39,7 @@ export const NETWORK: NetworkConfig = {
     "discord.ops": { risk: "low", executor: "discord_ops" },
     "vimeo.publish": { risk: "medium", executor: "vimeo" },
     "linkedin.post": { risk: "medium", executor: "manual" },
+    "github.approve_ci": { risk: "low", executor: "github", auto: true },
   },
   discord_approval_max_risk: "medium",
   people: [
@@ -49,7 +50,7 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "discord.ops", "linkedin.post"] },
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "discord.ops", "linkedin.post"] },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
@@ -68,7 +69,7 @@ export interface Fakes {
   sent: { chatId: number; text: string; opts?: unknown }[];
   discord: string[];
   ops: { text: string; ids: string[] }[];
-  dms: { user: string; content: string; buttons?: unknown[] }[];
+  dms: { user: string; content: string; buttons?: unknown[]; embeds?: { title?: string; description: string }[] }[];
   dcEdits: { channelId: string; messageId: string; content: string; buttons?: unknown[] }[];
   originals: { token: string; content: string }[];
   calls: { method: string; args: unknown[] }[];
@@ -80,7 +81,7 @@ export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fa
   const fakes: Fakes = { sent: [], discord: [], ops: [], dms: [], dcEdits: [], originals: [], calls: [], events: {}, sessions: {} };
   let dmId = 0;
   const dc = {
-    dm: async (user: string, p: { content: string; buttons?: unknown[] }) => {
+    dm: async (user: string, p: { content: string; buttons?: unknown[]; embeds?: any[] }) => {
       fakes.dms.push({ user, ...p });
       return { channelId: `dm-${user}`, messageId: `m${++dmId}` };
     },

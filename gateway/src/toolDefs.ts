@@ -73,17 +73,24 @@ export const ADA_TOOLS: CustomToolDef[] = [
     type: "custom",
     name: "assign_task",
     description:
-      "Start work for one agent. The brief states the outcome, constraints and what done looks like. Returns a task id.",
+      "Start work for one agent with a structured brief. effort sets the session budget and how many tool calls the agent should use: " +
+      "small (a lookup or one change, about 10 tool calls, $0.30), medium (a few items or a comparison, about 30 calls, $1), " +
+      "large (a multi-part piece of work, about 80 calls, $3). Returns a task id.",
     input_schema: {
       type: "object",
       properties: {
         agent: str("Agent name, e.g. mira"),
         title: str("Short task title"),
-        brief: str("Outcome, constraints, definition of done"),
+        objective: str("The outcome wanted, in one or two sentences"),
+        output: str("What to hand back and in what shape, e.g. 'a status report listing each PR with its decision id'"),
+        done_when: str("The test for finished, e.g. 'every PR older than 30 days has a comment or a closure request'"),
+        boundaries: str("What is out of scope, and sources or tools to use or avoid. Optional"),
+        context: str("Background, links and what Matt said. Optional"),
+        effort: { type: "string", enum: ["small", "medium", "large"] },
         priority: { type: "string", enum: ["low", "normal", "high"] },
         due: str("ISO date, optional"),
       },
-      required: ["agent", "title", "brief"],
+      required: ["agent", "title", "objective", "output", "done_when", "effort"],
     },
   },
   {
@@ -187,7 +194,31 @@ export const OTTO_TOOLS: CustomToolDef[] = [
   },
 ];
 
+export const MIRA_TOOLS: CustomToolDef[] = [
+  {
+    type: "custom",
+    name: "request_review_check",
+    description:
+      "Hand your draft review of a PR to a fresh session, which checks each finding against the code, posts only confirmed ones, " +
+      "and alone may propose the merge. Do not post the review or propose the merge yourself. Returns a task id.",
+    input_schema: {
+      type: "object",
+      properties: {
+        target: str("The PR, e.g. accordproject/concerto#123"),
+        sha: str("The head commit you reviewed"),
+        changed_lines: { type: "integer", description: "Lines added plus deleted in the PR" },
+        draft: str(
+          "Your findings, one per item: file:line, severity (blocking, should-fix, nit), confidence (high, medium), and why. " +
+            "Then CI state, maintainer approvals, unresolved threads, and whether you think it is ready to merge.",
+        ),
+      },
+      required: ["target", "sha", "changed_lines", "draft"],
+    },
+  },
+];
+
 export function toolsForAgent(agent: string): CustomToolDef[] {
+  if (agent === "mira") return [...COMMON_TOOLS, ...MIRA_TOOLS];
   if (agent === "ada") return [...COMMON_TOOLS, ...ADA_TOOLS];
   if (agent === "vera") return [...COMMON_TOOLS, ...VERA_TOOLS];
   if (agent === "otto") return [...COMMON_TOOLS, ...OTTO_TOOLS];

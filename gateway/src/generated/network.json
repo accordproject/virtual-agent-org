@@ -25,6 +25,15 @@
       "risk": "high",
       "executor": "github"
     },
+    "github.approve_ci": {
+      "risk": "low",
+      "executor": "github",
+      "auto": true
+    },
+    "github.docs_pr": {
+      "risk": "medium",
+      "executor": "github"
+    },
     "vimeo.publish": {
       "risk": "medium",
       "executor": "vimeo"
@@ -63,6 +72,13 @@
     }
   },
   "discord_approval_max_risk": "medium",
+  "approvals_app": "discord",
+  "review_check_required": true,
+  "model_tiers": {
+    "deep": "claude-opus-5-5",
+    "standard": "claude-sonnet-5-5",
+    "fast": "claude-haiku-5-5"
+  },
   "discord_channels": {
     "announcements": "874841542311960608",
     "agent_ops": "1566187048765751348"
@@ -199,6 +215,8 @@
         "github.close",
         "github.comment",
         "github.release",
+        "github.approve_ci",
+        "github.docs_pr",
         "discord.ops"
       ]
     },

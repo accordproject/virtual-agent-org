@@ -96,6 +96,66 @@ export class GitHub {
     return this.call<{ html_url: string }>("POST", `/repos/${r.owner}/${r.repo}/issues/${r.number}/comments`, { body });
   }
 
+  pull(r: Required<RepoRef>) {
+    return this.call<{ head: { sha: string; repo: { full_name: string } | null }; base: { repo: { full_name: string } }; state: string }>(
+      "GET",
+      `/repos/${r.owner}/${r.repo}/pulls/${r.number}`,
+    );
+  }
+
+  /** Changed file paths in a PR (up to 3,000, GitHub's own limit). */
+  async pullFiles(r: Required<RepoRef>): Promise<string[]> {
+    const out: string[] = [];
+    for (let page = 1; page <= 30; page++) {
+      const files = await this.call<{ filename: string; previous_filename?: string }[]>(
+        "GET",
+        `/repos/${r.owner}/${r.repo}/pulls/${r.number}/files?per_page=100&page=${page}`,
+      );
+      for (const f of files) out.push(f.filename, ...(f.previous_filename ? [f.previous_filename] : []));
+      if (files.length < 100) break;
+    }
+    return out;
+  }
+
+  /** Workflow runs for a commit that are waiting for a maintainer to approve them. */
+  async runsAwaitingApproval(r: RepoRef, sha: string): Promise<{ id: number; name: string; html_url: string }[]> {
+    const res = await this.call<{ workflow_runs: { id: number; name: string; html_url: string }[] }>(
+      "GET",
+      `/repos/${r.owner}/${r.repo}/actions/runs?head_sha=${sha}&status=action_required&per_page=50`,
+    );
+    return res.workflow_runs ?? [];
+  }
+
+  approveRun(r: RepoRef, runId: number) {
+    return this.call("POST", `/repos/${r.owner}/${r.repo}/actions/runs/${runId}/approve`);
+  }
+
+  /** Opens a PR that writes one file on a new branch from the default branch. */
+  async proposeFile(r: RepoRef, p: { path: string; content: string; branch: string; title: string; body: string }) {
+    const base = `/repos/${r.owner}/${r.repo}`;
+    const repo = await this.call<{ default_branch: string }>("GET", base);
+    const head = await this.call<{ object: { sha: string } }>("GET", `${base}/git/ref/heads/${repo.default_branch}`);
+    await this.call("POST", `${base}/git/refs`, { ref: `refs/heads/${p.branch}`, sha: head.object.sha });
+    let sha: string | undefined;
+    try {
+      sha = (await this.call<{ sha: string }>("GET", `${base}/contents/${encodePath(p.path)}?ref=${repo.default_branch}`)).sha;
+    } catch (e) {
+      if (!String(e).includes(": 404")) throw e; // a new file
+    }
+    await this.call("PUT", `${base}/contents/${encodePath(p.path)}`, {
+      message: p.title,
+      content: base64Utf8(p.content),
+      branch: p.branch,
+      ...(sha ? { sha } : {}),
+    });
+    return this.call<{ html_url: string; number: number }>("POST", `${base}/pulls`, {
+      title: p.title,
+      head: p.branch,
+      base: repo.default_branch,
+      body: p.body,
+    });
+  }
+
   release(r: RepoRef, p: { tag: string; name?: string; body?: string; target?: string; draft?: boolean }) {
     return this.call<{ html_url: string }>("POST", `/repos/${r.owner}/${r.repo}/releases`, {
       tag_name: p.tag,
@@ -105,4 +165,13 @@ export class GitHub {
       draft: p.draft ?? false,
     });
   }
+}
+
+const encodePath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+
+export function base64Utf8(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
 }

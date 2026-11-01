@@ -47,7 +47,40 @@
       "session_budget_cents": 100
     }
   },
-  "deployments": {},
+  "deployments": {
+    "ada-checkin": {
+      "id": "depl_01D7cexKFev6GqYS3fKHrdoC",
+      "agent": "ada"
+    },
+    "ada-weekly-evaluation": {
+      "id": "depl_014Dwn81cU9Bkbs2xpzJyRn6",
+      "agent": "ada"
+    },
+    "mira-triage": {
+      "id": "depl_01M99ixRXJd4k7DFPCcKraa7",
+      "agent": "mira"
+    },
+    "mira-review": {
+      "id": "depl_01V3XPhMsoqyvNnSvnB8Msgs",
+      "agent": "mira"
+    },
+    "mira-lessons": {
+      "id": "depl_016a2Q6FwYpH9XRTwAh239AE",
+      "agent": "mira"
+    },
+    "vera-daily": {
+      "id": "depl_018nwcoLMWzRkixiS54J8MX9",
+      "agent": "vera"
+    },
+    "vera-weekly": {
+      "id": "depl_01W2pbnjBBpHJGdEp9e1eKCw",
+      "agent": "vera"
+    },
+    "otto-tech-wg": {
+      "id": "depl_01A9j2gDPQrVXLjVPBDEgetg",
+      "agent": "otto"
+    }
+  },
   "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
   "shared_memory_store_id": "memstore_016a2PyDfBhNYKi7QkXfsiTp"
 }

@@ -255,6 +255,14 @@ export class Db {
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
   }
 
+  /** The task a session was started for, if any. */
+  async sessionTask(sessionId: string): Promise<Task | null> {
+    return this.db
+      .prepare("SELECT t.* FROM sessions s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?")
+      .bind(sessionId)
+      .first<Task>();
+  }
+
   async setTask(id: string, status: string, sessionId?: string) {
     await this.db
       .prepare("UPDATE tasks SET status = ?, session_id = COALESCE(?, session_id), updated_at = datetime('now') WHERE id = ?")

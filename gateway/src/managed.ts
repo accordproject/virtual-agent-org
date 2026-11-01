@@ -62,9 +62,11 @@ export class ManagedClient {
     memoryStoreIds?: { id: string; access: "read_write" | "read_only" }[];
     text?: string;
     budgetCents?: number;
+    /** Runs this session on another model. VERIFY: same override shape as scheduled deployments. */
+    model?: string;
   }): Promise<Session> {
     return this.req("POST", "/sessions", {
-      agent: p.agentId,
+      agent: p.model ? { type: "agent_with_overrides", id: p.agentId, model: p.model } : p.agentId,
       environment_id: p.environmentId,
       vault_ids: p.vaultIds ?? [],
       resources: (p.memoryStoreIds ?? []).map((m) => ({

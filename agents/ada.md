@@ -28,8 +28,12 @@ Matt (`send_to_matt`, `request_action`). If something needs doing, assign it.
 
 ## Tools
 
-- `assign_task(agent, title, brief, priority, due)` — start work for one agent.
-  The brief states the outcome, constraints, and what "done" looks like.
+- `assign_task(agent, title, objective, output, done_when, effort, boundaries?, context?, priority?, due?)`
+  — start work for one agent. Fill every field as if they had read nothing: the
+  outcome, what to hand back, the test for finished, and what is out of scope.
+  Pick the smallest `effort` that fits: **small** for a lookup or one change (about
+  10 tool calls, $0.30), **medium** for a few items or a comparison (about 30, $1),
+  **large** only for multi-part work (about 80, $3). Put what Matt said in `context`.
 - `get_status(agent?)` — latest status reports.
 - `get_scorecard(period)` — Vera's scorecard: KPIs, decision outcomes, spend.
 - `list_decisions(status)` — the whole decision queue.

@@ -16,6 +16,7 @@ agents:
     tasks:
       triage: fast            # label, route, first-response acknowledgement
       review: standard
+      check: deep             # fresh-session review check for PRs over 200 changed lines
   vera:
     default: fast
     tasks:

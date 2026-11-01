@@ -1,6 +1,6 @@
 import { cap, type Ctx } from "./context";
 import type { Decision, SessionRow } from "./db";
-import { decisionButtons, decisionCard, discordButtons } from "./format";
+import { decisionButtons, decisionCard, discordCard } from "./format";
 import { ManagedAgentsError } from "./managed";
 
 export class AgentUnavailable extends Error {}
@@ -25,7 +25,7 @@ export async function startSession(
   agent: string,
   text: string,
   origin: SessionRow["origin"],
-  opts: { chatId?: number; discordUser?: string; taskId?: string } = {},
+  opts: { chatId?: number; discordUser?: string; taskId?: string; budgetCents?: number; model?: string } = {},
 ): Promise<string> {
   await assertAvailable(ctx, agent);
   const dep = ctx.deployed.agents[agent];
@@ -39,7 +39,8 @@ export async function startSession(
       access: i === 0 ? "read_write" : "read_only",
     })),
     text,
-    budgetCents: dep.session_budget_cents,
+    budgetCents: opts.budgetCents ?? dep.session_budget_cents,
+    ...(opts.model ? { model: opts.model } : {}),
   });
   await ctx.db.upsertSession({
     id: session.id,
@@ -95,21 +96,29 @@ export function discordApprovable(ctx: Ctx, d: Pick<Decision, "kind" | "risk">):
   return risk > 0 && risk <= RISK_ORDER.indexOf(max);
 }
 
+/**
+ * Sends the owner the approval card. With approvals_app "discord", a card that can
+ * be approved in Discord goes only there; everything else, and any card Discord
+ * fails to deliver, goes to Telegram, so no decision is ever lost.
+ */
 export async function postDecision(ctx: Ctx, d: Decision) {
+  const app = ctx.network.approvals_app ?? "both";
+  const onDiscord = app !== "telegram" && (await postDiscordCard(ctx, d));
+  if (onDiscord && app === "discord") return;
   const id = await ctx.tg.send(ctx.ownerChatId, decisionCard(d), { buttons: decisionButtons(d) });
   await ctx.db.setDecisionMessage(d.id, id);
-  await postDiscordCard(ctx, d);
 }
 
-/** DMs the owner a Discord copy of the card, for decisions they may approve there. */
-export async function postDiscordCard(ctx: Ctx, d: Decision) {
-  if (!ctx.dc || !ctx.ownerDiscordId || !discordApprovable(ctx, d)) return;
+/** DMs the owner the card in Discord, for decisions they may approve there. True if it was delivered. */
+export async function postDiscordCard(ctx: Ctx, d: Decision): Promise<boolean> {
+  if (!ctx.dc || !ctx.ownerDiscordId || !discordApprovable(ctx, d)) return false;
   try {
-    const m = await ctx.dc.dm(ctx.ownerDiscordId, { content: decisionCard(d), buttons: discordButtons(d) });
+    const m = await ctx.dc.dm(ctx.ownerDiscordId, discordCard(d));
     await ctx.db.setDiscordMessage(d.id, m.channelId, m.messageId);
+    return true;
   } catch (e) {
-    // Telegram has the card; a Discord failure must not lose the decision.
     await ctx.db.audit({ agent: d.agent, event_type: "gateway.discord_error", detail: { id: d.id, error: String(e) } });
+    return false;
   }
 }
 
@@ -125,7 +134,7 @@ export async function refreshDecisionCard(ctx: Ctx, id: string) {
   }
   if (d.discord_channel_id && d.discord_message_id && ctx.dc) {
     try {
-      await ctx.dc.edit(d.discord_channel_id, d.discord_message_id, { content: decisionCard(d), buttons: discordButtons(d) });
+      await ctx.dc.edit(d.discord_channel_id, d.discord_message_id, discordCard(d));
     } catch {
       // Same: the decision record is authoritative.
     }

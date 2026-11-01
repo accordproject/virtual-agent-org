@@ -1,6 +1,7 @@
 import { cap } from "./context";
 import type { Decision } from "./db";
-import type { DiscordButton } from "./discordBot";
+import type { DiscordButton, DiscordEmbed, DiscordPayload } from "./discordBot";
+import { splitText } from "./telegram";
 import type { InlineButton } from "./telegram";
 
 const RISK = { low: "low risk", medium: "medium risk", high: "HIGH RISK" } as Record<string, string>;
@@ -78,4 +79,51 @@ export function discordButtons(d: Decision): DiscordButton[] {
   }
   if (d.status === "approved") return [{ label: "Mark done", custom_id: `x:${d.id}`, style: 1 }];
   return [];
+}
+
+const RISK_COLOUR: Record<string, number> = { low: 0x2e9e5b, medium: 0xe0a100, high: 0xd03b3b };
+const STATUS_ICON: Record<string, string> = { open: "🟡", approved: "✅", executed: "✅", rejected: "❌", failed: "⚠️" };
+
+/**
+ * The Discord card: a readable summary as the message, and the full content the
+ * decision would publish in embeds (Discord allows 6,000 characters there, against
+ * 2,000 in a message), so nothing is cut off.
+ */
+export function discordCard(d: Decision): DiscordPayload {
+  const payload = safeJson(d.payload);
+  const head = [
+    `${STATUS_ICON[d.status] ?? "•"} **${d.id} · ${cap(d.agent)} · ${d.kind}** · ${RISK[d.risk] ?? d.risk}`,
+    `**${d.summary}**`,
+    d.rationale,
+    `-# ${d.target}`,
+  ];
+  if (typeof payload.name === "string" && payload.name) head.push(`**Title:** ${payload.name}`);
+  if (payload.make_public === true) head.push("⚠ **Makes the video PUBLIC on Vimeo**");
+  if (Array.isArray(payload.mention) && payload.mention.length) {
+    head.push(`**Pings:** ${payload.mention.map((m) => `@${String(m).replace(/^@/, "")}`).join(", ")}`);
+  }
+  if (d.status !== "open") head.push(`**Status:** ${d.status}${d.note ? ` — ${d.note}` : ""}`);
+  if (d.result) head.push(`**Result:** ${d.result}`);
+
+  let content = head.join("\n");
+  if (content.length > 1990) {
+    // Shorten the rationale, never the decision line or status.
+    const over = content.length - 1990 + 2;
+    head[2] = `${d.rationale.slice(0, Math.max(0, d.rationale.length - over))}…`;
+    content = head.join("\n");
+  }
+
+  const text = payloadText(payload);
+  const embeds: DiscordEmbed[] = [];
+  if (text) {
+    let budget = 5900;
+    const parts = splitText(text, 4000);
+    for (const [i, part] of parts.entries()) {
+      if (budget <= 0 || embeds.length === 10) break;
+      const body = part.length > budget ? `${part.slice(0, budget - 40)}\n… (cut at Discord's limit)` : part;
+      embeds.push({ ...(i === 0 ? { title: "Content" } : {}), description: body, color: RISK_COLOUR[d.risk] });
+      budget -= body.length + (i === 0 ? 7 : 0);
+    }
+  }
+  return { content, buttons: discordButtons(d), embeds };
 }
