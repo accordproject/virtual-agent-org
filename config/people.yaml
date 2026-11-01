@@ -1,0 +1,59 @@
+# People who can reach the network, and who they are on each platform.
+#
+# Owner rights (approve, pause, stop, revoke) come ONLY from the
+# OWNER_TELEGRAM_ID Worker secret. Nothing in this file can grant them:
+# anyone listed here, whatever their role, gets read-and-ask access
+# (ask Ada, /status, /queue) on the platforms where their id matches.
+#
+# Discord and Telegram ids are not kept here: this repo may be public. They live
+# in the git-ignored config/people.ids.yaml (see config/people.ids.example.yaml),
+# keyed by name, and `npm run people:ids` loads them into the gateway.
+#
+# Roles (one, or a list such as `role: [tsc_member, maintainer]`):
+#   owner        Matt (owner rights still come only from the secret above)
+#   tsc_member   Technical Steering Committee member
+#   maintainer   reviews and merges; add `maintains: [concerto, template-engine]`
+#                to say where, so Mira requests their review on those repos
+#
+# github: login, for matching people across PRs, Discord and Telegram
+people:
+  - name: Matt Roberts
+    role: [owner, tsc_member, maintainer]
+    github: mttrbrts
+  - name: Dan Selman
+    role: [tsc_member, maintainer]
+    maintains: [concerto, template-engine]
+    github: dselman
+  - name: Diana Lease
+    role: [tsc_member, maintainer]
+    github: dianalease
+  - name: Niall Roche
+    role: [tsc_member, maintainer]
+    maintains: [apap]
+    github: niallroche
+  - name: Martin Halford
+    role: [tsc_member]
+    github: martinhalford
+  - name: Jonathan Casey
+    role: [tsc_member, maintainer]
+    maintains: [concerto]
+    github: jonathan-casey
+  - name: Tom Brooke
+    role: tsc_member
+    github: tbrooke
+  - name: Ertugrul Karademir
+    role: maintainer
+    maintains: [concerto, concerto-rust]
+    github: ekarademir
+  - name: Jamie Shorten
+    role: maintainer
+    maintains: [concerto, concerto-rust, concerto-dotnet]
+    github: jamieshorten
+  - name: Sanket Shevkar
+    role: maintainer
+    maintains: [concerto, template-archive]
+    github: sanketshevkar
+  # - name: Jane Doe
+  #   role: [tsc_member, maintainer]
+  #   maintains: [concerto]
+  #   github: janedoe

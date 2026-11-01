@@ -1,0 +1,285 @@
+{
+  "current_phase": 1,
+  "timezone": "Europe/London",
+  "monthly_credit_usd": 200,
+  "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
+  "repos": [
+    "accordproject/concerto",
+    "accordproject/template-engine",
+    "accordproject/template-playground"
+  ],
+  "action_kinds": {
+    "github.merge": {
+      "risk": "medium",
+      "executor": "github"
+    },
+    "github.close": {
+      "risk": "low",
+      "executor": "github"
+    },
+    "github.comment": {
+      "risk": "low",
+      "executor": "github"
+    },
+    "github.release": {
+      "risk": "high",
+      "executor": "github"
+    },
+    "github.approve_ci": {
+      "risk": "low",
+      "executor": "github",
+      "auto": true
+    },
+    "github.docs_pr": {
+      "risk": "medium",
+      "executor": "github"
+    },
+    "vimeo.publish": {
+      "risk": "medium",
+      "executor": "vimeo"
+    },
+    "wordpress.publish": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "linkedin.post": {
+      "risk": "medium",
+      "executor": "manual"
+    },
+    "discord.announce": {
+      "risk": "medium",
+      "executor": "discord"
+    },
+    "discord.ops": {
+      "risk": "low",
+      "executor": "discord_ops"
+    },
+    "message.person": {
+      "risk": "medium",
+      "executor": "discord_dm"
+    },
+    "email.send": {
+      "risk": "high",
+      "executor": "manual"
+    },
+    "spec.change": {
+      "risk": "high",
+      "executor": "manual"
+    },
+    "other": {
+      "risk": "high",
+      "executor": "manual"
+    }
+  },
+  "discord_approval_max_risk": "medium",
+  "approvals_app": "discord",
+  "review_check_required": true,
+  "model_tiers": {
+    "deep": "claude-opus-5-5",
+    "standard": "claude-sonnet-5-5",
+    "fast": "claude-haiku-5-5"
+  },
+  "discord_channels": {
+    "announcements": "874841542311960608",
+    "agent_ops": "1566187048765751348"
+  },
+  "people": [
+    {
+      "name": "Matt Roberts",
+      "roles": [
+        "owner",
+        "tsc_member",
+        "maintainer"
+      ],
+      "github": "mttrbrts"
+    },
+    {
+      "name": "Dan Selman",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/template-engine"
+      ],
+      "github": "dselman"
+    },
+    {
+      "name": "Diana Lease",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "github": "dianalease"
+    },
+    {
+      "name": "Niall Roche",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/apap"
+      ],
+      "github": "niallroche"
+    },
+    {
+      "name": "Martin Halford",
+      "roles": [
+        "tsc_member"
+      ],
+      "github": "martinhalford"
+    },
+    {
+      "name": "Jonathan Casey",
+      "roles": [
+        "tsc_member",
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto"
+      ],
+      "github": "jonathan-casey"
+    },
+    {
+      "name": "Tom Brooke",
+      "roles": [
+        "tsc_member"
+      ],
+      "github": "tbrooke"
+    },
+    {
+      "name": "Ertugrul Karademir",
+      "roles": [
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/concerto-rust"
+      ],
+      "github": "ekarademir"
+    },
+    {
+      "name": "Jamie Shorten",
+      "roles": [
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/concerto-rust",
+        "accordproject/concerto-dotnet"
+      ],
+      "github": "jamieshorten"
+    },
+    {
+      "name": "Sanket Shevkar",
+      "roles": [
+        "maintainer"
+      ],
+      "maintains": [
+        "accordproject/concerto",
+        "accordproject/template-archive"
+      ],
+      "github": "sanketshevkar"
+    }
+  ],
+  "agents": {
+    "ada": {
+      "name": "ada",
+      "title": "Chief of Staff",
+      "phase": 1,
+      "requestable": [
+        "spec.change",
+        "other",
+        "discord.ops"
+      ]
+    },
+    "mira": {
+      "name": "mira",
+      "title": "Maintainer Desk",
+      "phase": 1,
+      "requestable": [
+        "github.merge",
+        "github.close",
+        "github.comment",
+        "github.release",
+        "github.approve_ci",
+        "github.docs_pr",
+        "discord.ops"
+      ]
+    },
+    "vera": {
+      "name": "vera",
+      "title": "Metrics & Audit",
+      "phase": 1,
+      "requestable": []
+    },
+    "otto": {
+      "name": "otto",
+      "title": "Meetings",
+      "phase": 1,
+      "requestable": [
+        "vimeo.publish",
+        "discord.announce",
+        "github.comment",
+        "message.person",
+        "discord.ops"
+      ]
+    },
+    "rosa": {
+      "name": "rosa",
+      "title": "Community",
+      "phase": 2,
+      "requestable": [
+        "github.comment",
+        "discord.announce",
+        "message.person"
+      ]
+    },
+    "juno": {
+      "name": "juno",
+      "title": "Marketing & Docs",
+      "phase": 2,
+      "requestable": [
+        "wordpress.publish",
+        "linkedin.post",
+        "github.comment"
+      ]
+    },
+    "sage": {
+      "name": "sage",
+      "title": "Research",
+      "phase": 2,
+      "requestable": []
+    },
+    "kit": {
+      "name": "kit",
+      "title": "Training & Security",
+      "phase": 3,
+      "requestable": [
+        "github.comment",
+        "other",
+        "discord.ops"
+      ]
+    },
+    "felix": {
+      "name": "felix",
+      "title": "Release & CI",
+      "phase": 3,
+      "requestable": [
+        "github.release",
+        "github.comment"
+      ]
+    },
+    "nell": {
+      "name": "nell",
+      "title": "Ecosystem & Funding",
+      "phase": 3,
+      "requestable": [
+        "email.send",
+        "message.person"
+      ]
+    }
+  }
+}

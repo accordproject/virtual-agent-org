@@ -1,0 +1,43 @@
+# Model routing. Specs name a TIER, never a model ID, so the network can move
+# to a router later by changing this file and the runtime, not the specs.
+
+tiers:
+  deep:     claude-opus-5-5     # synthesis, evaluation, security review
+  standard: claude-sonnet-5-5   # drafting, code review, analysis
+  fast:     claude-haiku-5-5    # triage, classification, filtering
+
+# Default tier per agent, plus per-task overrides.
+# Ada's weekly evaluation proposes changes here as PRs (one per agent per week, max).
+agents:
+  ada:
+    default: deep
+  mira:
+    default: standard
+    tasks:
+      triage: fast            # label, route, first-response acknowledgement
+      review: standard
+      check: deep             # fresh-session review check for PRs over 200 changed lines
+  vera:
+    default: fast
+    tasks:
+      analysis: standard      # weekly scorecard narrative and anomaly reasoning
+  otto:
+    default: standard
+  rosa:
+    default: standard
+    tasks:
+      welcome: fast
+  juno:
+    default: standard
+  sage:
+    default: standard
+    tasks:
+      feed_filter: fast
+  kit:
+    default: standard
+    tasks:
+      threat_review: deep
+  felix:
+    default: standard
+  nell:
+    default: standard

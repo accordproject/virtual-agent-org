@@ -1,0 +1,26 @@
+# External MCP servers agents may use, and how each agent authenticates.
+# Each agent gets its own vault; deploy.ts adds one credential per server from
+# the environment variable named in `token_env` (with <AGENT> replaced by the
+# agent's name in capitals, e.g. MIRA_GITHUB_TOKEN). Tokens are never committed.
+
+servers:
+  github:
+    url: https://api.githubcopilot.com/mcp/
+    token_env: <AGENT>_GITHUB_TOKEN
+    # Fine-grained personal access tokens from mttrbrts-agent (decision 12), one per
+    # agent. Read-only tokens cover all accordproject repos; tokens that can write
+    # (mode read_plus_triage) list only the repos in scope (decision 23).
+  vimeo:
+    url: ""            # TODO: Vimeo MCP server URL; leave empty to skip
+    token_env: <AGENT>_VIMEO_TOKEN
+  wordpress:
+    url: ""            # TODO: WordPress.com MCP server URL; leave empty to skip
+    token_env: <AGENT>_WORDPRESS_TOKEN
+
+# How permission policies map from permissions.yaml modes.
+# Scoping lives in the credential (a read-only token cannot write); always_ask is
+# the backstop for servers whose token can write.
+modes:
+  read: always_allow
+  read_plus_triage: always_allow
+  draft_only: always_ask

@@ -1,0 +1,7 @@
+# Discord channels the app's bot posts to (decision 17A). Channel ids aren't secret.
+# Find one with Developer Mode on (Settings → Advanced): right-click the channel →
+# Copy Channel ID. Give the bot View Channel and Send Messages in each.
+# Leave an id empty to fall back to a card you post by hand.
+channels:
+  announcements: "874841542311960608"   # public: approved discord.announce posts, never pings anyone
+  agent_ops: "1566187048765751348"       # private: approved discord.ops posts, which may ping people in people.yaml

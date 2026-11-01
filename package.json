@@ -1,0 +1,26 @@
+{
+  "name": "virtual-agent-org",
+  "private": true,
+  "type": "module",
+  "description": "A virtual organisation of Claude agents that helps run the Accord Project, steered from Telegram.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "check": "tsx scripts/compile.ts --check",
+    "compile": "tsx scripts/compile.ts",
+    "deploy:agents": "tsx scripts/deploy.ts",
+    "deploy:agents:dry": "tsx scripts/deploy.ts --dry-run",
+    "deploy:agents:rotate": "tsx scripts/deploy.ts --rotate-credentials",
+    "discord:commands": "tsx scripts/discord-commands.ts",
+    "gateway:deploy": "npm run compile && npm --prefix gateway run deploy",
+    "people:ids": "tsx scripts/people-ids.ts",
+    "repo:add": "tsx scripts/repo-add.ts",
+    "test": "npm run check && npm run test:scripts && npm --prefix gateway run typecheck && npm --prefix gateway test",
+    "test:scripts": "tsx --test scripts/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "yaml": "^2.6.0"
+  }
+}

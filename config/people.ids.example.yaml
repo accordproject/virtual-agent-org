@@ -1,0 +1,10 @@
+# Copy to config/people.ids.yaml (git-ignored) and fill in real ids.
+# Keys are names exactly as in config/people.yaml. Then run `npm run people:ids`.
+#
+#   telegram: numeric user id (they message the bot, then /whoami)
+#   discord:  numeric user id, quoted (Discord settings → Advanced → Developer Mode,
+#             then right-click the person → Copy User ID)
+
+Jane Doe:
+  discord: "123456789012345678"
+  telegram: "123456789"

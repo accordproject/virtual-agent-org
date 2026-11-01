@@ -1,0 +1,114 @@
+# Recurring work, deployed as Managed Agents scheduled deployments.
+# Times are wall-clock Europe/London; avoid 01:00-03:00 (DST skips/duplicates).
+# budget_usd is a per-run cap: the session pauses when it is reached.
+
+schedules:
+  - name: ada-checkin
+    agent: ada
+    cron: "30 7 */2 * *"        # every other day, 07:30
+    budget_usd: 1.50
+    prompt: >
+      Run the check-in. Ask each active agent for status with get_status, read the latest
+      scorecard, list open decisions, and send Matt one check-in message with send_to_matt
+      in the standard format.
+
+  - name: ada-weekly-evaluation
+    agent: ada
+    cron: "0 16 * * 5"          # Fridays 16:00
+    budget_usd: 3.00
+    prompt: >
+      Run the weekly evaluation for every active agent using evaluation/rubric.md.
+      Record each evaluation with record_evaluation and raise at most one spec.change
+      request per agent.
+
+  - name: mira-triage
+    agent: mira
+    cron: "0 8,13,18 * * *"     # three passes a day
+    budget_usd: 1.00
+    prompt: >
+      Triage pass: first-respond to every new PR and issue, label and route, request
+      reviewers, approve CI for reviewed fork PRs, nudge, and propose closures. Update the
+      outcomes in /notes/review-ledger.md. Do not review code in this pass.
+
+  - name: mira-review
+    agent: mira
+    cron: "0 10,15 * * 1-5"     # weekdays, twice a day
+    budget_usd: 3.00
+    prompt: >
+      Review pass: review up to three PRs that are ready for review, oldest first, following
+      "Reviewing a PR" in your instructions, and hand each draft to request_review_check.
+
+  - name: mira-lessons
+    agent: mira
+    cron: "0 14 * * 5"          # Fridays 14:00, before Ada's evaluation
+    budget_usd: 1.50
+    prompt: >
+      Lessons pass: consolidate /notes/review-ledger.md into review lessons and, where a
+      lesson is ready, propose an update to that repo's AGENTS.md with github.docs_pr.
+
+  - name: vera-daily
+    agent: vera
+    cron: "0 6 * * *"
+    budget_usd: 0.50
+    prompt: >
+      Refresh KPIs and agent cost, write the daily scorecard, and flag anomalies.
+
+  - name: vera-weekly
+    agent: vera
+    cron: "0 14 * * 5"          # before Ada's evaluation
+    budget_usd: 1.50
+    prompt: >
+      Build the weekly scorecard per agent: KPIs, decision outcomes, spend and cost per outcome.
+
+  - name: otto-tech-wg
+    agent: otto
+    cron: "0 9 * * 1"           # Mondays: prepare this week's Tech WG, chase last week's recording
+    budget_usd: 1.00
+    prompt: >
+      Prepare the agenda for this week's Tech WG and process any new recording since last run.
+
+  - name: otto-wg-briefing
+    agent: otto
+    cron: "0 10 * * 2"          # Tuesdays 10:00, the day before the Tech WG
+    budget_usd: 1.00
+    prompt: >
+      Send Diana Lease, who chairs the Tech WG, the briefing for tomorrow's meeting, following
+      "Chair's briefing" in your instructions.
+
+  # Phase 2+
+  - name: rosa-community
+    agent: rosa
+    cron: "0 9,17 * * *"
+    budget_usd: 0.75
+    prompt: Welcome newcomers, answer questions, and check good-first-issue coverage.
+
+  - name: sage-weekly-brief
+    agent: sage
+    cron: "0 7 * * 1"
+    budget_usd: 1.00
+    prompt: Write the weekly research brief.
+
+  - name: juno-weekly
+    agent: juno
+    cron: "0 10 * * 3"
+    budget_usd: 1.00
+    prompt: Review docs gaps and draft this week's posts from recent work.
+
+  # Phase 3
+  - name: kit-weekly
+    agent: kit
+    cron: "0 10 * * 2"
+    budget_usd: 2.00
+    prompt: Check security posture and progress the training plan.
+
+  - name: felix-ci
+    agent: felix
+    cron: "0 7 * * *"
+    budget_usd: 0.75
+    prompt: Check CI health and flaky tests; prepare release notes if a release is due.
+
+  - name: nell-weekly
+    agent: nell
+    cron: "0 11 * * 4"
+    budget_usd: 1.00
+    prompt: Progress adopter, mentoring and funding pipelines.
