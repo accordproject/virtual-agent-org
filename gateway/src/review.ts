@@ -245,8 +245,9 @@ export const checklist = (checks: Check[]) => checks.map((c) => `${c.ok ? "✓" 
 
 /**
  * Open PRs in the order Mira should look at them: first-time contributors, then
- * age, then green CI and small size. Drafts and PRs already reviewed at their
- * current head are listed but marked.
+ * age, then green CI and small size. Age counts for two weeks at most, so new PRs
+ * aren't stuck behind the backlog (decision 39). Drafts and PRs already reviewed at
+ * their current head are listed but marked.
  */
 export function queueFrom(repo: string, pulls: OpenPull[], reviewed: Set<string>, now = Date.now()) {
   return pulls
@@ -257,7 +258,7 @@ export function queueFrom(repo: string, pulls: OpenPull[], reviewed: Set<string>
       const lines = p.additions + p.deletions;
       const ci = p.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null;
       const first = FIRST_TIME.includes(assoc);
-      const priority = p.isDraft ? 0 : (first ? 30 : 0) + Math.min(age, 60) + (ci === "SUCCESS" ? 10 : 0) + (lines <= 100 ? 10 : 0);
+      const priority = p.isDraft ? 0 : (first ? 30 : 0) + Math.min(age, 14) + (ci === "SUCCESS" ? 10 : 0) + (lines <= 100 ? 10 : 0);
       return {
         target,
         title: p.title,
