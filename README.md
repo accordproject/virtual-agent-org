@@ -45,7 +45,8 @@ network is governed; [docs/decisions.md](docs/decisions.md) records why.
 
 ## Talking to the network
 
-Plain messages to the bot go to Ada. Commands: `/status`, `/queue`,
+Plain messages to the Telegram bot go to Ada. On Discord, use `/ada <text>` in the
+server or in a DM with the bot. Commands: `/status`, `/queue`,
 `/ask <agent> <text>`, `/pause <agent>`, `/resume <agent>`, `/stop <agent|all>`,
 `/revoke <agent> confirm`. People listed in `config/people.yaml` can ask questions and
 see status and the queue; only the chair can instruct, approve or stop agents.

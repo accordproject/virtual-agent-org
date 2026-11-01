@@ -101,7 +101,9 @@ Then point each service at the gateway:
   `ANTHROPIC_WEBHOOK_SECRET`.
 - **Discord (optional):** in the Developer Portal set the Interactions Endpoint URL to
   `https://<worker>/discord`, then register the slash commands:
-  `DISCORD_APP_ID=… DISCORD_BOT_TOKEN=… DISCORD_GUILD_ID=… npm run discord:commands`.
+  `DISCORD_APP_ID=… DISCORD_BOT_TOKEN=… npm run discord:commands`. They work in your
+  server and in DMs with the bot. If you registered them before decision 34, add
+  `DISCORD_GUILD_ID=…` once to remove the old server-only copies.
 
 Check `https://<worker>/health` answers `ok`, and that `/whoami` in Telegram knows you.
 

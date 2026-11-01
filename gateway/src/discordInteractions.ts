@@ -164,9 +164,12 @@ async function modalSubmit(ctx: Ctx, i: Interaction, owner: boolean, run: (w: ()
 }
 
 /** Slash command definitions, registered by scripts/discord-commands.ts. */
+/** Where commands work: the server and DMs with the bot (decision 34). */
+const COMMAND_SCOPE = { contexts: [0, 1], integration_types: [0] };
+
 export function commandDefinitions(agents: string[]) {
   const agentChoices = agents.map((a) => ({ name: cap(a), value: a }));
-  return [
+  const defs = [
     { name: "ada", description: "Message Ada, the Chief of Staff", options: [{ type: 3, name: "message", description: "What you want", required: true }] },
     {
       name: "ask",
@@ -185,4 +188,5 @@ export function commandDefinitions(agents: string[]) {
       options: [{ type: 3, name: "agent", description: "Which agent", required: true, choices: [...agentChoices, { name: "All agents", value: "all" }] }],
     },
   ];
+  return defs.map((d) => ({ ...d, ...COMMAND_SCOPE }));
 }
