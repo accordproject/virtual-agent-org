@@ -1,0 +1,770 @@
+// One spec per action kind: what a valid request looks like, what the approval card
+// shows, and what approval does. The card is built from the same normalised payload the
+// executor runs, so what Matt approves is what happens. Critical credentials live here,
+// never in agent sandboxes.
+
+import type { ActionKind, Person } from "./config";
+import type { Ctx } from "./context";
+import type { Decision } from "./db";
+import { parseTarget, type RepoRef } from "./github";
+import { resolveMentions } from "./people";
+import { GATEWAY_LABEL, checklist, failed, mergeChecks, prFacts } from "./review";
+import { toSeconds, type Chapter } from "./vimeo";
+
+export interface ExecResult {
+  ok: boolean;
+  manual?: boolean; // the owner must now do it by hand, then tap "Mark done"
+  result: string;
+}
+
+export type Payload = Record<string, unknown>;
+
+/** A request with its target and payload checked and normalised. */
+export interface Normalised {
+  target: string;
+  payload: Payload;
+}
+
+/** What the card shows: short labelled lines, then long text in full. */
+export interface ActionView {
+  lines: string[];
+  blocks: { title: string; text: string }[];
+}
+
+/** Every problem with a request, so the agent can fix them all in one go. */
+export class ActionInvalid extends Error {
+  constructor(public problems: string[]) {
+    super(problems.join("\n"));
+  }
+}
+
+interface ActionSpec {
+  executor: ActionKind["executor"] | "managed";
+  validate(ctx: Ctx, target: string, payload: Payload): Normalised;
+  describe(target: string, payload: Payload): ActionView;
+  execute(ctx: Ctx, d: Decision, n: Normalised): Promise<ExecResult>;
+}
+
+export function inScope(ctx: Ctx, r: RepoRef): boolean {
+  const full = `${r.owner}/${r.repo}`.toLowerCase();
+  const allowed = [ctx.network.sandbox_repo, ...ctx.network.repos].filter(Boolean).map((s) => s.toLowerCase());
+  return allowed.includes(full);
+}
+
+/** The only files github.docs_pr may write: guidance for contributors and review agents. */
+export function isGuidanceFile(path: string): boolean {
+  return !path.split("/").includes("..") && /(^|\/)(AGENTS|CONTRIBUTING|REVIEWING|CLAUDE)\.md$/.test(path);
+}
+
+export function safeJson(s: string | null | undefined): Record<string, unknown> {
+  try {
+    const v = JSON.parse(s ?? "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+// ---- checking payloads --------------------------------------------------------
+
+/**
+ * Reads a payload field by field, collecting problems. Fields not read are unknown
+ * and refused, so nothing in a payload can act without appearing on the card.
+ */
+class Fields {
+  problems: string[] = [];
+  private seen = new Set<string>();
+  constructor(private p: Payload) {}
+
+  private present(k: string) {
+    this.seen.add(k);
+    const v = this.p[k];
+    return v !== undefined && v !== null && !(typeof v === "string" && !v.trim());
+  }
+
+  /** Text under `key` or one of its aliases. Two different texts are refused: only one could run. */
+  text(key: string, opts: { required?: boolean; max?: number; aliases?: string[] } = {}): string | undefined {
+    const keys = [key, ...(opts.aliases ?? [])];
+    const set = keys.filter((k) => this.present(k));
+    const bad = set.filter((k) => typeof this.p[k] !== "string");
+    if (bad.length) {
+      this.problems.push(`payload.${bad[0]} must be text`);
+      return undefined;
+    }
+    const values = [...new Set(set.map((k) => (this.p[k] as string).trim()))];
+    if (values.length > 1) {
+      this.problems.push(`set only one of payload.${set.join(", payload.")}`);
+      return undefined;
+    }
+    const v = values[0];
+    if (v === undefined) {
+      if (opts.required) this.problems.push(`payload.${key} is required`);
+      return undefined;
+    }
+    if (opts.max && v.length > opts.max) this.problems.push(`payload.${key} is over ${opts.max.toLocaleString("en-GB")} characters`);
+    return v;
+  }
+
+  bool(key: string): boolean {
+    if (!this.present(key)) return false;
+    const v = this.p[key];
+    if (typeof v !== "boolean") this.problems.push(`payload.${key} must be true or false`);
+    return v === true;
+  }
+
+  /** A list of names, also accepting a single one. */
+  names(key: string, opts: { required?: boolean } = {}): string[] {
+    if (!this.present(key)) {
+      if (opts.required) this.problems.push(`payload.${key} is required`);
+      return [];
+    }
+    const v = this.p[key];
+    const list = typeof v === "string" ? [v] : Array.isArray(v) ? v : null;
+    if (!list || list.some((x) => typeof x !== "string")) {
+      this.problems.push(`payload.${key} must be a list of names`);
+      return [];
+    }
+    const out = [...new Set((list as string[]).map((x) => x.replace(/^@/, "").trim()).filter(Boolean))];
+    if (opts.required && !out.length) this.problems.push(`payload.${key} is required`);
+    return out;
+  }
+
+  raw(key: string): unknown {
+    this.seen.add(key);
+    return this.p[key];
+  }
+
+  sha(key: string): string | undefined {
+    const v = this.text(key, { required: true });
+    if (v !== undefined && !/^[0-9a-f]{7,40}$/i.test(v)) this.problems.push(`payload.${key} must be a commit sha of at least 7 characters`);
+    return v?.toLowerCase();
+  }
+
+  /** Refuses anything not read, then throws if there were problems. */
+  done(): void {
+    const unknown = Object.keys(this.p).filter((k) => !this.seen.has(k));
+    if (unknown.length) this.problems.push(`unknown payload field${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")}: remove ${unknown.length > 1 ? "them" : "it"}`);
+    if (this.problems.length) throw new ActionInvalid(this.problems);
+  }
+}
+
+/** Drops undefined values, so a normalised payload is plain JSON. */
+const compact = (p: Payload): Payload => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined));
+
+/** The target as "owner/repo" or "owner/repo#N", checked against the configured repos. */
+function repoTarget(ctx: Ctx, target: string, problems: string[], number: "required" | "none"): Required<RepoRef> | undefined {
+  const ref = parseTarget(target.trim());
+  if (!ref) {
+    problems.push(`target must be ${number === "required" ? "a pull request or issue, e.g. accordproject/concerto#123" : "a repo, e.g. accordproject/concerto"}`);
+    return undefined;
+  }
+  if (!inScope(ctx, ref)) problems.push(`${ref.owner}/${ref.repo} is not in the configured repos`);
+  if (number === "required" && !ref.number) problems.push("target needs a PR or issue number, e.g. accordproject/concerto#123");
+  if (number === "none" && ref.number) problems.push("target must be the repo alone, without a PR or issue number");
+  return ref as Required<RepoRef>;
+}
+
+const refString = (r: RepoRef) => `${r.owner}/${r.repo}${r.number ? `#${r.number}` : ""}`;
+
+function findPerson(ctx: Ctx, who: string): Person | undefined {
+  const key = who.toLowerCase();
+  return (ctx.network.people ?? []).find((p) => p.github?.toLowerCase() === key || p.name.toLowerCase() === key);
+}
+
+// ---- views ------------------------------------------------------------------
+
+const str = (v: unknown) => (typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v));
+const yesNo = (v: unknown) => (v === true ? "yes" : "no");
+const nameList = (v: unknown) => (Array.isArray(v) ? v.map(String).join(", ") : str(v));
+
+/** Shows every field a view didn't cover, so a payload that skipped validation hides nothing. */
+function withRest(view: ActionView, payload: Payload, shown: string[]): ActionView {
+  const rest = Object.keys(payload).filter((k) => !shown.includes(k) && payload[k] !== undefined);
+  if (!rest.length) return view;
+  return { ...view, blocks: [...view.blocks, { title: "Other payload fields", text: JSON.stringify(Object.fromEntries(rest.map((k) => [k, payload[k]])), null, 2) }] };
+}
+
+/** Text under a field or any of its aliases, for showing payloads stored before they were normalised. */
+const pick = (p: Payload, keys: string[]) => keys.map((k) => p[k]).find((v) => typeof v === "string" && v.trim()) as string | undefined;
+const pickKey = (p: Payload, keys: string[]) => keys.filter((k) => p[k] !== undefined);
+
+const TEXT_ALIASES = ["text", "body", "message", "comment"];
+
+// ---- GitHub -------------------------------------------------------------------
+
+const MERGE_METHODS = ["squash", "merge", "rebase"];
+
+const githubMerge: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const sha = f.sha("sha");
+    const method = f.text("merge_method") ?? "squash";
+    if (!MERGE_METHODS.includes(method)) f.problems.push(`payload.merge_method must be one of ${MERGE_METHODS.join(", ")}`);
+    f.done();
+    return { target: refString(ref!), payload: { sha, merge_method: method } };
+  },
+  describe(target, p) {
+    return withRest({ lines: [`Merge: ${target} by ${str(p.merge_method) || "squash"} at ${str(p.sha).slice(0, 7) || "(no sha)"}`], blocks: [] }, p, ["sha", "merge_method"]);
+  },
+  async execute(ctx, d, { target, payload }) {
+    const ref = parseTarget(target) as Required<RepoRef>;
+    // Decision 35: the merge checks run again at approval, which may be hours after the proposal.
+    const f = await prFacts(ctx, ref);
+    const checks = mergeChecks(f, payload.sha as string, await ctx.db.latestReview(f.target, f.sha));
+    if (failed(checks).length) return { ok: false, result: `Not merged; the PR changed since the proposal:\n${checklist(failed(checks))}` };
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const gh = await ctx.github();
+    // GitHub refuses if the head moved after the checks above.
+    const r = await gh.merge(ref, payload.merge_method as "merge" | "squash" | "rebase", f.sha);
+    if (r.merged) await ctx.db.setReviewOutcome(target, "merged", `merged by the gateway (${d.id})`);
+    return { ok: r.merged, result: r.merged ? `Merged as ${r.sha.slice(0, 7)}` : "GitHub did not merge" };
+  },
+};
+
+const githubClose: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const text = f.text("text", { aliases: TEXT_ALIASES.slice(1), max: 65_000 });
+    f.done();
+    return { target: refString(ref!), payload: compact({ text }) };
+  },
+  describe(target, p) {
+    const text = pick(p, TEXT_ALIASES);
+    return withRest(
+      { lines: [`Close: ${target}${text ? ", commenting first" : ", with no comment"}`], blocks: text ? [{ title: "Comment", text }] : [] },
+      p,
+      pickKey(p, TEXT_ALIASES),
+    );
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const ref = parseTarget(target) as Required<RepoRef>;
+    const gh = await ctx.github();
+    if (payload.text) await gh.comment(ref, payload.text as string);
+    await gh.close(ref);
+    return { ok: true, result: "Closed" };
+  },
+};
+
+const githubComment: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const text = f.text("text", { required: true, aliases: TEXT_ALIASES.slice(1), max: 65_000 });
+    f.done();
+    return { target: refString(ref!), payload: { text } };
+  },
+  describe(target, p) {
+    const text = pick(p, TEXT_ALIASES);
+    return withRest({ lines: [`Comment on: ${target}, as the project bot`], blocks: text ? [{ title: "Comment", text }] : [] }, p, pickKey(p, TEXT_ALIASES));
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const c = await (await ctx.github()).comment(parseTarget(target) as Required<RepoRef>, payload.text as string);
+    return { ok: true, result: `Commented: ${c.html_url}` };
+  },
+};
+
+const NOTES_ALIASES = ["body", "text", "notes"];
+const COMMITISH_ALIASES = ["commitish", "target_commitish", "target"];
+
+const githubRelease: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "none");
+    const tag = f.text("tag", { required: true });
+    if (tag && !/^[\w.+\-/]{1,100}$/.test(tag)) f.problems.push("payload.tag must be a tag name such as v1.2.0, with no spaces");
+    const name = f.text("name", { max: 200 });
+    const body = f.text("body", { aliases: NOTES_ALIASES.slice(1), max: 125_000 });
+    const commitish = f.text("commitish", { aliases: COMMITISH_ALIASES.slice(1) });
+    const draft = f.bool("draft");
+    f.done();
+    return { target: refString(ref!), payload: compact({ tag, name, body, commitish, draft }) };
+  },
+  describe(target, p) {
+    const commitish = pick(p, COMMITISH_ALIASES);
+    const notes = pick(p, NOTES_ALIASES);
+    return withRest(
+      {
+        lines: [
+          `Release: ${target}`,
+          `Tag: ${str(p.tag) || "(none)"} · commitish: ${commitish ?? "the default branch"} · draft: ${yesNo(p.draft)}`,
+          ...(p.name ? [`Name: ${str(p.name)}`] : []),
+        ],
+        blocks: notes ? [{ title: "Release notes", text: notes }] : [],
+      },
+      p,
+      ["tag", "name", "draft", ...pickKey(p, [...NOTES_ALIASES, ...COMMITISH_ALIASES])],
+    );
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const r = await (await ctx.github()).release(parseTarget(target)!, {
+      tag: payload.tag as string,
+      name: payload.name as string | undefined,
+      body: (payload.body as string | undefined) ?? "",
+      target: payload.commitish as string | undefined,
+      draft: payload.draft as boolean,
+    });
+    return { ok: true, result: `Released: ${r.html_url}` };
+  },
+};
+
+const githubApproveCi: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const sha = f.sha("sha");
+    f.done();
+    return { target: refString(ref!), payload: { sha } };
+  },
+  describe(target, p) {
+    return withRest({ lines: [`Approve CI: runs waiting for approval on ${target} at ${str(p.sha).slice(0, 7) || "(no sha)"}`], blocks: [] }, p, ["sha"]);
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const ref = parseTarget(target) as Required<RepoRef>;
+    const gh = await ctx.github();
+    const pr = await gh.pull(ref);
+    const want = payload.sha as string;
+    if (!pr.head.sha.startsWith(want)) {
+      return { ok: false, result: `PR has new commits since the review (head is ${pr.head.sha.slice(0, 7)}); review again` };
+    }
+    const runs = await gh.runsAwaitingApproval(ref, pr.head.sha);
+    if (!runs.length) return { ok: true, result: `No runs waiting for approval on ${pr.head.sha.slice(0, 7)}` };
+    for (const run of runs) await gh.approveRun(ref, run.id);
+    return { ok: true, result: `Approved ${runs.length} CI run${runs.length > 1 ? "s" : ""} (${runs.map((r) => r.name).join(", ")}) on ${pr.head.sha.slice(0, 7)}` };
+  },
+};
+
+type InlineComment = { path: string; line: number; body: string };
+
+const githubReview: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    // Built by submit_review (decision 36), never by an agent; checked all the same.
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const sha = f.sha("sha");
+    const body = f.text("body", { required: true, max: 65_000 });
+    const rawComments = f.raw("comments") ?? [];
+    const comments: InlineComment[] = [];
+    if (!Array.isArray(rawComments)) f.problems.push("payload.comments must be a list");
+    else
+      rawComments.forEach((c, i) => {
+        const x = (c ?? {}) as Record<string, unknown>;
+        if (typeof x.path !== "string" || !x.path || !Number.isInteger(x.line) || (x.line as number) < 1 || typeof x.body !== "string" || !x.body) {
+          f.problems.push(`payload.comments[${i}] needs a path, a positive line and a body`);
+        } else comments.push({ path: x.path, line: x.line as number, body: x.body });
+      });
+    const labels = f.names("labels");
+    const bad = labels.filter((l) => !GATEWAY_LABEL.test(l));
+    if (bad.length) f.problems.push(`payload.labels may only be the gateway's ai/risk and ai/decision labels, not ${bad.join(", ")}`);
+    f.done();
+    return { target: refString(ref!), payload: { sha, body, comments, labels } };
+  },
+  describe(target, p) {
+    const comments = Array.isArray(p.comments) ? (p.comments as InlineComment[]) : [];
+    return withRest(
+      {
+        lines: [
+          `Review: posts a comment-only review on ${target} at ${str(p.sha).slice(0, 7) || "(no sha)"}`,
+          ...(Array.isArray(p.labels) && p.labels.length ? [`Labels: ${nameList(p.labels)}`] : []),
+        ],
+        blocks: [
+          ...(typeof p.body === "string" ? [{ title: "Review", text: p.body }] : []),
+          ...(comments.length ? [{ title: `Inline comments (${comments.length})`, text: comments.map((c) => `${c.path}:${c.line}\n${c.body}`).join("\n\n") }] : []),
+        ],
+      },
+      p,
+      ["sha", "body", "comments", "labels"],
+    );
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const ref = parseTarget(target) as Required<RepoRef>;
+    const gh = await ctx.github();
+    const review = { commit_id: payload.sha as string, body: payload.body as string, comments: payload.comments as InlineComment[] };
+    let posted: string;
+    try {
+      const r = await gh.createReview(ref, review);
+      posted = `Posted review: ${r.html_url}`;
+    } catch (e) {
+      // A line outside the diff makes GitHub refuse the whole review: post the findings in the body instead.
+      if (!review.comments.length || !String(e).includes(": 422")) throw e;
+      const moved = review.comments.map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n\n/, ": ")}`).join("\n");
+      const r = await gh.createReview(ref, { ...review, body: review.body.replace(/\n---\n/, `\n${moved}\n\n---\n`), comments: [] });
+      posted = `Posted review: ${r.html_url} (findings in the summary; GitHub refused the inline comments)`;
+    }
+    const labels = payload.labels as string[];
+    if (!labels.length) return { ok: true, result: posted };
+    // The review is posted either way; a label GitHub refuses is reported, not fatal.
+    try {
+      for (const old of (await gh.labels(ref)).filter((l) => GATEWAY_LABEL.test(l) && !labels.includes(l))) await gh.removeLabel(ref, old);
+      await gh.addLabels(ref, labels);
+      return { ok: true, result: `${posted} and labelled it ${labels.join(", ")}` };
+    } catch (e) {
+      return { ok: true, result: `${posted} but couldn't label it (${e instanceof Error ? e.message : String(e)})` };
+    }
+  },
+};
+
+const githubDocsPr: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "none");
+    const path = f.text("path", { required: true })?.replace(/^\/+/, "");
+    if (path && !isGuidanceFile(path)) f.problems.push(`docs_pr only writes AGENTS.md, CONTRIBUTING.md, REVIEWING.md or CLAUDE.md, not "${path}"`);
+    const content = f.text("content", { required: true, max: 200_000 });
+    const title = f.text("title", { max: 200 }) ?? (path ? `Update ${path} with review lessons` : undefined);
+    const body = f.text("body", { max: 60_000 });
+    f.done();
+    return { target: refString(ref!), payload: compact({ path, content: content!.endsWith("\n") ? content : `${content}\n`, title, body }) };
+  },
+  describe(target, p) {
+    const content = str(p.content);
+    return withRest(
+      {
+        lines: [`Opens a PR on ${target} replacing ${str(p.path) || "(no path)"}`, ...(p.title ? [`PR title: ${str(p.title)}`] : [])],
+        blocks: [
+          ...(p.body ? [{ title: "PR description", text: str(p.body) }] : []),
+          { title: `New ${str(p.path) || "file"}, whole file (${content.length.toLocaleString("en-GB")} characters)`, text: content || "(empty)" },
+        ],
+      },
+      p,
+      ["path", "content", "title", "body"],
+    );
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const pr = await (await ctx.github()).proposeFile(parseTarget(target)!, {
+      path: payload.path as string,
+      content: payload.content as string,
+      branch: `agents/${d.agent}-${d.id.toLowerCase()}`,
+      title: payload.title as string,
+      body: `${(payload.body as string | undefined) || d.rationale}\n\n---\nDrafted by an Accord Project agent (${d.id}); needs a maintainer's review like any other PR.`,
+    });
+    return { ok: true, result: `Opened ${pr.html_url}` };
+  },
+};
+
+// ---- Vimeo --------------------------------------------------------------------
+
+const vimeoPublish: ActionSpec = {
+  executor: "vimeo",
+  validate(_ctx, target, payload) {
+    const f = new Fields(payload);
+    const rawId = f.raw("video_id");
+    const id = typeof rawId === "number" ? String(rawId) : typeof rawId === "string" ? rawId.trim() : "";
+    if (!/^\d+$/.test(id)) f.problems.push("payload.video_id is required: the video's number");
+    // The target is the link Matt may open; it must be the video that changes.
+    const linked = target.match(/vimeo\.com\/(?:video\/)?(\d+)/)?.[1];
+    if (linked && id && linked !== id) f.problems.push(`target links to video ${linked} but payload.video_id is ${id}`);
+    const name = f.text("name", { required: true, max: 128 });
+    const description = f.text("description", { required: true, max: 5000 });
+    const make_public = f.bool("make_public");
+    const rawChapters = f.raw("chapters") ?? [];
+    const chapters: Chapter[] = [];
+    if (!Array.isArray(rawChapters)) f.problems.push("payload.chapters must be a list");
+    else
+      rawChapters.forEach((c, i) => {
+        const x = (c ?? {}) as Record<string, unknown>;
+        let ok = typeof x.title === "string" && !!x.title.trim() && (typeof x.start === "string" || typeof x.start === "number");
+        if (ok) {
+          try {
+            toSeconds(x.start as string | number);
+          } catch {
+            ok = false;
+          }
+        }
+        if (!ok) f.problems.push(`payload.chapters[${i}] needs a title and a start such as "4:30"`);
+        else chapters.push({ title: (x.title as string).trim().slice(0, 100), start: x.start as string | number });
+      });
+    f.done();
+    return { target: `https://vimeo.com/${id}`, payload: { video_id: id, name, description, make_public, ...(chapters.length ? { chapters } : {}) } };
+  },
+  describe(_target, p) {
+    const chapters = Array.isArray(p.chapters) ? (p.chapters as Chapter[]) : [];
+    return withRest(
+      {
+        lines: [
+          `Video: ${str(p.video_id) || "(none)"} (https://vimeo.com/${str(p.video_id)})`,
+          `Title: ${str(p.name)}`,
+          p.make_public === true ? "⚠ Makes the video PUBLIC on Vimeo" : "Privacy: left as it is",
+        ],
+        blocks: [
+          { title: "Description", text: str(p.description) || "(none)" },
+          ...(chapters.length ? [{ title: `Chapters (${chapters.length})`, text: chapters.map((c) => `${c.start}  ${c.title}`).join("\n") }] : []),
+        ],
+      },
+      p,
+      ["video_id", "name", "description", "make_public", "chapters"],
+    );
+  },
+  /**
+   * Chapters first (best effort), then title and description, and only then, if
+   * asked, make the video public. A failure before the last step leaves the video as
+   * private as it was.
+   */
+  async execute(ctx, _d, { payload: p }) {
+    const id = p.video_id as string;
+    const chapters = (p.chapters as Chapter[] | undefined) ?? [];
+    const vimeo = ctx.vimeo();
+    const video = await vimeo.ownVideo(id); // refuses videos the account doesn't own
+    if (ctx.dryRun) {
+      return { ok: true, result: `DRY RUN: would update "${video.name}"${chapters.length ? ` with ${chapters.length} chapters` : ""}${p.make_public ? " and make it public" : ""}` };
+    }
+    const notes: string[] = [];
+    let added = 0;
+    for (const c of chapters) {
+      try {
+        const secs = toSeconds(c.start);
+        if (secs < 1 || (video.duration && secs >= video.duration)) throw new Error(`time ${c.start} is outside the video`);
+        await vimeo.addChapter(id, c.title, secs);
+        added++;
+      } catch (e) {
+        notes.push(`chapter "${c.title}" skipped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    await vimeo.edit(id, { name: p.name as string, description: p.description as string });
+    if (p.make_public) await vimeo.edit(id, { privacy: { view: "anybody" } });
+
+    const done = [`Updated title and description`, chapters.length ? `${added} of ${chapters.length} chapters added` : "", p.make_public ? "now PUBLIC" : `still ${video.privacy}`]
+      .filter(Boolean)
+      .join("; ");
+    return { ok: true, result: `${done}: ${video.link}${notes.length ? `\nNotes: ${notes.slice(0, 3).join("; ")}` : ""}` };
+  },
+};
+
+// ---- Discord ------------------------------------------------------------------
+
+const POST_ALIASES = ["text", "post", "message", "content", "body"];
+
+const discordAnnounce: ActionSpec = {
+  executor: "discord",
+  validate(_ctx, _target, payload) {
+    const f = new Fields(payload);
+    const text = f.text("text", { required: true, aliases: POST_ALIASES.slice(1), max: 20_000 });
+    f.done();
+    return { target: "discord:#announcements", payload: { text } };
+  },
+  describe(_target, p) {
+    const text = pick(p, POST_ALIASES);
+    return withRest({ lines: ["Posts to: the announcements channel, labelled as agent-drafted, pinging no one"], blocks: text ? [{ title: "Post", text }] : [] }, p, pickKey(p, POST_ALIASES));
+  },
+  async execute(ctx, _d, { payload }) {
+    const text = payload.text as string;
+    if (!ctx.discord.configured) {
+      return { ok: true, manual: true, result: "No announcements channel is set in config/discord.yaml. Copy the content above, post it, then tap Mark done." };
+    }
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would post ${text.length} characters to Discord` };
+    const n = await ctx.discord.post(text);
+    return { ok: true, result: `Posted to Discord${n > 1 ? ` (${n} messages)` : ""}` };
+  },
+};
+
+const discordOps: ActionSpec = {
+  executor: "discord_ops",
+  validate(ctx, _target, payload) {
+    const f = new Fields(payload);
+    const text = f.text("text", { required: true, aliases: POST_ALIASES.slice(1), max: 20_000 });
+    const mention: string[] = [];
+    for (const who of f.names("mention")) {
+      const p = findPerson(ctx, who);
+      if (!p?.discord) f.problems.push(`Can't ping ${who}: not in people.yaml with a Discord id`);
+      else if (!mention.includes(p.name)) mention.push(p.name);
+    }
+    f.done();
+    return { target: "discord:#agent-ops", payload: { text, mention } };
+  },
+  describe(_target, p) {
+    const text = pick(p, POST_ALIASES);
+    const pings = Array.isArray(p.mention) && p.mention.length ? nameList(p.mention) : "";
+    return withRest(
+      { lines: ["Posts to: #agent-ops", `Pings: ${pings || "no one"}`], blocks: text ? [{ title: "Post", text }] : [] },
+      p,
+      ["mention", ...pickKey(p, POST_ALIASES)],
+    );
+  },
+  async execute(ctx, _d, { payload }) {
+    const m = resolveMentions(ctx, payload.mention);
+    if (!ctx.discordOps.configured) {
+      return { ok: true, manual: true, result: "No agent_ops channel is set in config/discord.yaml. Copy the content above, post it, then tap Mark done." };
+    }
+    const who = m.names.length ? ` pinging ${m.names.join(", ")}` : "";
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would post to #agent-ops${who}` };
+    await ctx.discordOps.post(payload.text as string, m.ids);
+    return { ok: true, result: `Posted to #agent-ops${who}` };
+  },
+};
+
+const messagePerson: ActionSpec = {
+  executor: "discord_dm",
+  validate(ctx, _target, payload) {
+    // A message to named people from people.yaml, sent as a Discord DM from the bot.
+    const f = new Fields(payload);
+    const to: string[] = [];
+    for (const who of f.names("to", { required: true })) {
+      const p = findPerson(ctx, who);
+      if (!p) f.problems.push(`${who} is not in people.yaml: name people by GitHub login or name`);
+      else if (!to.includes(p.name)) to.push(p.name);
+    }
+    const text = f.text("text", { required: true, aliases: ["message", "body"], max: 20_000 });
+    f.done();
+    // The target becomes the recipients, so lists of decisions name who it goes to.
+    return { target: to.join(", "), payload: { to, text } };
+  },
+  describe(_target, p) {
+    const text = pick(p, ["text", "message", "body"]);
+    return withRest(
+      { lines: [`To: ${nameList(p.to) || "(no one)"}, as a Discord DM from the bot (by hand for anyone without a Discord id)`], blocks: text ? [{ title: "Message", text }] : [] },
+      p,
+      ["to", ...pickKey(p, ["text", "message", "body"])],
+    );
+  },
+  async execute(ctx, _d, { payload }) {
+    const text = payload.text as string;
+    const m = resolveMentions(ctx, payload.to);
+    if (m.missing.length || !ctx.dc) {
+      const why = !ctx.dc ? "The Discord bot isn't set up" : `Can't DM ${m.missing.join(", ")}: no Discord id in people.yaml`;
+      return { ok: true, manual: true, result: `${why}. Copy the content above, send it, then tap Mark done.` };
+    }
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would DM ${m.names.join(", ")}` };
+    for (const id of m.ids) await ctx.dc.dm(id, { content: text });
+    return { ok: true, result: `Sent a Discord DM to ${m.names.join(", ")}` };
+  },
+};
+
+// ---- manual and tool confirmations ----------------------------------------------
+
+const label = (k: string) => k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, " ");
+
+/**
+ * Kinds Matt carries out by hand: the payload is free text for him to copy. Any field
+ * may be used, but only text or lists of text, and all of it is on the card.
+ */
+const manual: ActionSpec = {
+  executor: "manual",
+  validate(_ctx, target, payload) {
+    const f = new Fields(payload);
+    const out: Payload = {};
+    for (const k of Object.keys(payload)) {
+      const v = f.raw(k);
+      if (v === undefined || v === null) continue;
+      if (typeof v === "string") out[k] = v.trim();
+      else if (Array.isArray(v) && v.every((x) => typeof x === "string")) out[k] = v;
+      else f.problems.push(`payload.${k} must be text or a list of text`);
+    }
+    if (JSON.stringify(out).length > 60_000) f.problems.push("payload is over 60,000 characters");
+    f.done();
+    return { target: target.trim(), payload: out };
+  },
+  describe(target, p) {
+    const lines = [`By hand: ${target || "(no target)"}`];
+    const blocks: ActionView["blocks"] = [];
+    for (const [k, v] of Object.entries(p)) {
+      const text = Array.isArray(v) ? v.map(String).join(", ") : str(v);
+      if (text.length > 80 || text.includes("\n")) blocks.push({ title: label(k), text });
+      else lines.push(`${label(k)}: ${text}`);
+    }
+    return { lines, blocks };
+  },
+  async execute(_ctx, _d, { payload }) {
+    const hasText = Object.values(payload).some((v) => (typeof v === "string" ? v : "").trim());
+    return { ok: true, manual: true, result: hasText ? "Approved. Copy the content above, do it, then tap Mark done." : "Approved. Do it, then tap Mark done." };
+  },
+};
+
+/** An MCP or built-in tool call paused under always_ask. */
+const toolConfirm: ActionSpec = {
+  executor: "managed",
+  validate(_ctx, target, payload) {
+    const f = new Fields(payload);
+    const input = f.raw("input");
+    f.done();
+    return { target, payload: { input: input ?? {} } };
+  },
+  describe(target, p) {
+    return withRest({ lines: [`Tool: ${target}`], blocks: [{ title: "Input", text: JSON.stringify(p.input ?? {}, null, 2) }] }, p, ["input"]);
+  },
+  async execute(ctx, d) {
+    if (!d.session_id || !d.tool_use_id) return { ok: false, result: "Missing session or tool use id" };
+    await ctx.managed.sendToolConfirmation(d.session_id, d.tool_use_id, true);
+    return { ok: true, result: "Tool call allowed" };
+  },
+};
+
+export const ACTIONS: Record<string, ActionSpec> = {
+  "github.merge": githubMerge,
+  "github.close": githubClose,
+  "github.comment": githubComment,
+  "github.release": githubRelease,
+  "github.approve_ci": githubApproveCi,
+  "github.review": githubReview,
+  "github.docs_pr": githubDocsPr,
+  "vimeo.publish": vimeoPublish,
+  "wordpress.publish": manual,
+  "linkedin.post": manual,
+  "discord.announce": discordAnnounce,
+  "discord.ops": discordOps,
+  "message.person": messagePerson,
+  "email.send": manual,
+  "spec.change": manual,
+  other: manual,
+  "tool.confirm": toolConfirm,
+};
+
+/**
+ * The spec that runs a kind under the current config. A kind set to the manual
+ * executor (or a kind the config doesn't list) is carried out by hand. Otherwise the
+ * kind's spec must exist and agree with permissions.yaml about the executor.
+ */
+function specFor(ctx: Ctx, kind: string): ActionSpec | { error: string } {
+  if (kind === "tool.confirm") return toolConfirm;
+  const cfg = ctx.network.action_kinds[kind];
+  if (!cfg || cfg.executor === "manual") return manual;
+  const spec = ACTIONS[kind];
+  if (!spec || spec.executor !== cfg.executor) return { error: `No executor for ${kind}` };
+  return spec;
+}
+
+/**
+ * Checks a request when it is made: the target and payload as they will be stored and
+ * run. Throws ActionInvalid listing every problem.
+ */
+export function validateAction(ctx: Ctx, kind: string, target: string, payload: unknown): Normalised {
+  if (kind !== "tool.confirm" && !ctx.network.action_kinds[kind]) throw new ActionInvalid([`${kind} is not an action kind`]);
+  if (payload !== undefined && payload !== null && (typeof payload !== "object" || Array.isArray(payload))) {
+    throw new ActionInvalid(["payload must be an object"]);
+  }
+  const spec = specFor(ctx, kind);
+  if ("error" in spec) throw new ActionInvalid([spec.error]);
+  return spec.validate(ctx, typeof target === "string" ? target : "", (payload ?? {}) as Payload);
+}
+
+/** What approving this decision does, field by field, for the approval card. */
+export function describeAction(d: Pick<Decision, "kind" | "target" | "payload">): ActionView {
+  return (ACTIONS[d.kind] ?? manual).describe(d.target, safeJson(d.payload));
+}
+
+export async function executeAction(ctx: Ctx, d: Decision): Promise<ExecResult> {
+  const spec = specFor(ctx, d.kind);
+  if ("error" in spec) return { ok: false, result: spec.error };
+  let n: Normalised;
+  try {
+    // Checked again here, in case the config or people changed since the request.
+    n = spec.validate(ctx, d.target, safeJson(d.payload));
+  } catch (e) {
+    if (!(e instanceof ActionInvalid)) throw e;
+    return { ok: false, result: `Not done; the request doesn't pass the gateway's checks:\n- ${e.problems.join("\n- ")}` };
+  }
+  return spec.execute(ctx, d, n);
+}

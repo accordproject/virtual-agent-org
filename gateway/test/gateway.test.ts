@@ -547,7 +547,8 @@ describe("#agent-ops pings", () => {
   it("shows who will be pinged on the card, and pings only them once approved", async () => {
     const { ctx, fakes } = makeTestCtx({ dryRun: false });
     await ping(ctx, ["@alikhan", "Jane Doe"]);
-    expect(fakes.sent[0].text).toContain("Pings: @alikhan, @Jane Doe");
+    expect(fakes.sent[0].text).toContain("Posts to: #agent-ops");
+    expect(fakes.sent[0].text).toMatch(/Pings: .*alikhan.*Jane Doe|Pings: Ali Khan, Jane Doe/);
     expect(await approve(ctx, "D-1")).toBe("D-1: Posted to #agent-ops pinging Ali Khan, Jane Doe");
     expect(fakes.ops).toEqual([{ text: "PR #3 has waited 4 days for review", ids: ["223456789012345678", "123456789012345678"] }]);
   });
@@ -1374,13 +1375,15 @@ describe("message.person as a Discord DM", () => {
   it("falls back to a manual send when someone can't be DMed", async () => {
     const { r, fakes } = await run(["samlee"]);
     expect(r.manual).toBe(true);
-    expect(r.result).toMatch(/Can't DM samlee/);
+    expect(r.result).toMatch(/Can't DM Sam Lee: no Discord id/);
     expect(fakes.dms).toHaveLength(0);
   });
 
-  it("falls back to manual with no recipient", async () => {
-    const { r } = await run(undefined);
-    expect(r.manual).toBe(true);
+  it("refuses to run with no recipient", async () => {
+    const { r, fakes } = await run(undefined);
+    expect(r).toMatchObject({ ok: false });
+    expect(r.result).toMatch(/payload.to is required/);
+    expect(fakes.dms).toHaveLength(0);
   });
 });
 
