@@ -258,3 +258,22 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   replacing its own earlier labels. A model never sets these, so they always match what
   the gateway enforces (decisions 35 and 37).
 - A label GitHub refuses doesn't stop the review being posted; the result says so.
+
+**40. File tools for memory** · RESOLVED: every agent gets read, write, edit and glob
+
+- Each agent's memory stores are mounted as files in its sandbox, but no agent had file
+  tools, so none could read or write its notes and every session started from nothing.
+- Every agent now has the built-in `read`, `write`, `edit` and `glob` tools. They touch
+  only the agent's own sandbox and memory stores.
+- Ada gets these four and nothing else. The config check still refuses her any other
+  built-in tool and any MCP server, so she still has no side effects.
+
+**41. How Mira labels PRs** · RESOLVED: through a gateway tool, one label at a time
+
+- The GitHub MCP server can label only by replacing every label on an issue or PR. A
+  call made just after the gateway labels a review could remove the gateway's labels.
+- Mira labels PRs with `label_pr`, which adds and removes single labels with the
+  gateway's GitHub App. It refuses `ai/risk:*` and `ai/decision:*`, kinds outside the
+  agreed list, and labels the repo doesn't already have. Adding a kind removes the old
+  one, so a PR has one kind at most. Each change is in the audit log.
+- Issues still use her GitHub tools, since the gateway doesn't label issues.

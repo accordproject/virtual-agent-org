@@ -152,6 +152,12 @@ export class GitHub {
     return this.call("POST", `/repos/${r.owner}/${r.repo}/issues/${r.number}/labels`, { labels: names });
   }
 
+  /** The repo's own labels (the first 100). */
+  async repoLabels(r: RepoRef): Promise<string[]> {
+    const ls = await this.call<{ name: string }[]>("GET", `/repos/${r.owner}/${r.repo}/labels?per_page=100`);
+    return ls.map((l) => l.name);
+  }
+
   removeLabel(r: Required<RepoRef>, name: string) {
     return this.call("DELETE", `/repos/${r.owner}/${r.repo}/issues/${r.number}/labels/${encodeURIComponent(name)}`);
   }

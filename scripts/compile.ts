@@ -6,7 +6,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILTIN_TOOLS, ROOT, loadAll, readText, type ReviewYaml } from "./lib";
+import { BUILTIN_TOOLS, FILE_TOOLS, ROOT, loadAll, readText, type ReviewYaml } from "./lib";
 import { REPOS_MARKER, REPO_RE } from "./repos";
 
 export const PERSON_ROLES = ["owner", "tsc_member", "maintainer"];
@@ -146,10 +146,10 @@ export function validate(cfg = loadAll()): string[] {
   }
   for (const s of Object.keys(specs)) if (!names.includes(s)) errs.push(`agents/${s}.md is not listed in network.yaml`);
 
-  // The Chief of Staff must have no side effects.
+  // The Chief of Staff must have no side effects: file tools for her own memory, nothing else (decision 40).
   const ada = permissions.agents.ada;
-  if (ada && ((Array.isArray(ada.mcp_servers) ? ada.mcp_servers.length : Object.keys(ada.mcp_servers).length) || ada.builtin_tools.length)) {
-    errs.push("ada must have no MCP servers or built-in tools");
+  if (ada && ((Array.isArray(ada.mcp_servers) ? ada.mcp_servers.length : Object.keys(ada.mcp_servers).length) || ada.builtin_tools.some((t) => !FILE_TOOLS.includes(t)))) {
+    errs.push(`ada must have no MCP servers and no built-in tools other than ${FILE_TOOLS.join(", ")}`);
   }
 
   const seen = new Set<string>();

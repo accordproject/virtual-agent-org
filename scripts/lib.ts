@@ -103,3 +103,5 @@ export function loadAll() {
 }
 
 export const BUILTIN_TOOLS = ["bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search"];
+/** Built-in tools that only touch the agent's own sandbox and memory stores (decision 40). */
+export const FILE_TOOLS = ["read", "write", "edit", "glob"];
