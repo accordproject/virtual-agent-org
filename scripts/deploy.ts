@@ -62,6 +62,10 @@ function systemPrompt(agent: string): string {
   const spec = cfg.specs[agent];
   const parts = [readText("agents/_protocol.md"), spec.body];
   if (agent === "ada") parts.push(readText("evaluation/rubric.md"));
+  if (agent === "vera") {
+    parts.push("## Scorecard schema\n\nEvery scorecard you pass to `write_scorecard` must follow this JSON Schema.\n\n```json\n" +
+      readText("evaluation/scorecard.schema.json").trim() + "\n```");
+  }
   parts.push(
     "## Shared context\n\nTwo memory stores are mounted in your sandbox, each under `" + MEMORY_MOUNT + "/<store name>/`. " +
       "Your own is read-write and holds your notes (see Memory between sessions): `" + MEMORY_MOUNT + "/" + agent + "-memory/`, " +

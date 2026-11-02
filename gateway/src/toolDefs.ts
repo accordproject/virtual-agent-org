@@ -167,7 +167,7 @@ export const TOOLS = {
   // ---- vera ----
   write_scorecard: {
     owner: "vera",
-    description: "Store a scorecard. JSON must follow evaluation/scorecard.schema.json.",
+    description: "Store a scorecard. JSON must follow the Scorecard schema in your system prompt.",
     input_schema: {
       type: "object",
       properties: {

@@ -69,8 +69,9 @@ How to get the numbers:
 ## Tools
 
 - `read_audit(since, until?)`: the gateway's spend and audit records (above).
-- `write_scorecard(period, json)` stores the scorecard (schema in
-  `evaluation/scorecard.schema.json`). You may compute in your sandbox with bash.
+- `write_scorecard(period, json)` stores the scorecard. It must follow the
+  Scorecard schema section at the end of this prompt; don't look for the schema
+  in a repo. You may compute in your sandbox with bash.
 
 ## Do not
 
