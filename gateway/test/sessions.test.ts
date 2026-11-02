@@ -29,6 +29,22 @@ describe("session processing", () => {
     await processSession(ctx, "s2");
     const r = fakes.calls.find((c) => c.method === "sendToolResult")!;
     expect(r.args[2]).toMatch(/^Error: send_to_matt is not available to mira/);
+    // Refusals on permission grounds are logged as denials (decision 48).
+    const denied = await (ctx.db as any).db.prepare("SELECT tool, permission FROM audit WHERE event_type = 'gateway.tool_denied'").all();
+    expect(denied.results).toEqual([{ tool: "send_to_matt", permission: "deny" }]);
+  });
+
+  it("records a scheduled session's tokens and default model, and never lowers them", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const usage = { list_cost: { amount: "42", currency: "USD" }, input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 9000, cache_creation_input_tokens: 50 };
+    fakes.sessions.s4 = { id: "s4", status: "running", agent: { id: "agent_mira" }, usage };
+    await processSession(ctx, "s4");
+    expect(await ctx.db.getSession("s4")).toMatchObject({
+      origin: "deployment", model: "claude-sonnet-5-5", cost_cents: 42, input_tokens: 1200, output_tokens: 300, cache_read_tokens: 9000, cache_write_tokens: 50,
+    });
+    fakes.sessions.s4 = { id: "s4", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "end_turn" }, usage: { input_tokens: 10 } };
+    await processSession(ctx, "s4");
+    expect(await ctx.db.getSession("s4")).toMatchObject({ cost_cents: 42, input_tokens: 1200, status: "idle:end_turn" });
   });
 });
 

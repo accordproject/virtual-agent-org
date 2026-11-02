@@ -2,11 +2,11 @@
 // audits every event, answers custom tool calls, turns paused tool calls into
 // decisions, and forwards agent replies to Telegram.
 
-import { postDecision, replyToOrigin } from "./agents";
+import { defaultModel, postDecision, replyToOrigin } from "./agents";
 import { agentByManagedId } from "./config";
 import { cap, type Ctx } from "./context";
-import { costCents, messageText, sessionAgentId, type SessionEvent } from "./managed";
-import { ToolError, handleTool } from "./tools";
+import { costCents, messageText, sessionAgentId, sessionTokens, type SessionEvent } from "./managed";
+import { ToolDenied, ToolError, handleTool } from "./tools";
 
 export async function processSession(ctx: Ctx, sessionId: string): Promise<void> {
   const session = await ctx.managed.retrieveSession(sessionId);
@@ -17,7 +17,7 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
     return;
   }
   if (!row) {
-    await ctx.db.upsertSession({ id: sessionId, agent, origin: "deployment" });
+    await ctx.db.upsertSession({ id: sessionId, agent, origin: "deployment", model: defaultModel(ctx, agent) });
     row = await ctx.db.getSession(sessionId);
   }
 
@@ -49,7 +49,7 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   if (through && through !== doneThrough) await ctx.db.setEventsDoneThrough(sessionId, through);
 
   const status = session.status === "idle" ? `idle:${session.stop_reason?.type ?? ""}` : session.status;
-  await ctx.db.updateSession(sessionId, status, costCents(session));
+  await ctx.db.updateSession(sessionId, status, costCents(session), sessionTokens(session));
 
   if (row?.task_id && session.status === "idle" && session.stop_reason?.type === "end_turn") {
     await ctx.db.setTask(row.task_id, "done");
@@ -82,7 +82,9 @@ async function handleEvent(
       } catch (err) {
         // Always answer: an unanswered tool call leaves the session paused and
         // unable to take new messages. Unexpected failures go to the audit log.
-        if (!(err instanceof ToolError)) {
+        if (err instanceof ToolDenied) {
+          await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_denied", tool: e.name, permission: "deny", detail: err.message });
+        } else if (!(err instanceof ToolError)) {
           await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_error", tool: e.name, detail: String(err) });
         }
         result =

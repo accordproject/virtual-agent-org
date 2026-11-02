@@ -64,9 +64,15 @@ export async function startSession(
     discord_user: opts.discordUser,
     task_id: opts.taskId,
     started_by: startedBy,
+    model: opts.model ?? defaultModel(ctx, agent),
   });
   await ctx.db.audit({ agent, session_id: session.id, event_type: "gateway.session_started", detail: { origin, task: opts.taskId, started_by: startedBy } });
   return session.id;
+}
+
+/** The model an agent runs on unless a session overrides it (its default tier in models.yaml). */
+export function defaultModel(ctx: Ctx, agent: string): string | undefined {
+  return ctx.network.agents[agent]?.model;
 }
 
 /**

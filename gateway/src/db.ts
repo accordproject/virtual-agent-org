@@ -1,5 +1,7 @@
 // Data access for the gateway's D1 database.
 
+import type { Tokens } from "./managed";
+
 export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "failed";
 export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 
@@ -85,6 +87,11 @@ export interface SessionRow {
   status: string;
   cost_cents: number;
   started_by: StartedBy;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export class Db {
@@ -128,10 +135,10 @@ export class Db {
   async upsertSession(s: Partial<SessionRow> & { id: string; agent: string; origin: SessionRow["origin"] }) {
     await this.db
       .prepare(
-        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status, started_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+        "INSERT INTO sessions (id, agent, origin, chat_id, discord_user, task_id, status, started_by, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
           "ON CONFLICT(id) DO NOTHING",
       )
-      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running", s.started_by ?? "schedule")
+      .bind(s.id, s.agent, s.origin, s.chat_id ?? null, s.discord_user ?? null, s.task_id ?? null, s.status ?? "running", s.started_by ?? "schedule", s.model ?? null)
       .run();
   }
 
@@ -157,10 +164,15 @@ export class Db {
     return this.db.prepare("SELECT * FROM sessions WHERE id = ?").bind(id).first<SessionRow>();
   }
 
-  async updateSession(id: string, status: string, costCents: number) {
+  /** Usage is cumulative, so a stale snapshot never lowers what is recorded. */
+  async updateSession(id: string, status: string, costCents: number, tokens?: Tokens) {
+    const t = tokens ?? { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
     await this.db
-      .prepare("UPDATE sessions SET status = ?, cost_cents = MAX(cost_cents, ?), updated_at = datetime('now') WHERE id = ?")
-      .bind(status, costCents, id)
+      .prepare(
+        "UPDATE sessions SET status = ?, cost_cents = MAX(cost_cents, ?), input_tokens = MAX(input_tokens, ?), output_tokens = MAX(output_tokens, ?), " +
+          "cache_read_tokens = MAX(cache_read_tokens, ?), cache_write_tokens = MAX(cache_write_tokens, ?), updated_at = datetime('now') WHERE id = ?",
+      )
+      .bind(status, costCents, t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_tokens, id)
       .run();
   }
 
@@ -199,6 +211,70 @@ export class Db {
       .bind(sinceIso)
       .all<{ agent: string; cents: number }>();
     return Object.fromEntries(results.map((r) => [r.agent, r.cents]));
+  }
+
+  // ---- agent audit (read_audit) --------------------------------------------
+  // Times are D1's "YYYY-MM-DD HH:MM:SS" UTC; callers pass the same form.
+
+  /** Sessions started in [since, until), summed by agent, model and origin. */
+  sessionUsage(since: string, until: string) {
+    return this.db
+      .prepare(
+        "SELECT agent, COALESCE(model, 'unknown') AS model, origin, COUNT(*) AS sessions, SUM(cost_cents) AS cost_cents, " +
+          "SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_read_tokens) AS cache_read_tokens, " +
+          "SUM(cache_write_tokens) AS cache_write_tokens FROM sessions WHERE created_at >= ? AND created_at < ? GROUP BY agent, model, origin ORDER BY agent, model, origin",
+      )
+      .bind(since, until)
+      .all<{ agent: string; model: string; origin: string; sessions: number; cost_cents: number } & Tokens>()
+      .then((r) => r.results);
+  }
+
+  /** Spend per agent per UTC day the sessions started, for spotting spikes. */
+  dailySpend(since: string, until: string) {
+    return this.db
+      .prepare(
+        "SELECT date(created_at) AS day, agent, SUM(cost_cents) AS cost_cents FROM sessions WHERE created_at >= ? AND created_at < ? " +
+          "GROUP BY day, agent ORDER BY day, agent",
+      )
+      .bind(since, until)
+      .all<{ day: string; agent: string; cost_cents: number }>()
+      .then((r) => r.results);
+  }
+
+  /** Decisions created in [since, until), excluding tool confirmations. */
+  decisionsBetween(since: string, until: string) {
+    return this.db
+      .prepare(
+        "SELECT id, agent, kind, target, status, note, created_at, decided_at, executed_at FROM decisions " +
+          "WHERE created_at >= ? AND created_at < ? ORDER BY seq",
+      )
+      .bind(since, until)
+      .all<Pick<Decision, "id" | "agent" | "kind" | "target" | "status" | "note" | "created_at" | "decided_at" | "executed_at">>()
+      .then((r) => r.results);
+  }
+
+  /** Tool calls refused by a permission policy or by the gateway. */
+  denials(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare(
+        "SELECT ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
+          "WHERE ts >= ? AND ts < ? AND (permission = 'deny' OR event_type = 'gateway.tool_denied') ORDER BY id LIMIT ?",
+      )
+      .bind(since, until, limit)
+      .all<{ ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .then((r) => r.results);
+  }
+
+  /** External (built-in and MCP) tool calls, counted by agent, tool and permission. */
+  toolCalls(since: string, until: string) {
+    return this.db
+      .prepare(
+        "SELECT agent, event_type, tool, COALESCE(permission, 'none') AS permission, COUNT(*) AS calls FROM audit " +
+          "WHERE ts >= ? AND ts < ? AND event_type IN ('agent.tool_use', 'agent.mcp_tool_use') GROUP BY agent, event_type, tool, permission ORDER BY agent, calls DESC",
+      )
+      .bind(since, until)
+      .all<{ agent: string | null; event_type: string; tool: string | null; permission: string; calls: number }>()
+      .then((r) => r.results);
   }
 
   // ---- events: idempotency ------------------------------------------------

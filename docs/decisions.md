@@ -334,3 +334,27 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   handles at most 40 sessions.
 - A tool call's answer is stored before it is sent, so a retry resends it instead of
   acting twice.
+
+**47. Where Vera gets spend and audit data** · RESOLVED: a read-only gateway tool
+
+- Vera's agent audit needs spend, tokens, models used, decision outcomes and tool
+  denials. She had no way to read any of them.
+- She calls `read_audit`, which returns the gateway's own records for a period of up to
+  92 days. She holds no new credential.
+- Not chosen: the Managed Agents API key in her vault, which could start sessions and
+  edit agents (rule 2); and an Admin API key for Anthropic's usage and cost reports,
+  which is an organisation-wide credential and cannot split cost by agent, since all
+  sessions run under the gateway's key.
+- Not now: checking the gateway's monthly totals against the cost report. The owner
+  compares them with the Console by hand; revisit when decision 10 needs figures that
+  can be audited.
+
+**48. What the gateway records for the audit** · RESOLVED
+
+- Each session now stores its model (the override, or the agent's default tier) and its
+  cumulative token totals, alongside its list cost.
+- A custom tool call the gateway refuses on permission grounds (a tool owned by another
+  agent, an action kind the agent may not request, a stopped agent) is logged as a
+  denial, as permission-policy denials already were.
+- Scheduled runs are recorded with the agent's default model, since a session does not
+  report which model it ran on.

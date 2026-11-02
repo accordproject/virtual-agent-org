@@ -37,6 +37,8 @@ export interface AgentConfig {
   title: string;
   phase: number;
   requestable: string[];
+  /** The model of the agent's default tier in models.yaml. */
+  model?: string;
 }
 
 export interface NetworkConfig {

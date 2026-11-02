@@ -32,7 +32,7 @@ Design principles:
 | --- | --- | --- | --- | --- |
 | **Ada** | Chief of Staff | Turn the owner's intent into delegated work; report and stay unblocked | Task assignments and the decision queue only. No external tools. | 1 |
 | **Mira** | Maintainer Desk | Every PR and issue gets a fast, correct response | GitHub triage: label, assign, request reviewers. Merge, close, comment as the project, release: queued. | 1 |
-| **Vera** | Metrics & Audit | Independent numbers on KPIs and agent cost | Read-only GitHub; computes metrics in her sandbox | 1 |
+| **Vera** | Metrics & Audit | Independent numbers on KPIs and agent cost | Read-only GitHub; reads the gateway's spend and audit records; computes metrics in her sandbox | 1 |
 | **Otto** | Meetings | Every Tech WG has a briefing before and a recording, summary and actions after | Read-only GitHub and Vimeo. Publishing, announcements and DMs: queued. | 1 |
 | **Rosa** | Community | Newcomers find a path to a first contribution | GitHub triage. Announcements and DMs: queued. | 2 |
 | **Juno** | Marketing & Docs | Accord's work is visible and its docs current | Drafts only. Any publish: queued. | 2 |
@@ -150,7 +150,8 @@ gateway as the `PEOPLE_IDS` secret (decision 25).
 | Revoke | `/revoke mira confirm` | Interrupts sessions and archives the agent's vault, purging its credentials. |
 | Spending cap | Automatic | Each session has a budget; it pauses at the cap. |
 
-Every tool call and decision is in the gateway's audit table. Vera flags anomalies:
+Every tool call and decision is in the gateway's audit table, and each session's cost,
+tokens and model are recorded. Vera reads them with `read_audit` and flags anomalies:
 spend well above an agent's weekly median, tool denials, rejected decisions, and any
 public action without a decision id.
 
