@@ -64,7 +64,8 @@ npm run repo:add owner/name  # check a repo is ready, then add it to the network
 ```
 
 Deploying needs the project's Anthropic, Cloudflare and GitHub credentials, so it is
-done by the maintainers. To run your own network for another project, see
+done by the maintainers: merging to `main` starts a deploy, which runs once the owner
+approves it. To run your own network for another project, see
 [docs/setup.md](docs/setup.md).
 
 ## Contributing

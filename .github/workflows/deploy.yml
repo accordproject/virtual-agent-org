@@ -1,7 +1,14 @@
 name: deploy
-# Manual only. Deploys agents to Claude Managed Agents, then the gateway to Cloudflare,
-# and opens a PR with any new resource IDs.
+# Runs after every push to main (a merged PR), and by hand. Deploys only what the push
+# changed, in this order: people's ids, D1 migrations, the gateway, then the agents.
+# If the agents' deploy creates resources, the gateway is deployed again with the new
+# ids, and a PR records them in deployed.json.
+#
+# The production environment holds the secrets. It only accepts runs from main and
+# needs the owner's approval before each run (docs/setup.md, section 7).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -10,13 +17,81 @@ on:
         default: true
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+# One deploy at a time, in push order; never cancel one half-way.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  plan:
+    if: ${{ github.repository_owner == 'accordproject' }}
     runs-on: ubuntu-latest
-    environment: production   # require owner approval in the repo's environment settings
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      people: ${{ steps.changes.outputs.people }}
+      migrations: ${{ steps.changes.outputs.migrations }}
+      gateway: ${{ steps.changes.outputs.gateway }}
+      agents: ${{ steps.changes.outputs.agents }}
+      any: ${{ steps.changes.outputs.any }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: What changed
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Compare with the last push that deployed successfully, not the previous
+          # commit, so a run that was rejected, failed or replaced in the queue is
+          # caught up by the next one. A manual run, or no base we can see, deploys
+          # everything.
+          base=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main \
+            --event push --status success --limit 1 --json headSha --jq '.[0].headSha // ""')
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            files=ALL
+          else
+            printf 'Changes since %s\n\n' "$base" >> "$GITHUB_STEP_SUMMARY"
+            files=$(git diff --name-only "$base" "$GITHUB_SHA")
+          fi
+          has() { [ "$files" = ALL ] || grep -qE "$1" <<<"$files"; }
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "| $1 | $2 |" >> "$GITHUB_STEP_SUMMARY"; }
+          flag() { if has "$1"; then echo true; else echo false; fi; }
+
+          echo "| Part | Deploy |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          people=$(flag '^config/people\.yaml$')
+          migrations=$(flag '^gateway/migrations/')
+          gateway=$(flag '^(gateway/|config/|scripts/(compile|lib|repos)\.ts$)')
+          agents=$(flag '^(agents/|context/|config/|scripts/(deploy|compile|lib|repos)\.ts$|gateway/src/(toolDefs|managed|config)\.ts$)')
+          out people "$people"
+          out migrations "$migrations"
+          out gateway "$gateway"
+          out agents "$agents"
+          if [ "$people$migrations$gateway$agents" = falsefalsefalsefalse ]; then out any false; else out any true; fi
+          if has '^scripts/discord-commands\.ts$'; then
+            echo "::warning::Discord slash commands changed. Run npm run discord:commands by hand."
+          fi
+
+  deploy:
+    needs: plan
+    if: ${{ needs.plan.outputs.any == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ids_changed: ${{ steps.ids.outputs.changed }}
+    env:
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -24,23 +99,116 @@ jobs:
           node-version: 22
       - run: npm ci && npm ci --prefix gateway
       - run: npm test
+
+      # deploy.ts reads resource ids from deployed.json. While a PR recording new ids is
+      # unmerged, main doesn't have them, and deploying the agents again would create
+      # duplicates.
+      - name: No unmerged resource ids
+        if: ${{ needs.plan.outputs.agents == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head deploy/resource-ids --state open --json number --jq '.[0].number')
+          if [ -n "$pr" ]; then
+            echo "::error::Merge PR #$pr (deployed resource ids) first, then re-run this deploy."
+            exit 1
+          fi
+
+      # People's ids live outside the repo, so the gateway needs them loaded whenever
+      # people.yaml changes, or people lose access.
+      - name: Load people's ids
+        if: ${{ needs.plan.outputs.people == 'true' }}
+        env:
+          PEOPLE_IDS_YAML: ${{ secrets.PEOPLE_IDS_YAML }}
+        run: |
+          if [ -z "$PEOPLE_IDS_YAML" ]; then
+            echo "::error::people.yaml changed but the PEOPLE_IDS_YAML secret isn't set. Run npm run people:ids by hand, then re-run this deploy."
+            exit 1
+          fi
+          printf '%s\n' "$PEOPLE_IDS_YAML" > config/people.ids.yaml
+          if [ "$DRY_RUN" = true ]; then npm run people:ids -- --dry-run; else npm run people:ids; fi
+          rm config/people.ids.yaml
+
+      - name: Apply D1 migrations
+        if: ${{ needs.plan.outputs.migrations == 'true' }}
+        working-directory: gateway
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            npx wrangler d1 migrations list virtual-agent-org1 --remote
+          else
+            npm run migrate
+          fi
+
+      # The gateway goes before the agents, so new agents never call tools the live
+      # gateway doesn't have yet.
+      - name: Deploy gateway
+        if: ${{ needs.plan.outputs.gateway == 'true' }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            npm run compile && npm --prefix gateway run deploy -- --dry-run
+          else
+            npm run gateway:deploy
+          fi
+
       - name: Deploy agents
+        id: agents
+        if: ${{ needs.plan.outputs.agents == 'true' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_DEPLOY_KEY }}
           MIRA_GITHUB_TOKEN: ${{ secrets.MIRA_GITHUB_TOKEN }}
           VERA_GITHUB_TOKEN: ${{ secrets.VERA_GITHUB_TOKEN }}
           OTTO_GITHUB_TOKEN: ${{ secrets.OTTO_GITHUB_TOKEN }}
         run: npx tsx scripts/deploy.ts ${{ inputs.dry_run && '--dry-run' || '' }}
-      - name: Deploy gateway
-        if: ${{ !inputs.dry_run }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npm --prefix gateway run migrate && npm --prefix gateway run deploy
-      - name: Propose updated resource IDs
-        if: ${{ !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
+
+      # deploy.ts saves what it created even when it fails part-way, so check after
+      # a failure too.
+      - name: New resource ids?
+        id: ids
+        if: ${{ !cancelled() && steps.agents.outcome != 'skipped' && env.DRY_RUN != 'true' }}
+        run: |
+          if git diff --quiet gateway/src/generated/deployed.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy gateway with the new ids
+        if: ${{ steps.agents.outcome == 'success' && steps.ids.outputs.changed == 'true' }}
+        run: npm run gateway:deploy
+
+      - name: Keep the new ids
+        if: ${{ !cancelled() && steps.ids.outputs.changed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deployed-json
+          path: gateway/src/generated/deployed.json
+          retention-days: 30
+
+  # Separate from deploy so the job that can write to the repo holds no deploy secrets.
+  propose-ids:
+    needs: deploy
+    if: ${{ !cancelled() && needs.deploy.outputs.ids_changed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: deployed-json
+          path: gateway/src/generated
+      - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
         with:
           branch: deploy/resource-ids
-          title: "Update deployed resource IDs"
           add-paths: gateway/src/generated/deployed.json
+          commit-message: "chore(deploy): record deployed resource ids"
+          title: "chore(deploy): record deployed resource ids"
+          body: |
+            The deploy run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} created Managed Agents resources. This records their ids so the next deploy updates them instead of creating new ones.
+
+            Agent deploys are blocked until this is merged.
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          signoff: true
+          delete-branch: true
