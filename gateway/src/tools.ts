@@ -17,6 +17,8 @@ import { TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
 import { isTechWg } from "./vimeo";
 
 export class ToolError extends Error {}
+/** A refusal on permission grounds rather than bad input; the audit log records these. */
+export class ToolDenied extends ToolError {}
 
 type Input = Record<string, unknown>;
 
@@ -39,11 +41,11 @@ type Handler = (ctx: Ctx, call: Call) => Promise<string>;
 export async function handleTool(ctx: Ctx, agent: string, sessionId: string, name: string, input: Input): Promise<string> {
   if (!isToolName(name)) throw new ToolError(`Unknown tool ${name}`);
   const spec: ToolSpec = TOOLS[name];
-  if (spec.owner && spec.owner !== agent) throw new ToolError(`${name} is not available to ${agent}`);
+  if (spec.owner && spec.owner !== agent) throw new ToolDenied(`${name} is not available to ${agent}`);
 
   const status = await ctx.db.agentStatus(agent);
   if (status === "stopped" || status === "revoked") {
-    throw new ToolError(`You have been ${status} by the owner. Stop work and end the session.`);
+    throw new ToolDenied(`You have been ${status} by the owner. Stop work and end the session.`);
   }
 
   const problems = schemaProblems(spec.input_schema, input);
@@ -214,6 +216,8 @@ const HANDLERS: Record<ToolName, Handler> = {
     });
   },
 
+  read_audit: async (ctx, { input }) => readAudit(ctx, input),
+
   write_scorecard: async (ctx, { input }) => {
     const period = s(input.period, "period");
     if (!input.scorecard || typeof input.scorecard !== "object") throw new ToolError("scorecard must be an object");
@@ -223,11 +227,77 @@ const HANDLERS: Record<ToolName, Handler> = {
 };
 
 
+/** D1's timestamp form ("YYYY-MM-DD HH:MM:SS", UTC) for an ISO date or date-time. */
+function d1Time(v: string, field: string): string {
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v);
+  if (Number.isNaN(t)) throw new ToolError(`${field} must be an ISO date such as 2026-11-02`);
+  return new Date(t).toISOString().slice(0, 19).replace("T", " ");
+}
+
+const MAX_AUDIT_DAYS = 92;
+const TOKEN_FIELDS = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"] as const;
+
+/** Vera's view of the gateway's records: spend, tokens, models, decisions and denials per agent. */
+async function readAudit(ctx: Ctx, input: Input): Promise<string> {
+  const since = d1Time(s(input.since, "since"), "since");
+  const end = input.until ? d1Time(s(input.until, "until"), "until") : d1Time(new Date().toISOString(), "until");
+  if (since >= end) throw new ToolError("since must be before until");
+  if (Date.parse(`${end.replace(" ", "T")}Z`) - Date.parse(`${since.replace(" ", "T")}Z`) > MAX_AUDIT_DAYS * 86_400_000) {
+    throw new ToolError(`Ask for ${MAX_AUDIT_DAYS} days or fewer at a time`);
+  }
+  // Open-ended: include rows written this very second, which "now" to the second would cut off.
+  const until = input.until ? end : "9999-12-31 23:59:59";
+  const [usage, daily, decisions, denials, toolCalls] = await Promise.all([
+    ctx.db.sessionUsage(since, until),
+    ctx.db.dailySpend(since, until),
+    ctx.db.decisionsBetween(since, until),
+    ctx.db.denials(since, until),
+    ctx.db.toolCalls(since, until),
+  ]);
+
+  type Totals = { sessions: number; cost_cents: number } & Record<(typeof TOKEN_FIELDS)[number], number>;
+  const zero = (): Totals => ({ sessions: 0, cost_cents: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
+  const add = (t: Totals, r: Totals) => {
+    for (const k of ["sessions", "cost_cents", ...TOKEN_FIELDS] as const) t[k] += r[k] ?? 0;
+  };
+  const agents: Record<string, Totals & { by_model: Record<string, Totals>; by_origin: Record<string, Totals>; decisions: Record<string, number> }> = {};
+  const agentOf = (name: string) => (agents[name] ??= { ...zero(), by_model: {}, by_origin: {}, decisions: {} });
+  for (const r of usage) {
+    const a = agentOf(r.agent);
+    add(a, r);
+    add((a.by_model[r.model] ??= zero()), r);
+    add((a.by_origin[r.origin] ??= zero()), r);
+  }
+  const decided = decisions.filter((d) => d.kind !== "tool.confirm");
+  for (const d of decided) {
+    const counts = agentOf(d.agent).decisions;
+    counts[d.status] = (counts[d.status] ?? 0) + 1;
+  }
+
+  return JSON.stringify({
+    period: { since, until: end, timezone: "UTC" },
+    notes: [
+      "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started.",
+      "Sessions from before token and model recording began show 0 tokens and model 'unknown'.",
+      "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected. Tool confirmations are excluded.",
+      "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
+    ],
+    agents,
+    daily_spend: daily,
+    rejected: decided.filter((d) => d.status === "rejected").map((d) => ({ id: d.id, agent: d.agent, kind: d.kind, target: d.target, note: d.note })),
+    executed_actions: decided
+      .filter((d) => d.status === "executed" || d.status === "failed")
+      .map((d) => ({ id: d.id, agent: d.agent, kind: d.kind, target: d.target, status: d.status, executed_at: d.executed_at })),
+    denials,
+    tool_calls: toolCalls,
+  });
+}
+
 async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: Input): Promise<string> {
   const kind = s(input.kind, "kind");
   const allowed = ctx.network.agents[agent]?.requestable ?? [];
   if (!allowed.includes(kind)) {
-    throw new ToolError(`You may not request ${kind}. Allowed: ${allowed.join(", ") || "none"}.`);
+    throw new ToolDenied(`You may not request ${kind}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
   const declared: Risk = toRisk(input.risk);
   const floor = toRisk(ctx.network.action_kinds[kind]?.risk);

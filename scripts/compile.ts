@@ -195,7 +195,13 @@ export function compile(cfg = loadAll()) {
     agents: Object.fromEntries(
       Object.keys(network.agents).map((n) => [
         n,
-        { name: n, title: specs[n].title, phase: network.agents[n], requestable: permissions.agents[n].requestable },
+        {
+          name: n,
+          title: specs[n].title,
+          phase: network.agents[n],
+          requestable: permissions.agents[n].requestable,
+          model: cfg.models.tiers[cfg.models.agents[n]?.default],
+        },
       ]),
     ),
   };

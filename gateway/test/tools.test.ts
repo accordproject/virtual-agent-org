@@ -212,3 +212,71 @@ describe("member messages", () => {
     expect(audit.results.filter((r: { detail: string }) => r.detail.includes("internal detail"))).toHaveLength(4);
   });
 });
+
+describe("read_audit (decision 47)", () => {
+  const sql = (ctx: any, q: string, ...args: unknown[]) => ctx.db.db.prepare(q).bind(...args).run();
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  it("sums spend, tokens and models per agent, and lists decisions, actions and denials", async () => {
+    const { ctx } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "s1", agent: "mira", origin: "task", model: "claude-sonnet-5-5" });
+    await ctx.db.upsertSession({ id: "s2", agent: "mira", origin: "deployment", model: "claude-opus-5-5" });
+    await ctx.db.upsertSession({ id: "s3", agent: "ada", origin: "telegram" });
+    await ctx.db.updateSession("s1", "idle:end_turn", 40, { input_tokens: 100, output_tokens: 20, cache_read_tokens: 500, cache_write_tokens: 5 });
+    await ctx.db.updateSession("s2", "idle:end_turn", 110, { input_tokens: 300, output_tokens: 60, cache_read_tokens: 0, cache_write_tokens: 0 });
+    await ctx.db.updateSession("s3", "idle:end_turn", 7);
+
+    const merge = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: T, summary: "s", rationale: "r", risk: "low", payload: {} });
+    await ctx.db.decide(merge.id, "approved");
+    await ctx.db.markExecuted(merge.id, true, "ok");
+    const no = await ctx.db.createDecision({ agent: "mira", kind: "github.merge", target: T, summary: "s", rationale: "r", risk: "medium", payload: {} });
+    await ctx.db.decide(no.id, "rejected", "tests are thin");
+    await ctx.db.createDecision({ agent: "mira", kind: "tool.confirm", target: "bash", summary: "s", rationale: "r", risk: "high", payload: {} });
+    await ctx.db.audit({ agent: "mira", event_type: "agent.mcp_tool_use", tool: "mcp__github__get_pr", permission: "allow" });
+    await ctx.db.audit({ agent: "mira", event_type: "agent.tool_use", tool: "bash", permission: "deny", detail: { cmd: "rm" } });
+    await ctx.db.audit({ agent: "otto", event_type: "gateway.tool_denied", tool: "read_audit", permission: "deny", detail: "read_audit is not available to otto" });
+
+    const r = JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: today() }));
+    expect(r.agents.mira).toMatchObject({ sessions: 2, cost_cents: 150, input_tokens: 400, output_tokens: 80, cache_read_tokens: 500 });
+    expect(r.agents.mira.by_model["claude-opus-5-5"]).toMatchObject({ sessions: 1, cost_cents: 110 });
+    expect(r.agents.mira.by_origin.task.cost_cents).toBe(40);
+    expect(r.agents.mira.decisions).toEqual({ executed: 1, rejected: 1 });
+    expect(r.agents.ada.by_model.unknown.cost_cents).toBe(7);
+    expect(r.daily_spend).toEqual([
+      { day: today(), agent: "ada", cost_cents: 7 },
+      { day: today(), agent: "mira", cost_cents: 150 },
+    ]);
+    expect(r.rejected).toEqual([{ id: no.id, agent: "mira", kind: "github.merge", target: T, note: "tests are thin" }]);
+    expect(r.executed_actions.map((a: { id: string }) => a.id)).toEqual([merge.id]);
+    expect(r.denials.map((d: { tool: string }) => d.tool)).toEqual(["bash", "read_audit"]);
+    expect(r.tool_calls).toHaveLength(2);
+  });
+
+  it("leaves out sessions outside the period", async () => {
+    const { ctx } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "old", agent: "mira", origin: "task" });
+    await ctx.db.updateSession("old", "idle:end_turn", 90);
+    await sql(ctx, "UPDATE sessions SET created_at = '2026-01-10 12:00:00' WHERE id = 'old'");
+    const r = JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: "2026-01-11", until: "2026-02-01" }));
+    expect(r.agents).toEqual({});
+    const r2 = JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: "2026-01-10", until: "2026-01-11" }));
+    expect(r2.agents.mira.cost_cents).toBe(90);
+  });
+
+  it("is Vera's alone, and refuses bad or overlong periods", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "ada", "s", "read_audit", { since: "2026-10-01" })).rejects.toThrow(/not available to ada/);
+    await expect(handleTool(ctx, "vera", "s", "read_audit", { since: "last week" })).rejects.toThrow(/must be an ISO date/);
+    await expect(handleTool(ctx, "vera", "s", "read_audit", { since: "2026-01-01", until: "2026-06-01" })).rejects.toThrow(/92 days or fewer/);
+    await expect(handleTool(ctx, "vera", "s", "read_audit", { since: "2026-02-01", until: "2026-01-01" })).rejects.toThrow(/before until/);
+  });
+
+  it("records the model a session was started on", async () => {
+    const { ctx } = makeTestCtx();
+    const a = await messageAgent(ctx, "mira", { telegram: 42 }, "hi", "owner");
+    expect((await ctx.db.getSession(a))?.model).toBe("claude-sonnet-5-5");
+    const { startSession } = await import("../src/agents");
+    const b = await startSession(ctx, "mira", "check", "task", "owner", { model: "claude-opus-5-5" });
+    expect((await ctx.db.getSession(b))?.model).toBe("claude-opus-5-5");
+  });
+});

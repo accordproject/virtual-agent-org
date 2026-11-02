@@ -51,7 +51,7 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "discord.ops", "linkedin.post"] },
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "discord.ops", "linkedin.post"], model: "claude-sonnet-5-5" },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
