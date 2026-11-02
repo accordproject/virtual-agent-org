@@ -80,6 +80,10 @@ export function validate(cfg = loadAll()): string[] {
   errs.push(...validateReview(review));
   const cap = network.budgets.member_daily_messages;
   if (cap !== undefined && !(Number.isInteger(cap) && cap >= 0)) errs.push("network.yaml: budgets.member_daily_messages must be a whole number, 0 or more");
+  const wakes = network.budgets.follow_up_daily_wakes;
+  if (wakes !== undefined && !(Number.isInteger(wakes) && wakes >= 0 && wakes <= 50)) errs.push("network.yaml: budgets.follow_up_daily_wakes must be a whole number from 0 to 50");
+  const wakeUsd = network.budgets.follow_up_budget_usd;
+  if (wakeUsd !== undefined && !(typeof wakeUsd === "number" && wakeUsd > 0 && wakeUsd <= 3)) errs.push("network.yaml: budgets.follow_up_budget_usd must be more than 0 and at most 3");
 
   const repos = network.github.repos ?? [];
   if (!Array.isArray(repos)) errs.push("github.repos must be a list");
@@ -175,6 +179,11 @@ export function compile(cfg = loadAll()) {
     timezone: network.network.timezone,
     monthly_credit_usd: network.budgets.monthly_credit_usd,
     member_daily_messages: network.budgets.member_daily_messages ?? 20,
+    schedules_enabled: network.network.schedules_enabled ?? false,
+    follow_up: {
+      daily_wakes: network.budgets.follow_up_daily_wakes ?? 5,
+      budget_cents: Math.round((network.budgets.follow_up_budget_usd ?? 0.5) * 100),
+    },
     sandbox_repo: network.github.sandbox_repo,
     repos: network.github.repos ?? [],
     action_kinds: permissions.action_kinds,

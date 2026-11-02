@@ -107,6 +107,32 @@ describe("review checks are a kind of task, not a title (finding 2)", () => {
   });
 });
 
+describe("assigning follow-ups (decision 50)", () => {
+  const brief = { title: "Unblock", objective: "o", output: "x", done_when: "d", effort: "small" };
+
+  it("records what a task follows up and refuses a second open follow-up for the same id", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const blocked = await ctx.db.createTask({ agent: "mira", title: "t", brief: "b" });
+    await ctx.db.setTask(blocked.id, "blocked");
+    expect(await handleTool(ctx, "ada", "sesn_ada", "assign_task", { ...brief, agent: "otto", follows_up: blocked.id.toLowerCase() })).toMatch(/^Assigned T-2/);
+    expect((await ctx.db.getTask("T-2"))?.follows_up).toBe(blocked.id);
+    expect(created(fakes).at(-1)!.text).toContain(`following up ${blocked.id}`);
+
+    await expect(handleTool(ctx, "ada", "sesn_ada", "assign_task", { ...brief, agent: "mira", follows_up: blocked.id })).rejects.toThrow(
+      `T-2 (Otto, running) already follows up ${blocked.id}`,
+    );
+    // Once the follow-up is finished, the id may be followed up again.
+    await ctx.db.setTask("T-2", "done");
+    expect(await handleTool(ctx, "ada", "sesn_ada", "assign_task", { ...brief, agent: "mira", follows_up: blocked.id })).toMatch(/^Assigned T-3/);
+  });
+
+  it("refuses an id that isn't a task or decision", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { ...brief, agent: "mira", follows_up: "PR-12" })).rejects.toThrow(/must be a task or decision id/);
+    await expect(handleTool(ctx, "ada", "s", "assign_task", { ...brief, agent: "mira", follows_up: "D-9" })).rejects.toThrow("No task or decision D-9");
+  });
+});
+
 describe("work a member set going (finding 3)", () => {
   it("marks a member's conversation and every task assigned from it", async () => {
     const { ctx, fakes } = makeTestCtx();

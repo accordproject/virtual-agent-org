@@ -114,6 +114,55 @@ describe("approvals", () => {
   });
 });
 
+describe("following up failed decisions (decision 50)", () => {
+  const adaWakes = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_ada");
+  const skipped = async (ctx: any) =>
+    (await ctx.db.db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.follow_up_skipped'").all()).results.map((r: any) => JSON.parse(r.detail).reason);
+
+  it("wakes Ada once when an approved decision fails to run", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "deployment", started_by: "schedule" });
+    const d = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: "accordproject/concerto#4", summary: "Do a thing", rationale: "r", risk: "low", payload: {}, session_id: "sesn_m" });
+    await approve(ctx, d.id);
+    expect((await ctx.db.getDecision(d.id))?.status).toBe("failed");
+    const wakes = adaWakes(fakes);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0].args[0].text).toContain(`decision ${d.id} (Mira, github.comment on accordproject/concerto#4) was approved but failed`);
+    expect((await ctx.db.activeSessions("ada"))[0]).toMatchObject({ origin: "follow_up", started_by: "schedule" });
+  });
+
+  it("wakes Ada when execution throws, and still answers the owner", async () => {
+    const { ctx, fakes } = makeTestCtx({ dryRun: false });
+    await handleTool(ctx, "mira", "s", "request_action", {
+      kind: "github.comment", target: "accordproject/concerto#3", summary: "s", rationale: "r", risk: "low", payload: { text: "Thanks!" },
+    });
+    expect(await approve(ctx, "D-1")).toMatch(/^D-1 failed: .*no github in tests/);
+    expect(adaWakes(fakes)).toHaveLength(1);
+  });
+
+  it("doesn't wake Ada about her own decisions, or for successes and manual actions", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const own = await ctx.db.createDecision({ agent: "ada", kind: "github.comment", target: "accordproject/concerto#5", payload: {}, summary: "s", rationale: "r", risk: "low" });
+    await approve(ctx, own.id);
+    expect((await ctx.db.getDecision(own.id))?.status).toBe("failed");
+    const ok = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: "accordproject/concerto#3", summary: "s", rationale: "r", risk: "low", payload: { text: "hi" } });
+    await approve(ctx, ok.id);
+    const manual = await ctx.db.createDecision({ agent: "mira", kind: "linkedin.post", target: "linkedin", summary: "s", rationale: "r", risk: "low", payload: { text: "hi" } });
+    await approve(ctx, manual.id);
+    expect(adaWakes(fakes)).toHaveLength(0);
+    expect(await skipped(ctx)).toEqual(["Ada's own work"]);
+  });
+
+  it("doesn't wake a stopped Ada", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.setAgentStatus("ada", "stopped");
+    const d = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: "accordproject/concerto#6", payload: {}, summary: "s", rationale: "r", risk: "low" });
+    expect(await approve(ctx, d.id)).toContain(d.id);
+    expect(adaWakes(fakes)).toHaveLength(0);
+    expect(await skipped(ctx)).toEqual(["Ada is stopped"]);
+  });
+});
+
 describe("approval cards in one app", () => {
   const queue = (ctx: any, kind: string, risk = "low", text = "hi") =>
     handleTool(ctx, "mira", "s", "request_action", { kind, target: "accordproject/concerto#1", summary: "s", rationale: "r", risk, payload: { text } });

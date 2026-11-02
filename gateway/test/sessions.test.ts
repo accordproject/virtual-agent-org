@@ -148,3 +148,152 @@ describe("shared memory upsert", () => {
     await expect(new ManagedClient("k", fake).upsertMemory("s", "/p", "x")).rejects.toThrow(/403/);
   });
 });
+
+describe("following up blocked tasks (decision 50)", () => {
+  const audit = async (ctx: any, type: string) =>
+    (await ctx.db.db.prepare("SELECT detail FROM audit WHERE event_type = ? ORDER BY id").bind(type).all()).results.map((r: any) => JSON.parse(r.detail));
+  const adaWakes = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_ada");
+
+  /** A task for an agent whose session ends its turn after reporting `blocked` (or not reporting, for null). */
+  async function finish(ctx: any, fakes: any, blocked: string[] | null, o: { agent?: string; sid?: string; follows_up?: string } = {}) {
+    const agent = o.agent ?? "mira";
+    const sid = o.sid ?? `sesn_${agent}_task`;
+    const task = await ctx.db.createTask({ agent, title: "Chase the parser PRs", brief: "b", ...(o.follows_up ? { follows_up: o.follows_up } : {}) });
+    await ctx.db.upsertSession({ id: sid, agent, origin: "task", task_id: task.id, started_by: "owner" });
+    await ctx.db.setTask(task.id, "running", sid);
+    fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: `agent_${agent}` }, stop_reason: { type: "end_turn" } };
+    fakes.events[sid] = blocked
+      ? [{ id: `${sid}_e1`, type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked } }]
+      : [];
+    await processSession(ctx, sid);
+    return task.id as string;
+  }
+
+  it("marks a task done when its last report lists no blockers, and doesn't wake Ada", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const id = await finish(ctx, fakes, []);
+    expect((await ctx.db.getTask(id))?.status).toBe("done");
+    const silent = await finish(ctx, fakes, null, { sid: "sesn_silent" });
+    expect((await ctx.db.getTask(silent))?.status).toBe("done");
+    expect(adaWakes(fakes)).toHaveLength(0);
+  });
+
+  it("marks a task blocked when its last report lists blockers, keeps it open, and wakes Ada once", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const id = await finish(ctx, fakes, ["Needs a maintainer on concerto to review #812"]);
+    expect((await ctx.db.getTask(id))?.status).toBe("blocked");
+    expect((await ctx.db.openTasks("mira")).map((t) => t.id)).toEqual([id]);
+
+    const wakes = adaWakes(fakes);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0].args[0].budgetCents).toBe(50);
+    expect(wakes[0].args[0].text).toContain(`task ${id} for Mira`);
+    expect(wakes[0].args[0].text).toContain("Needs a maintainer on concerto to review #812");
+    expect(wakes[0].args[0].text).toContain('"Following up"');
+    expect((await ctx.db.activeSessions("ada"))[0]).toMatchObject({ origin: "follow_up", started_by: "owner" });
+    expect(await audit(ctx, "gateway.follow_up_woken")).toEqual([{ subject: id, of: "mira", started_by: "owner" }]);
+
+    // Later passes over the same idle session change nothing.
+    await processSession(ctx, "sesn_mira_task");
+    expect(adaWakes(fakes)).toHaveLength(1);
+  });
+
+  it("uses the session's latest report, not an earlier one", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const task = await ctx.db.createTask({ agent: "mira", title: "t", brief: "b" });
+    await ctx.db.upsertSession({ id: "sesn_two", agent: "mira", origin: "task", task_id: task.id });
+    fakes.sessions.sesn_two = { id: "sesn_two", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "end_turn" } };
+    fakes.events.sesn_two = [
+      { id: "r1", type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked: ["CI red"] } },
+      { id: "r2", type: "agent.custom_tool_use", name: "report_status", input: { done: ["CI green after retry"], doing: [], blocked: [] } },
+    ];
+    await processSession(ctx, "sesn_two");
+    expect((await ctx.db.getTask(task.id))?.status).toBe("done");
+  });
+
+  it("shows blocked tasks in get_status and the status views", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const id = await finish(ctx, fakes, ["Waiting on D-3"]);
+    const { handleTool } = await import("../src/tools");
+    const st = JSON.parse(await handleTool(ctx, "ada", "sesn_x", "get_status", {}));
+    expect(st.open_tasks.map((t: any) => [t.id, t.status])).toEqual([[id, "blocked"]]);
+    const { gatherStatus, statusCards, statusPlain } = await import("../src/status");
+    const s = await gatherStatus(ctx);
+    expect(statusPlain(s)).toContain("tasks 1 (1 blocked)");
+    expect(statusCards(s).embeds![1].description).toContain("1 open task (1 blocked)");
+  });
+
+  it("wakes Ada at most once per task", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const id = await finish(ctx, fakes, ["x"]);
+    const { wakeAda } = await import("../src/followUp");
+    const task = (await ctx.db.getTask(id))!;
+    expect(await wakeAda(ctx, { kind: "task", task, blockers: ["x"] })).toBe("skipped");
+    expect(adaWakes(fakes)).toHaveLength(1);
+    expect((await audit(ctx, "gateway.follow_up_skipped")).map((d: any) => d.reason)).toEqual(["already woken for this id"]);
+  });
+
+  it("stops waking Ada at the daily cap", async () => {
+    const network = { ...makeTestCtx().ctx.network, follow_up: { daily_wakes: 2, budget_cents: 50 } };
+    const { ctx, fakes } = makeTestCtx({ network });
+    for (const n of [1, 2, 3]) await finish(ctx, fakes, ["x"], { sid: `sesn_cap${n}` });
+    expect(adaWakes(fakes)).toHaveLength(2);
+    expect((await audit(ctx, "gateway.follow_up_skipped")).map((d: any) => [d.subject, d.reason])).toEqual([["T-3", "daily cap of 2 wakes reached"]]);
+  });
+
+  it("never wakes a stopped or paused Ada, or when schedules are off, and says why", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.setAgentStatus("ada", "stopped");
+    await finish(ctx, fakes, ["x"], { sid: "sesn_a" });
+    await ctx.db.setAgentStatus("ada", "paused");
+    await finish(ctx, fakes, ["x"], { sid: "sesn_b" });
+    const off = makeTestCtx({ network: { ...makeTestCtx().ctx.network, schedules_enabled: false } });
+    await finish(off.ctx, off.fakes, ["x"]);
+    expect(adaWakes(fakes)).toHaveLength(0);
+    expect(adaWakes(off.fakes)).toHaveLength(0);
+    expect((await audit(ctx, "gateway.follow_up_skipped")).map((d: any) => d.reason)).toEqual(["Ada is stopped", "Ada is paused"]);
+    expect((await audit(off.ctx, "gateway.follow_up_skipped")).map((d: any) => d.reason)).toEqual(["schedules are off (network.schedules_enabled)"]);
+    expect((await ctx.db.getTask("T-1"))?.status).toBe("blocked");
+  });
+
+  it("doesn't wake Ada about review checks", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const task = await ctx.db.createTask({ agent: "mira", title: "Review check", brief: "b", review: { target: "accordproject/concerto#1", sha: "abc1234" } });
+    await ctx.db.upsertSession({ id: "sesn_rc", agent: "mira", origin: "task", task_id: task.id });
+    fakes.sessions.sesn_rc = { id: "sesn_rc", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "end_turn" } };
+    fakes.events.sesn_rc = [{ id: "rc1", type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked: ["head moved"] } }];
+    await processSession(ctx, "sesn_rc");
+    expect((await ctx.db.getTask(task.id))?.status).toBe("blocked");
+    expect(adaWakes(fakes)).toHaveLength(0);
+  });
+
+  it("keeps processing the session when waking Ada fails, and audits it", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const create = ctx.managed.createSession.bind(ctx.managed);
+    (ctx.managed as any).createSession = async (p: any) => {
+      if (p.agentId === "agent_ada") throw new Error("Managed Agents down");
+      return create(p);
+    };
+    const id = await finish(ctx, fakes, ["x"]);
+    expect((await ctx.db.getTask(id))?.status).toBe("blocked");
+    expect(fakes.calls.filter((c) => c.method === "sendToolResult")).toHaveLength(1);
+    expect(await audit(ctx, "gateway.follow_up_error")).toEqual([{ subject: id, of: "mira", error: "Managed Agents down" }]);
+    // A failed wake isn't counted towards the daily cap.
+    expect((await (ctx.db as any).db.prepare("SELECT status FROM follow_ups").all()).results).toEqual([{ status: "failed" }]);
+  });
+
+  it("closes a blocked task when its follow-up finishes", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const blocked = await finish(ctx, fakes, ["x"], { sid: "sesn_first" });
+    const followUp = await finish(ctx, fakes, [], { agent: "otto", sid: "sesn_second", follows_up: blocked });
+    expect((await ctx.db.getTask(followUp))?.status).toBe("done");
+    expect((await ctx.db.getTask(blocked))?.status).toBe("done");
+  });
+
+  it("tells Ada when a blocked task was itself a follow-up", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const first = await finish(ctx, fakes, ["x"], { sid: "sesn_first" });
+    await finish(ctx, fakes, ["still stuck"], { agent: "otto", sid: "sesn_second", follows_up: first });
+    expect(adaWakes(fakes).at(-1).args[0].text).toContain(`It was itself a follow-up of ${first}: put it to Matt`);
+  });
+});

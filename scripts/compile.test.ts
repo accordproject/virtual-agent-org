@@ -62,3 +62,16 @@ test("compile carries the member message allowance, and validate checks it", () 
   const network = { ...cfg.network, budgets: { ...cfg.network.budgets, member_daily_messages: 2.5 } };
   assert.ok(validate({ ...cfg, network }).includes("network.yaml: budgets.member_daily_messages must be a whole number, 0 or more"));
 });
+
+test("compile carries the follow-up wake limits and the schedules switch, and validate checks them", () => {
+  const cfg = loadAll();
+  const out = compile(cfg);
+  assert.deepEqual(out.follow_up, { daily_wakes: 5, budget_cents: 50 });
+  assert.equal(out.schedules_enabled, cfg.network.network.schedules_enabled ?? false);
+  const bad = (budgets: object) => validate({ ...cfg, network: { ...cfg.network, budgets: { ...cfg.network.budgets, ...budgets } } });
+  assert.ok(bad({ follow_up_daily_wakes: -1 }).includes("network.yaml: budgets.follow_up_daily_wakes must be a whole number from 0 to 50"));
+  assert.ok(bad({ follow_up_daily_wakes: 1.5 }).includes("network.yaml: budgets.follow_up_daily_wakes must be a whole number from 0 to 50"));
+  assert.ok(bad({ follow_up_budget_usd: 0 }).includes("network.yaml: budgets.follow_up_budget_usd must be more than 0 and at most 3"));
+  assert.ok(bad({ follow_up_budget_usd: 5 }).includes("network.yaml: budgets.follow_up_budget_usd must be more than 0 and at most 3"));
+  assert.deepEqual(bad({ follow_up_daily_wakes: 0, follow_up_budget_usd: 0.25 }), validate(cfg));
+});

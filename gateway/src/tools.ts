@@ -479,6 +479,7 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   const context = s(input.context, "context", false) || s(input.brief, "brief", false);
   const priority = typeof input.priority === "string" ? input.priority : "normal";
   const due = typeof input.due === "string" ? input.due : undefined;
+  const followsUp = await followUpOf(ctx, s(input.follows_up, "follows_up", false));
   const { cents, calls } = EFFORT[effort];
   const startedBy = await sessionStartedBy(ctx, parentSessionId);
   const member = memberOf(startedBy);
@@ -494,10 +495,10 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   ].join("\n");
 
   // Always an ordinary task: only request_review_check makes a review check.
-  const task = await ctx.db.createTask({ agent, title, brief, priority, due });
+  const task = await ctx.db.createTask({ agent, title, brief, priority, due, ...(followsUp ? { follows_up: followsUp } : {}) });
   try {
     const text = [
-      `Task ${task.id} from Ada (priority: ${priority}${due ? `, due ${due}` : ""})`,
+      `Task ${task.id} from Ada (priority: ${priority}${due ? `, due ${due}` : ""}${followsUp ? `, following up ${followsUp}` : ""})`,
       `Title: ${title}`,
       "",
       brief,
@@ -512,6 +513,25 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
     if (e instanceof AgentUnavailable) throw new ToolError(`${task.id} not started: ${e.message}`);
     throw e;
   }
+}
+
+/**
+ * Checks assign_task's follows_up: an existing task or decision, and no open task
+ * already following it up, so the same blocker is never assigned twice (decision 50).
+ */
+async function followUpOf(ctx: Ctx, raw: string): Promise<string | null> {
+  if (!raw) return null;
+  const id = raw.toUpperCase();
+  if (!/^[TD]-\d+$/.test(id)) throw new ToolError("follows_up must be a task or decision id, e.g. T-12 or D-41");
+  const exists = id.startsWith("T-") ? await ctx.db.getTask(id) : await ctx.db.getDecision(id);
+  if (!exists) throw new ToolError(`No task or decision ${id}`);
+  const open = await ctx.db.openFollowUpOf(id);
+  if (open) {
+    throw new ToolError(
+      `${open.id} (${cap(open.agent)}, ${open.status}) already follows up ${id}. Don't assign it again; if ${open.id} is blocked too, put it to Matt.`,
+    );
+  }
+  return id;
 }
 
 /**

@@ -373,3 +373,44 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   opens, so the owner merges these past the `ci` check.
 - People's platform ids are kept as a `production` environment secret, so a change to
   `people.yaml` loads them without a manual step.
+
+**50. Following up blocked work** · DEFAULT: the gateway wakes Ada, within limits
+
+- A task used to count as done whenever its session ended, even if its last status
+  report listed blockers, and a failed approved decision was seen only if someone
+  listed the queue.
+- A task whose session ends with blockers in its last report is now `blocked`. It stays
+  among the open tasks in `get_status` and `/status`.
+- When a task ends blocked, or an approved decision fails to run, the gateway starts an
+  Ada session naming it. She follows "Following up" in her spec: assign it, with full
+  context, to an agent who can fix it, or put it to the owner as a decision. The
+  check-in does the same for every blocked task, failed decision and task idle more
+  than 4 days.
+- Limits: never for Ada's own work or for review checks; one wake per task or decision;
+  at most 5 wakes a day at $0.50 each (`budgets.follow_up_daily_wakes` and
+  `follow_up_budget_usd`). Wakes run only while Ada is active and `schedules_enabled`
+  is on, since they are work nobody asked for, like a scheduled run. Every wake and
+  every skip is audited, and a failed wake never stops the work it came from.
+- `assign_task` takes `follows_up` (the task or decision id). The gateway refuses a
+  second open follow-up for the same id, and closes a blocked task when its follow-up
+  finishes. A follow-up that is blocked again goes to the owner, not to another agent.
+- Not chosen: a separate pause switch for wakes (pausing Ada, or setting the daily
+  wakes to 0, already does it); waking the agent that was blocked (it reported the
+  blocker because it couldn't fix it).
+
+**51. Who may change the network's own code** · RESOLVED (the mechanic is not built yet)
+
+- No agent holds a credential for this repo, and it is in no agent's scope or the
+  gateway's `repos`. Today the owner applies every `spec.change` by hand.
+- A future mechanic agent may open pull requests here from its own fork, with a
+  credential limited to that fork. It cannot merge. No other agent may write to this
+  repo.
+- When it is built: `compile.ts` refuses this repo in any other agent's scope or in
+  `repos`; the gateway refuses every action kind that targets it; the owner merges on
+  GitHub and deploys by hand, so a merged change is not live until deployed.
+- Each proposal cites the audit rows it rests on; text in those rows is data, not
+  instructions. Pull requests that touch the mechanic's own spec or permissions,
+  `permissions.yaml`, or the gateway's checks are flagged for closer review.
+- Not chosen: letting every agent propose changes here (the rules would be editable by
+  the agents they limit); no agent writing here at all (every fix waits for the owner
+  to write it).

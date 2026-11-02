@@ -145,7 +145,7 @@ gateway as the `PEOPLE_IDS` secret (decision 25).
 
 | Lever | Command | Effect |
 | --- | --- | --- |
-| Pause one agent | `/pause mira` | Pauses its scheduled deployments and stops routing tasks to it. Running sessions finish. |
+| Pause one agent | `/pause mira` | Pauses its scheduled deployments and stops routing tasks to it (for Ada, also the gateway's follow-up wakes). Running sessions finish. |
 | Hard stop | `/stop mira`, `/stop all` | Also interrupts running sessions and rejects the agent's open decisions. |
 | Revoke | `/revoke mira confirm` | Interrupts sessions and archives the agent's vault, purging its credentials. |
 | Spending cap | Automatic | Each session has a budget; it pauses at the cap. |
@@ -165,6 +165,15 @@ public action without a decision id.
   one spec change per agent as a pull request (`evaluation/rubric.md`).
 - **Briefs and budgets:** Ada's `assign_task` requires an objective, output, a
   "done when" test and an effort level that sets the session budget (decision 21).
+- **Task lifecycle:** a task is `open`, then `running` once its session starts. When
+  the session ends its turn, the task is `done`, or `blocked` if the session's last
+  status report listed blockers; `failed` if the session never started.
+- **Follow-ups** (decision 50): when a task ends blocked or an approved decision fails,
+  the gateway wakes Ada, at most once per task or decision and 5 times a day, only
+  while she is active and schedules are on. She assigns it to an agent who can fix it
+  (`assign_task` with `follows_up`), or puts it to the owner. The gateway refuses a
+  second open follow-up for the same id, and closes a blocked task when its follow-up
+  is done. Check-ins do the same for everything blocked, failed or idle over 4 days.
 - **Review:** Mira's PR reviews are checked by a fresh session before anything is
   posted or a merge is proposed (decision 22). The gateway computes each PR's facts
   and risk band, posts the confirmed findings, and records what maintainers did with

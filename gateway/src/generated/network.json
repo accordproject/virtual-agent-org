@@ -3,6 +3,11 @@
   "timezone": "Europe/London",
   "monthly_credit_usd": 200,
   "member_daily_messages": 20,
+  "schedules_enabled": true,
+  "follow_up": {
+    "daily_wakes": 5,
+    "budget_cents": 50
+  },
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
   "repos": [
     "accordproject/concerto",

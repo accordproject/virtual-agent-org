@@ -41,6 +41,8 @@ export interface Task {
   kind: "task" | "review_check";
   review_target: string | null;
   review_sha: string | null;
+  /** The task or decision (T-12, D-41) this task was assigned to follow up, if any. */
+  follows_up: string | null;
   created_at: string;
 }
 
@@ -80,7 +82,7 @@ export type StartedBy = "owner" | "schedule" | "unknown" | `member:${string}`;
 export interface SessionRow {
   id: string;
   agent: string;
-  origin: "telegram" | "discord" | "task" | "deployment";
+  origin: "telegram" | "discord" | "task" | "deployment" | "follow_up";
   chat_id: number | null;
   discord_user: string | null;
   task_id: string | null;
@@ -384,12 +386,13 @@ export class Db {
     priority?: string;
     due?: string;
     review?: { target: string; sha: string };
+    follows_up?: string;
   }): Promise<Task> {
     const seq = await this.next("task");
     const id = `T-${seq}`;
     await this.db
-      .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : "task", t.review?.target ?? null, t.review?.sha ?? null)
+      .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha, follows_up) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : "task", t.review?.target ?? null, t.review?.sha ?? null, t.follows_up ?? null)
       .run();
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
   }
@@ -409,10 +412,49 @@ export class Db {
       .run();
   }
 
+  getTask(id: string) {
+    return this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id.toUpperCase()).first<Task>();
+  }
+
+  /** Tasks not finished: open, running, or blocked until someone follows them up. */
   async openTasks(agent?: string): Promise<Task[]> {
-    const sql = "SELECT * FROM tasks WHERE status IN ('open', 'running')" + (agent ? " AND agent = ?" : "") + " ORDER BY seq";
+    const sql = "SELECT * FROM tasks WHERE status IN ('open', 'running', 'blocked')" + (agent ? " AND agent = ?" : "") + " ORDER BY seq";
     const stmt = agent ? this.db.prepare(sql).bind(agent) : this.db.prepare(sql);
     return (await stmt.all<Task>()).results;
+  }
+
+  /** An unfinished task already assigned to follow up this task or decision id. */
+  openFollowUpOf(subject: string) {
+    return this.db
+      .prepare("SELECT * FROM tasks WHERE follows_up = ? AND status IN ('open', 'running', 'blocked') ORDER BY seq LIMIT 1")
+      .bind(subject.toUpperCase())
+      .first<Task>();
+  }
+
+  // ---- follow-up wakes (decision 50) --------------------------------------
+
+  /**
+   * Claims the one wake allowed for a task or decision id, if today's wakes (UTC) are
+   * under the cap. One statement, so two passes can't both claim it or pass the cap.
+   */
+  async claimFollowUp(subject: string, agent: string, dailyCap: number): Promise<"claimed" | "duplicate" | "cap"> {
+    const r = await this.db
+      .prepare(
+        "INSERT INTO follow_ups (subject, agent) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM follow_ups WHERE subject = ?) " +
+          "AND (SELECT COUNT(*) FROM follow_ups WHERE status != 'failed' AND created_at >= date('now')) < ?",
+      )
+      .bind(subject, agent, subject, dailyCap)
+      .run();
+    if ((r.meta?.changes ?? 0) > 0) return "claimed";
+    const seen = await this.db.prepare("SELECT 1 AS x FROM follow_ups WHERE subject = ?").bind(subject).first();
+    return seen ? "duplicate" : "cap";
+  }
+
+  async setFollowUp(subject: string, status: "started" | "failed", sessionId?: string) {
+    await this.db
+      .prepare("UPDATE follow_ups SET status = ?, session_id = COALESCE(?, session_id) WHERE subject = ?")
+      .bind(status, sessionId ?? null, subject)
+      .run();
   }
 
   // ---- reviews and findings (decisions 35 and 36) -------------------------
@@ -532,6 +574,15 @@ export class Db {
       .prepare("INSERT INTO statuses (agent, session_id, done, doing, blocked, notes) VALUES (?, ?, ?, ?, ?, ?)")
       .bind(s.agent, s.session_id, JSON.stringify(s.done), JSON.stringify(s.doing), JSON.stringify(s.blocked), s.notes ?? null)
       .run();
+  }
+
+  /** What a session's last report_status listed as blocked, or null if it never reported. */
+  async sessionBlockers(sessionId: string): Promise<string[] | null> {
+    const r = await this.db
+      .prepare("SELECT blocked FROM statuses WHERE session_id = ? ORDER BY id DESC LIMIT 1")
+      .bind(sessionId)
+      .first<{ blocked: string }>();
+    return r ? (JSON.parse(r.blocked) as string[]) : null;
   }
 
   async latestStatuses(agent?: string) {

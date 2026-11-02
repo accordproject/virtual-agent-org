@@ -3,6 +3,7 @@
 import { messageAgent, refreshDecisionCard, type ReplyTo } from "./agents";
 import { cap, type Ctx } from "./context";
 import { executeDecision } from "./executors";
+import { wakeAda } from "./followUp";
 
 function deploymentsFor(ctx: Ctx, agent: string): string[] {
   return Object.values(ctx.deployed.deployments)
@@ -19,12 +20,20 @@ export async function approve(ctx: Ctx, id: string): Promise<string> {
     if (!r.manual) await ctx.db.markExecuted(id, r.ok, r.result);
     else await ctx.db.setNote(id, r.result);
     await refreshDecisionCard(ctx, id);
+    if (!r.manual && !r.ok) await followUpFailure(ctx, id);
     return `${id}: ${r.result}`;
   } catch (err) {
     await ctx.db.markExecuted(id, false, String(err));
     await refreshDecisionCard(ctx, id);
+    await followUpFailure(ctx, id);
     return `${id} failed: ${String(err)}`;
   }
+}
+
+/** An approved decision failed to run: wake Ada to follow it up (decision 50). Never throws. */
+async function followUpFailure(ctx: Ctx, id: string) {
+  const failed = await ctx.db.getDecision(id).catch(() => null);
+  if (failed) await wakeAda(ctx, { kind: "decision", decision: failed });
 }
 
 export async function reject(ctx: Ctx, id: string, note?: string): Promise<string> {

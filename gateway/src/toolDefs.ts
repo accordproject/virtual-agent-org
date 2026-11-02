@@ -106,13 +106,17 @@ export const TOOLS = {
         effort: { type: "string", enum: ["small", "medium", "large"] },
         priority: { type: "string", enum: ["low", "normal", "high"] },
         due: str("ISO date, optional"),
+        follows_up: str(
+          "The blocked task or failed decision this task follows up, e.g. T-12 or D-41. Optional. Refused if an open task already follows it up; when this task finishes, a blocked task it follows up is closed.",
+        ),
       },
       required: ["agent", "title", "objective", "output", "done_when", "effort"],
     },
   },
   get_status: {
     owner: "ada",
-    description: "Latest status reports and open tasks, for one agent or all.",
+    description:
+      "Latest status reports and open tasks, for one agent or all. open_tasks includes blocked ones (status blocked) and, in follows_up, the task or decision each follow-up was assigned for.",
     input_schema: { type: "object", properties: { agent: str("Agent name; omit for all") } },
   },
   get_scorecard: {
