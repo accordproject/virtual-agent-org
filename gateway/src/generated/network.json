@@ -256,7 +256,8 @@
         "spec.change",
         "other",
         "discord.ops"
-      ]
+      ],
+      "model": "claude-opus-5-5"
     },
     "mira": {
       "name": "mira",
@@ -270,13 +271,15 @@
         "github.approve_ci",
         "github.docs_pr",
         "discord.ops"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     },
     "vera": {
       "name": "vera",
       "title": "Metrics & Audit",
       "phase": 1,
-      "requestable": []
+      "requestable": [],
+      "model": "claude-haiku-5-5"
     },
     "otto": {
       "name": "otto",
@@ -288,7 +291,8 @@
         "github.comment",
         "message.person",
         "discord.ops"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     },
     "rosa": {
       "name": "rosa",
@@ -298,7 +302,8 @@
         "github.comment",
         "discord.announce",
         "message.person"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     },
     "juno": {
       "name": "juno",
@@ -308,13 +313,15 @@
         "wordpress.publish",
         "linkedin.post",
         "github.comment"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     },
     "sage": {
       "name": "sage",
       "title": "Research",
       "phase": 2,
-      "requestable": []
+      "requestable": [],
+      "model": "claude-sonnet-5-5"
     },
     "kit": {
       "name": "kit",
@@ -324,7 +331,8 @@
         "github.comment",
         "other",
         "discord.ops"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     },
     "felix": {
       "name": "felix",
@@ -333,7 +341,8 @@
       "requestable": [
         "github.release",
         "github.comment"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     },
     "nell": {
       "name": "nell",
@@ -342,7 +351,8 @@
       "requestable": [
         "email.send",
         "message.person"
-      ]
+      ],
+      "model": "claude-sonnet-5-5"
     }
   }
 }

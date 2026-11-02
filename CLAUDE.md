@@ -144,6 +144,8 @@ only for a fork without the workflow, or when a run fails.
     (`managed.ts`);
   - `agent_with_overrides` on scheduled deployments (`deploy.ts`);
   - events-list pagination (`managed.ts`);
+  - the token field names on a session's `usage` (`sessionTokens` in `managed.ts`),
+    behind Vera's `read_audit`;
   - the Vimeo texttrack `link` field (`vimeo.ts`);
   - the PR GraphQL query, including `latestOpinionatedReviews`, and the fallback when
     GitHub refuses a review's inline comments (`github.ts`, `actions.ts`);

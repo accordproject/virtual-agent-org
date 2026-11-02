@@ -178,6 +178,22 @@ export const TOOLS = {
     },
   },
 
+  read_audit: {
+    owner: "vera",
+    description:
+      "The gateway's records for the agent audit, for one period of up to 92 days: each agent's spend (list cost in US cents), tokens, " +
+      "models used and session origins; spend per day; decision outcomes with rejection notes; executed actions with their decision ids; " +
+      "tool denials; and external tool calls by tool and permission. Read-only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        since: str("Start, inclusive: ISO date or date-time in UTC, e.g. 2026-10-26"),
+        until: str("End, exclusive: ISO date or date-time in UTC; omit for now"),
+      },
+      required: ["since"],
+    },
+  },
+
   // ---- otto ----
   vimeo_recordings: {
     owner: "otto",

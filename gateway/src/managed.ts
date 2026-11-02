@@ -24,7 +24,14 @@ export interface Session {
   status: "idle" | "running" | "rescheduling" | "terminated";
   agent?: { id: string; version?: number } | string;
   stop_reason?: { type: string; event_ids?: string[] };
-  usage?: { list_cost?: { amount: string; currency: string } };
+  // VERIFY: token field names, assumed to match span.model_request_end's model_usage.
+  usage?: {
+    list_cost?: { amount: string; currency: string };
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
   metadata?: Record<string, string>;
 }
 
@@ -224,6 +231,24 @@ export function sessionAgentId(s: Session): string | undefined {
 export function costCents(s: Session): number {
   const a = s.usage?.list_cost?.amount;
   return a ? Number.parseInt(a, 10) || 0 : 0;
+}
+
+/** Cumulative token totals so far; missing fields count as 0. */
+export function sessionTokens(s: Session): Tokens {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  return {
+    input_tokens: n(s.usage?.input_tokens),
+    output_tokens: n(s.usage?.output_tokens),
+    cache_read_tokens: n(s.usage?.cache_read_input_tokens),
+    cache_write_tokens: n(s.usage?.cache_creation_input_tokens),
+  };
+}
+
+export interface Tokens {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export function messageText(e: SessionEvent): string {
