@@ -40,6 +40,12 @@ budgets:
   # Messages each member (anyone in people.yaml but the owner) may send the agents per
   # day, across Telegram and Discord. Over it, they're told to try tomorrow.
   member_daily_messages: 20
+  # Ada is woken when a task ends blocked or an approved decision fails (decision 50).
+  # At most this many wakes a day (UTC), one per task or decision; 0 turns it off.
+  # Wakes also need schedules_enabled. Worst case: wakes x budget a day.
+  follow_up_daily_wakes: 5
+  # Session budget for each wake (USD).
+  follow_up_budget_usd: 0.50
 
 agents:
   # name: phase in which the agent is first deployed

@@ -62,6 +62,13 @@ export interface NetworkConfig {
   review?: ReviewConfig;
   /** Messages each member may send the agents per day (network.yaml budgets). Absent = 20. */
   member_daily_messages?: number;
+  /** network.schedules_enabled: whether agents run without being asked. Absent = off. */
+  schedules_enabled?: boolean;
+  /**
+   * Waking Ada when a task ends blocked or an approved decision fails (decision 50):
+   * wakes per UTC day, and each wake's session budget. Absent or 0 wakes = off.
+   */
+  follow_up?: { daily_wakes: number; budget_cents: number };
   /** Model ids by tier, from models.yaml, for sessions the gateway starts on a stronger model. */
   model_tiers?: Record<string, string>;
 }

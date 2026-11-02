@@ -9,8 +9,11 @@ schedules:
     budget_usd: 1.50
     prompt: >
       Run the check-in. Ask each active agent for status with get_status, read the latest
-      scorecard, list open decisions, and send Matt one check-in message with send_to_matt
-      in the standard format.
+      scorecard, and list decisions. First work through "Following up" in your instructions:
+      assign each blocked task, failed decision and task idle more than 4 days to an agent
+      who can fix it, or put it to Matt as a decision, never twice for the same id. Then send
+      Matt one check-in message with send_to_matt in the standard format, with the
+      follow-ups listed.
 
   - name: ada-weekly-evaluation
     agent: ada

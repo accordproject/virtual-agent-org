@@ -10,6 +10,8 @@ export interface AgentStatusRow {
   title: string;
   state: string; // active | paused | stopped | revoked | not deployed
   tasks: number;
+  /** How many of those tasks ended blocked and wait on a follow-up. */
+  blockedTasks?: number;
   decisions: number;
   weekCents: number;
   last?: { at: string; line: string; doing: string[]; blocked: string[] };
@@ -44,6 +46,7 @@ export async function gatherStatus(ctx: Ctx): Promise<NetworkStatus> {
         title: a.title,
         state: ctx.deployed.agents[a.name] ? controls[a.name] ?? "active" : "not deployed",
         tasks: tasks.filter((t) => t.agent === a.name).length,
+        blockedTasks: tasks.filter((t) => t.agent === a.name && t.status === "blocked").length,
         decisions: open.filter((d) => d.agent === a.name).length,
         weekCents: spendWeek[a.name] ?? 0,
         last: st ? { at: st.at, line: st.doing[0] ?? st.done[0] ?? "—", doing: st.doing, blocked: st.blocked } : undefined,
@@ -65,7 +68,7 @@ export function statusPlain(s: NetworkStatus): string {
   const out = [`Phase ${s.phase}${s.dryRun ? " · DRY RUN" : ""}`];
   for (const a of s.agents) {
     out.push(
-      `${cap(a.name)} (${a.title}) · ${a.state} · tasks ${a.tasks} · decisions ${a.decisions} · 7d ${usd(a.weekCents)}` +
+      `${cap(a.name)} (${a.title}) · ${a.state} · tasks ${a.tasks}${a.blockedTasks ? ` (${a.blockedTasks} blocked)` : ""} · decisions ${a.decisions} · 7d ${usd(a.weekCents)}` +
         (a.last ? `\n  last report ${a.last.at}: ${a.last.line}` : ""),
     );
   }
@@ -108,7 +111,7 @@ export function statusCards(s: NetworkStatus): DiscordPayload {
   const budget = Math.floor(6000 / Math.max(s.agents.length, 1));
   const embeds = s.agents.map((a) => {
     const title = `${STATE_MARK[a.state] ?? "⚪"} ${cap(a.name)} · ${a.title}${a.state === "active" ? "" : ` · ${a.state}`}`;
-    const lines = [`${plural(a.tasks, "open task")} · ${plural(a.decisions, "decision")} waiting · ${usd(a.weekCents)} this week`, ""];
+    const lines = [`${plural(a.tasks, "open task")}${a.blockedTasks ? ` (${a.blockedTasks} blocked)` : ""} · ${plural(a.decisions, "decision")} waiting · ${usd(a.weekCents)} this week`, ""];
     if (!a.last) lines.push("No report yet.");
     else {
       lines.push(`**Last report** ${a.last.at.slice(5, 16)}`);

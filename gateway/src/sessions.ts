@@ -5,6 +5,7 @@
 import { defaultModel, postDecision, replyToOrigin } from "./agents";
 import { agentByManagedId } from "./config";
 import { cap, type Ctx } from "./context";
+import { wakeAda } from "./followUp";
 import { costCents, messageText, sessionAgentId, sessionTokens, type SessionEvent } from "./managed";
 import { ToolDenied, ToolError, handleTool } from "./tools";
 
@@ -52,11 +53,37 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   await ctx.db.updateSession(sessionId, status, costCents(session), sessionTokens(session));
 
   if (row?.task_id && session.status === "idle" && session.stop_reason?.type === "end_turn") {
-    await ctx.db.setTask(row.task_id, "done");
+    await finishTask(ctx, row.task_id, sessionId);
   }
   // Tell Matt once, when the session first runs out, not on every later pass.
   if (status === "idle:budget_reached" && row?.status !== "idle:budget_reached") {
     await ctx.tg.send(ctx.ownerChatId, `${cap(agent)} hit its session budget and paused (${sessionId}).`);
+  }
+}
+
+/**
+ * A task's session ended its turn. The task is blocked if the session's last status
+ * report listed blockers, and Ada is woken to follow it up (decision 50); otherwise it
+ * is done, and so is a blocked task it was assigned to follow up. Runs on every pass
+ * over an idle session, so it acts only when the status changes.
+ */
+async function finishTask(ctx: Ctx, taskId: string, sessionId: string) {
+  const task = await ctx.db.getTask(taskId);
+  if (!task || ["done", "blocked", "failed", "cancelled"].includes(task.status)) return;
+  const blockers = (await ctx.db.sessionBlockers(sessionId)) ?? [];
+  if (blockers.length) {
+    await ctx.db.setTask(task.id, "blocked");
+    await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.task_blocked", detail: { task: task.id, blockers: blockers.slice(0, 5) } });
+    await wakeAda(ctx, { kind: "task", task, blockers });
+    return;
+  }
+  await ctx.db.setTask(task.id, "done");
+  if (task.follows_up?.startsWith("T-")) {
+    const original = await ctx.db.getTask(task.follows_up);
+    if (original?.status === "blocked") {
+      await ctx.db.setTask(original.id, "done");
+      await ctx.db.audit({ agent: original.agent, event_type: "gateway.task_unblocked", detail: { task: original.id, by: task.id } });
+    }
   }
 }
 

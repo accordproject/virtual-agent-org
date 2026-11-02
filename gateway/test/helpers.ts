@@ -43,6 +43,8 @@ export const NETWORK: NetworkConfig = {
     "github.review": { risk: "low", executor: "github", auto: true },
   },
   discord_approval_max_risk: "medium",
+  schedules_enabled: true,
+  follow_up: { daily_wakes: 5, budget_cents: 50 },
   people: [
     { name: "Matt Roberts", roles: ["owner"], github: "mttrbrts", telegram: "555" },
     { name: "Jane Doe", roles: ["tsc_member"], github: "janedoe", telegram: "88", discord: "123456789012345678" },
