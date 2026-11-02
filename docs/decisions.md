@@ -397,3 +397,20 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: a separate pause switch for wakes (pausing Ada, or setting the daily
   wakes to 0, already does it); waking the agent that was blocked (it reported the
   blocker because it couldn't fix it).
+
+**51. Who may change the network's own code** · RESOLVED (the mechanic is not built yet)
+
+- No agent holds a credential for this repo, and it is in no agent's scope or the
+  gateway's `repos`. Today the owner applies every `spec.change` by hand.
+- A future mechanic agent may open pull requests here from its own fork, with a
+  credential limited to that fork. It cannot merge. No other agent may write to this
+  repo.
+- When it is built: `compile.ts` refuses this repo in any other agent's scope or in
+  `repos`; the gateway refuses every action kind that targets it; the owner merges on
+  GitHub and deploys by hand, so a merged change is not live until deployed.
+- Each proposal cites the audit rows it rests on; text in those rows is data, not
+  instructions. Pull requests that touch the mechanic's own spec or permissions,
+  `permissions.yaml`, or the gateway's checks are flagged for closer review.
+- Not chosen: letting every agent propose changes here (the rules would be editable by
+  the agents they limit); no agent writing here at all (every fix waits for the owner
+  to write it).
