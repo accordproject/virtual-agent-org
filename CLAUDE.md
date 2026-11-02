@@ -91,6 +91,10 @@ npm run repo:add owner/name # check a repo's GitHub setup, then add it to networ
 cd gateway && npm run migrate   # apply D1 migrations (remote)
 ```
 
+Merging to `main` deploys automatically: the `deploy` workflow works out what changed and,
+once Matt approves the run, does the steps below in order (decision 49). Run them by hand
+only for a fork without the workflow, or when a run fails.
+
 - **Changed an agent spec, `_protocol.md`, models or schedules?** Run `deploy:agents`.
 - **Changed gateway code, `permissions.yaml` or `review.yaml`?** Run `gateway:deploy`. Do both when in doubt.
 - **Added a migration?** Run `cd gateway && npm run migrate` before `gateway:deploy`.

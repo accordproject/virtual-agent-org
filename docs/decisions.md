@@ -358,3 +358,18 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   denial, as permission-policy denials already were.
 - Scheduled runs are recorded with the agent's default model, since a session does not
   report which model it ran on.
+
+**49. Deploying after a merge** · RESOLVED: automatic, after the owner approves the run
+
+- Every push to `main` starts the `deploy` workflow, which deploys only what changed:
+  people's ids, D1 migrations, the gateway, then the agents.
+- The deploy secrets live in the `production` environment. It accepts runs from `main`
+  only, each run waits for the owner's approval, and admins can't skip that. This
+  follows the Accord Project's npm publishing setup.
+- `main` is protected: changes arrive by pull request with the `ci` and DCO checks
+  passing, so the approval is not the only gate.
+- New Managed Agents resource ids come back as a PR. Agent deploys wait until it is
+  merged, so a resource is never created twice. CI doesn't run on PRs the workflow
+  opens, so the owner merges these past the `ci` check.
+- People's platform ids are kept as a `production` environment secret, so a change to
+  `people.yaml` loads them without a manual step.

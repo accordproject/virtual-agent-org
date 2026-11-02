@@ -128,10 +128,45 @@ npm run gateway:deploy            # the gateway bundles deployed.json
 
 Commit `deployed.json`; it holds resource ids, not secrets.
 
-To deploy from GitHub Actions instead, add these repository secrets and run the
-`deploy` workflow by hand: `ANTHROPIC_DEPLOY_KEY`, `MIRA_GITHUB_TOKEN`,
-`VERA_GITHUB_TOKEN`, `OTTO_GITHUB_TOKEN`, `CLOUDFLARE_API_TOKEN`,
-`CLOUDFLARE_ACCOUNT_ID`. Give its `production` environment a required reviewer.
+### Deploying from GitHub Actions
+
+After the first deploy, the `deploy` workflow does this on every push to `main`
+(decision 49). It works out what changed since the last successful deploy and deploys
+only that: people's ids
+when `people.yaml` changed, D1 migrations, the gateway, then the agents. If the agents'
+deploy creates resources, it deploys the gateway again and opens a
+`chore(deploy): record deployed resource ids` PR. Merge it before the next agent
+deploy; until then the workflow refuses to deploy agents, so nothing is created twice.
+Running the workflow by hand deploys everything, as a dry run unless you untick it.
+
+Set up its `production` environment once. Only runs from `main` may use it, each run
+waits for your approval, and admins can't skip that:
+
+```sh
+REPO=<owner>/<repo>
+ME=$(gh api user --jq .id)
+gh api -X PUT repos/$REPO/environments/production --input - <<EOF
+{ "reviewers": [{ "type": "User", "id": $ME }], "prevent_self_review": false,
+  "can_admins_bypass": false,
+  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
+EOF
+gh api -X POST repos/$REPO/environments/production/deployment-branch-policies -f name=main -f type=branch
+```
+
+Then give the environment its secrets. Keep them out of repository secrets, so only
+approved runs from `main` can read them:
+
+```sh
+for s in ANTHROPIC_DEPLOY_KEY MIRA_GITHUB_TOKEN VERA_GITHUB_TOKEN OTTO_GITHUB_TOKEN \
+         CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+  gh secret set $s --env production --repo $REPO
+done
+gh secret set PEOPLE_IDS_YAML --env production --repo $REPO < config/people.ids.yaml
+```
+
+The Cloudflare token needs Workers Scripts: Edit and D1: Edit on the account. When
+`people.ids.yaml` changes, set `PEOPLE_IDS_YAML` again. Discord slash commands are not
+deployed by the workflow; it warns when they change.
 
 ## 8. Pass the Phase 0 gate
 
@@ -149,5 +184,7 @@ repos with `npm run repo:add owner/name` (it checks the GitHub side), and run
 ## 9. Repo settings worth turning on
 
 - Secret scanning and push protection.
-- Branch protection on `main`: pull requests, the `ci` check and the DCO check.
+- Branch protection on `main`: pull requests, the `ci` check and the DCO check. The
+  `deploy` workflow relies on it (decision 49). CI doesn't run on the resource-ids PRs
+  it opens, so merge those past the `ci` check.
 - Actions: require approval for workflows from fork pull requests.
