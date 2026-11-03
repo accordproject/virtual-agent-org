@@ -43,6 +43,8 @@ export interface Task {
   review_sha: string | null;
   /** The task or decision (T-12, D-41) this task was assigned to follow up, if any. */
   follows_up: string | null;
+  /** Why the gateway left it blocked, when its session stopped without finishing (decision 53). */
+  blocked_reason: string | null;
   created_at: string;
 }
 
@@ -418,6 +420,33 @@ export class Db {
       .prepare("UPDATE tasks SET status = ?, session_id = COALESCE(?, session_id), updated_at = datetime('now') WHERE id = ?")
       .bind(status, sessionId ?? null, id)
       .run();
+  }
+
+  /**
+   * Blocks open and running tasks whose session is over (terminated, out of retries or
+   * stale), or that never got a session in `days` days, with the reason. Returns their ids.
+   */
+  async blockAbandonedTasks(days: number, why: { ended: string; idle: string; unstarted: string }): Promise<string[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT t.id, s.status AS session_status FROM tasks t LEFT JOIN sessions s ON s.id = t.session_id " +
+          "WHERE t.status IN ('open', 'running') AND (s.status IN ('terminated', 'done', 'stale', 'idle:retries_exhausted') " +
+          "OR (t.session_id IS NULL AND t.created_at < datetime('now', ?))) ORDER BY t.seq",
+      )
+      .bind(`-${days} days`)
+      .all<{ id: string; session_status: string | null }>();
+    for (const r of results) {
+      const reason = r.session_status === "stale" ? why.idle : r.session_status ? why.ended : why.unstarted;
+      await this.db
+        .prepare("UPDATE tasks SET status = 'blocked', blocked_reason = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(reason, r.id)
+        .run();
+    }
+    return results.map((r) => r.id);
+  }
+
+  async setBlockedReason(id: string, reason: string) {
+    await this.db.prepare("UPDATE tasks SET blocked_reason = ? WHERE id = ?").bind(reason, id).run();
   }
 
   getTask(id: string) {
