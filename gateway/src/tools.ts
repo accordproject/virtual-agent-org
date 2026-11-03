@@ -572,6 +572,13 @@ async function closeTask(ctx: Ctx, sessionId: string, input: Input): Promise<str
   }
   await ctx.db.setTask(id, "cancelled");
   await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "ada.closed_task", detail: { task: id, of: task.agent, note } });
+  // A change nobody is building any more is closed now, not left for the 7-day backstop (decision 55).
+  const change = task.kind === "change" ? await ctx.db.changeForTask(id) : null;
+  if (change?.state === "building") {
+    await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "closed by Ada" });
+    await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "gateway.change_closed", detail: { change: change.id, reason: "closed by Ada" } });
+    return `${id} closed, and with it ${change.id}. Report both under "Decided for you".`;
+  }
   return `${id} closed. Report it under "Decided for you".`;
 }
 

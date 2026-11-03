@@ -447,14 +447,14 @@ describe("mechanic tasks that end without a PR", () => {
 
   it("a mechanic task that ends without submitting is blocked", async () => {
     const { ctx, fakes, task } = await blocked();
-    expect((await ctx.db.getTask(task.id))?.status).toBe("blocked");
+    expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "blocked", blocked_reason: "C-1: no change submitted" });
     const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
     expect(audit.results[0].detail).toContain("C-1: no change submitted");
     expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
     expect(wakes(fakes).length).toBeGreaterThan(0);
   });
 
-  it("a mechanic session that runs out of budget or is ended is blocked like one that ends its turn", async () => {
+  it("a mechanic session that runs out of budget or is ended is blocked like one that ends its turn, with the change in blocked_reason", async () => {
     const endings: [object, string][] = [
       [{ status: "idle", stop_reason: { type: "budget_reached" } }, "C-1: no change submitted (budget reached)"],
       [{ status: "terminated" }, "C-1: no change submitted (session ended)"],
@@ -465,7 +465,7 @@ describe("mechanic tasks that end without a PR", () => {
       fakes.sessions[sid] = { id: sid, agent: { id: "agent_mechanic" }, ...session };
       fakes.events[sid] = [];
       await processSession(ctx, sid);
-      expect((await ctx.db.getTask(task.id))?.status).toBe("blocked");
+      expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "blocked", blocked_reason: blocker });
       const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
       expect(audit.results[0].detail).toContain(blocker);
       expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
@@ -526,6 +526,23 @@ describe("mechanic tasks that end without a PR", () => {
     const msg = "The mechanic only works on approved changes: propose one with spec.change.";
     await expect(handleTool(ctx, "ada", "sesn_ada", "assign_task", { agent: "mechanic", title: "x", objective: "o", output: "o", done_when: "d", effort: "small" })).rejects.toThrow(msg);
     await expect(follow(ctx, "mechanic", plain.id)).rejects.toThrow(msg);
+  });
+
+  it("Ada closing a blocked change task closes its change too", async () => {
+    const { ctx, task } = await blocked();
+    const out = await handleTool(ctx, "ada", "sesn_ada", "close_task", { id: task.id, note: "superseded by a new proposal" });
+    expect(out).toBe(`${task.id} closed, and with it C-1. Report both under "Decided for you".`);
+    expect((await ctx.db.getTask(task.id))?.status).toBe("cancelled");
+    expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "closed", closed_reason: "closed by Ada" });
+    const row: any = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.change_closed'").first();
+    expect(JSON.parse(row.detail)).toEqual({ change: "C-1", reason: "closed by Ada" });
+  });
+
+  it("Ada closing a change task leaves a change that already has its PR alone", async () => {
+    const { ctx, task } = await blocked();
+    await ctx.db.updateChange("C-1", { state: "pr_open" });
+    expect(await handleTool(ctx, "ada", "sesn_ada", "close_task", { id: task.id, note: "PR is open" })).toBe(`${task.id} closed. Report it under "Decided for you".`);
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
   });
 
   it("a follow-up that is blocked again closes the change", async () => {

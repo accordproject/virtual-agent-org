@@ -526,7 +526,9 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   request, with the change, decision and evidence ids in its description. If the
   task ends without a pull request (including running out of budget), Ada may follow
   it up once with the mechanic, on the same budget and tier; a second block closes
-  the change and goes to the owner. A change still building after 7 days is closed.
+  the change and goes to the owner. If Ada closes the task with `close_task`
+  (decision 53), the change closes with it. A change still building after 7 days is
+  closed.
 - **Budgets:** $1 a mechanic task for `wording` and `tier`, $5 and the deep tier for
   the other types (`budgets.mechanic_small_usd` and `mechanic_large_usd`).
 - **Live:** after each deploy the workflow marks live the changes named in the
