@@ -145,6 +145,31 @@ describe("spec.change proposals", () => {
     expect(await propose(ctx, "mira", PAYLOAD)).toMatch(/^Queued as D-\d+/);
   });
 
+  it("the gap between proposals and the evidence rule are settings", async () => {
+    // Each starts with D-1, Otto's, as evidence; it doesn't count towards Mira's.
+    const settling = async (si: object) => {
+      const { ctx } = loopCtx(isoDay(Date.now()));
+      const c = { ...ctx, network: { ...ctx.network, self_improvement: { ...ctx.network.self_improvement!, ...si } } } as Ctx;
+      await decided(c, "otto", 1);
+      return c;
+    };
+    // min_days 0: no evidence needed from the start; a 1-day gap.
+    const daily = await settling({ proposal_gap_days: 1, min_days: 0 });
+    const first = (await propose(daily, "mira", PAYLOAD)).match(/D-\d+/)![0];
+    await expect(propose(daily, "mira", PAYLOAD)).rejects.toThrow(`mira already has a proposal from the last 1 days: ${first}. Propose at most one change per agent every 1 days`);
+    await backdate(daily, first, 2);
+    expect(await propose(daily, "mira", PAYLOAD)).toMatch(/^Queued as D-\d+/);
+    // A gap of 0 is no limit.
+    const open = await settling({ proposal_gap_days: 0, min_days: 0 });
+    expect(await propose(open, "mira", PAYLOAD)).toMatch(/^Queued as D-\d+/);
+    expect(await propose(open, "mira", PAYLOAD)).toMatch(/^Queued as D-\d+/);
+    // The evidence rule reads min_decided and min_days.
+    const strict = await settling({ min_decided: 2, min_days: 5 });
+    await expect(propose(strict, "mira", PAYLOAD)).rejects.toThrow(/0 decided decisions.*need 2, or 5 days/s);
+    await decided(strict, "mira", 2);
+    expect(await propose(strict, "mira", PAYLOAD)).toMatch(/^Queued as D-\d+/);
+  });
+
   it("repeat_rejections needs a rejected decision by the target", async () => {
     const { ctx } = loopCtx();
     await decided(ctx, "mira", 10); // D-2, D-4, ... are rejected

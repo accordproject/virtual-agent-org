@@ -519,7 +519,7 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - **Start rule:** the gateway refuses proposals until the loop is switched on, and
   then until the agent has 10 decided decisions or the loop has run 14 days. It also
   refuses a second proposal for the same target within 7 days. Several changes may
-  be in flight for one agent.
+  be in flight for one agent. (Decision 57 makes these limits settings.)
 - **The gateway drives it:** approving records a change (`C-n`) and starts a task
   for Mandla, the mechanic, with a brief built from the payload. Mandla clones the
   repo, makes the change, runs the tests and calls `submit_change` once. The gateway opens the pull
@@ -564,3 +564,17 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   the owner. Every merge proposal is high risk. The repo stays out of her write
   scope.
 - It does not change who writes here (decision 51).
+
+**57. More proposals while the network settles** · RESOLVED
+
+- The owner wants to run Mandla several times a week while the network settles. The
+  loop allowed one proposal per agent a week, and none until an agent had 10 decided
+  decisions or the loop had run 14 days.
+- Those limits are now settings in `config/network.yaml`: `proposal_gap_days`,
+  `min_decided` and `min_days`, with defaults 7, 10 and 14. While settling they are 0,
+  10 and 0: Ada may propose for an agent as often as needed, from the start.
+- Ada proposes in the weekly evaluation and whenever the owner asks. She still cites
+  evidence, and the owner still approves each proposal before Mandla builds it.
+- Changes to one agent close together share their before-and-after figures; each
+  result names the others (decision 55). Once settled, the gap goes back to 7 days and
+  the start rule to 14.

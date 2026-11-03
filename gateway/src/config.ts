@@ -75,6 +75,10 @@ export interface NetworkConfig {
   self_improvement?: {
     since: string | null;
     stale_days: number;
+    /** Days between proposals for one target, and the evidence rule; defaults 7, 10 and 14. */
+    proposal_gap_days?: number;
+    min_decided?: number;
+    min_days?: number;
     commit_author: { name: string; email: string };
     task_cents: { small: number; large: number };
   };
