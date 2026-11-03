@@ -149,9 +149,10 @@ test("validate refuses the placeholder commit email once the loop is on", () => 
 });
 
 test("compile emits the loop settings", () => {
-  const out = compile(loadAll());
+  const all = loadAll();
+  const out = compile(all);
   assert.deepEqual(out.self_improvement.task_cents, { small: 100, large: 500 });
-  assert.equal(out.self_improvement.since, null);
+  assert.equal(out.self_improvement.since, all.network.self_improvement?.since ?? null);
   assert.equal(out.network_repo, "accordproject/virtual-agent-org");
   assert.equal(out.agents.mechanic.requestable.length, 0);
 });

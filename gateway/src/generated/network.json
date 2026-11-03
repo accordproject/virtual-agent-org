@@ -11,7 +11,7 @@
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
   "network_repo": "accordproject/virtual-agent-org",
   "self_improvement": {
-    "since": null,
+    "since": "2026-11-03",
     "stale_days": 30,
     "commit_author": {
       "name": "mira-accord-project[bot]",

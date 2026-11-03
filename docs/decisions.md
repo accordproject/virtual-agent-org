@@ -495,7 +495,7 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Considered: giving Otto web search (overlaps Sage later), and folding Sage's remit
   into Otto (mixes two jobs).
 
-**55. The self-improvement loop** · RESOLVED (off until `self_improvement.since` is set)
+**55. The self-improvement loop** · RESOLVED (on from 2026-11-03)
 
 - The owner's rejection notes went back to the one agent rejected and then faded. Ada's
   weekly evaluation could propose a spec change, but nothing built it, recorded it or
@@ -545,6 +545,10 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - **Results:** Ada reports each in her next check-in, one line per change. A `worse`
   result leads her to propose reverting it through the same card; nothing is
   reverted automatically.
+- **Commit author:** the gateway has one GitHub App, named after Mira, so the
+  mechanic's pull requests show that App as author. The owner kept it: each
+  description names the change, decision and task. A neutral App name is worth it
+  once others read this repo's history.
 - Not chosen: replaying past cases against a proposed spec before it ships (the owner
   chose a before-and-after check); Ada tracking proposals in her notes (sessions start
   fresh, so proposals stall; her notes are only a reminder, and the gateway's change

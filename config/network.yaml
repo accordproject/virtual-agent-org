@@ -55,7 +55,7 @@ budgets:
 
 # The self-improvement loop (decision 55).
 self_improvement:
-  since: null            # ISO date the loop starts; null = off
+  since: 2026-11-03      # ISO date the loop starts; null = off
   stale_days: 30         # matches .github/workflows/stale.yml
   # Author of the gateway's commits to the network repo: the GitHub App's bot user
   # (gh api "/users/<app slug>[bot]" gives the id).
