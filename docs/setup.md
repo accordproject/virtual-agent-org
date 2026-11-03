@@ -231,3 +231,7 @@ D1 credential it needs.
   `deploy` workflow relies on it (decision 49). CI doesn't run on the resource-ids PRs
   it opens, so merge those past the `ci` check.
 - Actions: require approval for workflows from fork pull requests.
+- Actions → General → Workflow permissions: tick **Allow GitHub Actions to create and
+  approve pull requests**. The `deploy` workflow needs it to open the resource-ids PR.
+  Without it the ids wait on the `deploy/resource-ids` branch and agent deploys stop
+  until you open and merge that PR by hand.
