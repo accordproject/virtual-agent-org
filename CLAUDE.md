@@ -8,7 +8,7 @@ is public: write as if anyone can read it.
 
 A network of Claude Managed Agents that helps run the Accord Project. Matt Roberts
 (TSC chair, the owner) instructs **Ada**, the Chief of Staff, from Telegram or Discord.
-Ada delegates to specialists (Mira, Vera, Otto in Phase 1; Rosa, Juno, Sage, Kit, Felix,
+Ada delegates to specialists (Mira, Vera, Otto and Sage in Phase 1; Rosa, Juno, Kit, Felix,
 Nell later). A Cloudflare Worker, the **gateway**, connects everything: it runs the
 agents' custom tools, holds the decision queue, executes approved actions with its
 own credentials, and keeps the audit log.
@@ -145,6 +145,8 @@ only for a fork without the workflow, or when a run fails.
   - `model` override on session creation, used for deep-tier review checks
     (`managed.ts`);
   - `agent_with_overrides` on scheduled deployments (`deploy.ts`);
+  - the `unrestricted` networking body for Sage's open environment (`ensureEnvironment`
+    in `deploy.ts`, decision 54);
   - events-list pagination (`managed.ts`);
   - the token field names on a session's `usage` (`sessionTokens` in `managed.ts`),
     behind Vera's `read_audit`;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { startSession } from "../src/agents";
 import { housekeeping, processSession } from "../src/sessions";
-import { makeTestCtx } from "./helpers";
+import { DEPLOYED, makeTestCtx } from "./helpers";
 
 describe("session processing", () => {
   it("answers custom tools once, queues ask-permission calls, and forwards Telegram replies", async () => {
@@ -371,5 +372,19 @@ describe("tasks whose session stops without finishing (decision 53)", () => {
     const row: any = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.housekeeping'").first();
     expect(JSON.parse(row.detail).blocked_tasks).toEqual([stale, orphan]);
     expect(adaWakes(fakes)).toHaveLength(0);
+  });
+});
+
+describe("session memory stores", () => {
+  it("mounts every store after the first read-only", async () => {
+    const otto = { ...DEPLOYED.agents.otto, memory_store_ids: ["mem_otto", "mem_shared", "mem_sage"] };
+    const { ctx, fakes } = makeTestCtx({ deployed: { ...DEPLOYED, agents: { ...DEPLOYED.agents, otto } } });
+    await startSession(ctx, "otto", "x", "task", "owner");
+    const call = fakes.calls.find((c) => c.method === "createSession")!;
+    expect((call.args[0] as { memoryStoreIds: unknown }).memoryStoreIds).toEqual([
+      { id: "mem_otto", access: "read_write" },
+      { id: "mem_shared", access: "read_only" },
+      { id: "mem_sage", access: "read_only" },
+    ]);
   });
 });

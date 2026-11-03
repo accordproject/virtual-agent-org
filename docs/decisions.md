@@ -459,3 +459,22 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   "Decided for you".
 - Not chosen: leaving them open; marking them `failed`, which drops them from Ada's
   list without anyone deciding; a close command for the owner only.
+
+**54. Sage joins Phase 1 for WG news** · RESOLVED
+
+- The Tech WG chair's weekly briefing offers up to three outside developments the WG
+  could discuss. The chair decides what to raise; Otto never adds them to the agenda.
+- Sage joins Phase 1 early, for this job only: a Monday brief on standards work for
+  legal and contract data, legal context in agent protocols and agentic commerce, and
+  related open source projects. Its wider brief waits for Phase 2.
+- Sage is measured by the share of its items, sent to the chair, that the WG discusses.
+  Otto records this from the transcript; Vera reports it.
+- Otto reads Sage's memory store read-only (`reads_memory_of` in `permissions.yaml`),
+  and Vera reads Otto's the same way. Agents can't write to the shared store.
+- Otto processes recordings on Thursdays, the morning after the meeting, instead of
+  the following Monday.
+- The environment's network allowlist also limits web search and fetch, so Sage runs
+  in its own environment with unrestricted outbound access (`networking: open` in
+  `permissions.yaml`). Every other agent stays on the limited one; Ada can't be moved.
+- Considered: giving Otto web search (overlaps Sage later), and folding Sage's remit
+  into Otto (mixes two jobs).
