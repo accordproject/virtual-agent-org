@@ -428,6 +428,10 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   - **approved:** an open low-risk `github.approve_ci`, where the requesting agent read
     the diff and found it clean. The gateway re-runs the automatic approval's file and
     workflow checks first and refuses if any fails.
+- An approved decision is a manual action waiting for the owner, and its card is the
+  only reminder of it, so marking it done clears that reminder. Kept: Ada's note gives
+  the evidence and the check-in lists each one. Not chosen: limiting (a) to superseded
+  decisions, which would leave every "done" to the owner.
 - In practice (c) covers CI approvals a member's message set going: other low-risk ones
   already run automatically, and ones the checks flag are high risk. Kept on purpose,
   since the gateway's checks are the same either way.
