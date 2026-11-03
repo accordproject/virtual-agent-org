@@ -56,6 +56,8 @@ export interface PermissionsYaml {
       requestable: string[];
       /** Other agents whose memory stores this agent mounts read-only (decision 49). */
       reads_memory_of?: string[];
+      /** "open" runs the agent in an environment with unrestricted outbound access (decision 49). Default "limited". */
+      networking?: "limited" | "open";
     }
   >;
 }

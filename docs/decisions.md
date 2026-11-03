@@ -473,7 +473,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   and Vera reads Otto's the same way. Agents can't write to the shared store.
 - Otto processes recordings on Thursdays, the morning after the meeting, instead of
   the following Monday.
-- If the environment's network allowlist also limits web search, Sage gets its own
-  environment with open web access; every other agent stays limited.
+- The environment's network allowlist also limits web search and fetch, so Sage runs
+  in its own environment with unrestricted outbound access (`networking: open` in
+  `permissions.yaml`). Every other agent stays on the limited one; Ada can't be moved.
 - Considered: giving Otto web search (overlaps Sage later), and folding Sage's remit
   into Otto (mixes two jobs).

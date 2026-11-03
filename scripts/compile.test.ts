@@ -66,6 +66,15 @@ test("validate checks reads_memory_of", () => {
   assert.ok(!ottoReads(["mira"]).some((e) => e.includes("reads_memory_of")));
 });
 
+test("validate checks networking", () => {
+  const cfg = loadAll();
+  const withNet = (agent: string, networking: string) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, [agent]: { ...cfg.permissions.agents[agent], networking } } } } as typeof cfg);
+  assert.ok(withNet("sage", "wide").includes("sage: networking must be limited or open"));
+  assert.ok(withNet("ada", "open").includes("ada must stay on limited networking"));
+  assert.ok(!withNet("sage", "open").some((e) => e.includes("networking")));
+});
+
 test("compile carries the member message allowance, and validate checks it", () => {
   const cfg = loadAll();
   assert.equal(compile(cfg).member_daily_messages, 20);

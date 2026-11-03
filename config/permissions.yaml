@@ -90,6 +90,7 @@ agents:
     mcp_servers: {}
     builtin_tools: [read, write, edit, glob, web_search, web_fetch]
     requestable: []
+    networking: open                           # own environment: the allowlist also limits web search (decision 49)
   kit:
     mcp_servers:
       github: { mode: read }

@@ -144,6 +144,7 @@ export function validate(cfg = loadAll()): string[] {
       continue;
     }
     for (const k of p.requestable) if (!permissions.action_kinds[k]) errs.push(`${n}: unknown action kind "${k}"`);
+    if (p.networking !== undefined && !["limited", "open"].includes(p.networking)) errs.push(`${n}: networking must be limited or open`);
     for (const peer of p.reads_memory_of ?? []) {
       if (peer === n) errs.push(`${n}: reads_memory_of cannot name itself`);
       else if (network.agents[peer] === undefined) errs.push(`${n}: reads_memory_of names unknown agent "${peer}"`);
@@ -162,6 +163,7 @@ export function validate(cfg = loadAll()): string[] {
   if (ada && ((Array.isArray(ada.mcp_servers) ? ada.mcp_servers.length : Object.keys(ada.mcp_servers).length) || ada.builtin_tools.some((t) => !FILE_TOOLS.includes(t)))) {
     errs.push(`ada must have no MCP servers and no built-in tools other than ${FILE_TOOLS.join(", ")}`);
   }
+  if (ada && (ada.networking ?? "limited") !== "limited") errs.push("ada must stay on limited networking");
 
   const seen = new Set<string>();
   for (const s of schedules.schedules) {
