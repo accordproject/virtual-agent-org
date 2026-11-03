@@ -5,6 +5,7 @@ import type { Ctx } from "../src/context";
 import { approve } from "../src/controls";
 import { GitHub } from "../src/github";
 import { handleTool, ToolDenied, ToolError } from "../src/tools";
+import { processSession } from "../src/sessions";
 import { DEPLOYED, NETWORK, fakeGitHub, makeTestCtx } from "./helpers";
 
 describe("changes", () => {
@@ -348,5 +349,80 @@ describe("submit_change", () => {
     expect(post("/git/commits")).toEqual({ message: "docs: x", tree: "tree2", parents: ["head1"], author });
     expect(post("/git/refs")).toEqual({ ref: "refs/heads/change/c-1", sha: "commit2" });
     expect(post("/pulls")).toEqual({ title: "docs: x", head: "change/c-1", base: "main", body: "B" });
+  });
+});
+
+describe("mechanic tasks that end without a PR", () => {
+  const end = async (ctx: Ctx, fakes: any, sid: string, blocked: string[] = []) => {
+    fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mechanic" }, stop_reason: { type: "end_turn" } };
+    fakes.events[sid] = [{ id: `${sid}_e1`, type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked } }];
+    await processSession(ctx, sid);
+  };
+  const follow = (ctx: Ctx, agent: string, follows_up: string) =>
+    handleTool(ctx, "ada", "sesn_ada", "assign_task", {
+      agent, title: "Retry C-1", objective: "Finish the change", output: "A PR", done_when: "submit_change succeeded", effort: "small", follows_up,
+    });
+  /** C-1 approved, its mechanic session ended without submitting. */
+  async function blocked() {
+    const gh = fakeGitHub();
+    const { ctx, fakes } = loopCtx(undefined, { dryRun: false, github: async () => gh as any });
+    await decided(ctx, "mira", 10);
+    const out = await propose(ctx, "mira", { ...PAYLOAD, evidence: ["D-1", "D-2"] });
+    await approve(ctx, out.match(/D-\d+/)![0]);
+    const task = (await ctx.db.openTasks("mechanic"))[0];
+    await end(ctx, fakes, task.session_id!);
+    return { ctx, fakes, task, gh };
+  }
+  const wakes = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_ada");
+
+  it("a mechanic task that ends without submitting is blocked", async () => {
+    const { ctx, fakes, task } = await blocked();
+    expect((await ctx.db.getTask(task.id))?.status).toBe("blocked");
+    const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
+    expect(audit.results[0].detail).toContain("C-1: no change submitted");
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+    expect(wakes(fakes).length).toBeGreaterThan(0);
+  });
+
+  it("a follow-up of a blocked change task takes over the change", async () => {
+    const { ctx, task, gh } = await blocked();
+    expect(await follow(ctx, "mechanic", task.id)).toMatch(/^Assigned T-\d+ to Mechanic/);
+    const next = (await ctx.db.openTasks("mechanic")).find((t) => t.follows_up === task.id)!;
+    expect(next.kind).toBe("change");
+    expect(next.brief).toContain("C-1");
+    expect((await ctx.db.getChange("C-1"))?.task_id).toBe(next.id);
+
+    const out = await handleTool(ctx, "mechanic", next.session_id!, "submit_change", {
+      change: "C-1", title: "docs(mira): thank first", body: "b", files: [{ path: "agents/mira.md", content: "x" }],
+    });
+    expect(out).toContain("/pull/1");
+    expect(gh.proposed).toHaveLength(1);
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
+  });
+
+  it("a change follow-up can only go to the mechanic", async () => {
+    const { ctx, task } = await blocked();
+    await expect(follow(ctx, "mira", task.id)).rejects.toThrow("only the mechanic can follow it up");
+    expect((await ctx.db.getChange("C-1"))?.task_id).toBe(task.id);
+  });
+
+  it("the mechanic only gets tasks that follow up a change", async () => {
+    const { ctx } = loopCtx();
+    const plain = await ctx.db.createTask({ agent: "mira", title: "t", brief: "b" });
+    const msg = "The mechanic only works on approved changes: propose one with spec.change.";
+    await expect(handleTool(ctx, "ada", "sesn_ada", "assign_task", { agent: "mechanic", title: "x", objective: "o", output: "o", done_when: "d", effort: "small" })).rejects.toThrow(msg);
+    await expect(follow(ctx, "mechanic", plain.id)).rejects.toThrow(msg);
+  });
+
+  it("a follow-up that is blocked again closes the change", async () => {
+    const { ctx, fakes, task } = await blocked();
+    await follow(ctx, "mechanic", task.id);
+    const next = (await ctx.db.openTasks("mechanic")).find((t) => t.follows_up === task.id)!;
+    const before = wakes(fakes).length;
+    await end(ctx, fakes, next.session_id!);
+    expect((await ctx.db.getTask(next.id))?.status).toBe("blocked");
+    expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "closed", closed_reason: "blocked twice" });
+    expect(wakes(fakes).length).toBe(before);
+    await expect(follow(ctx, "mechanic", next.id)).rejects.toThrow(/closed/);
   });
 });

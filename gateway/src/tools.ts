@@ -493,6 +493,14 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   const priority = typeof input.priority === "string" ? input.priority : "normal";
   const due = typeof input.due === "string" ? input.due : undefined;
   const followsUp = await followUpOf(ctx, s(input.follows_up, "follows_up", false));
+  // The mechanic only works on approved changes: a follow-up of a blocked change task takes the change over.
+  const earlier = followsUp?.startsWith("T-") ? await ctx.db.getTask(followsUp) : null;
+  const change = earlier?.kind === "change" ? await ctx.db.changeForTask(earlier.id) : null;
+  if (agent === "mechanic" && !change) throw new ToolError("The mechanic only works on approved changes: propose one with spec.change.");
+  if (change && agent !== "mechanic") throw new ToolError(`${earlier!.id} is a change task: only the mechanic can follow it up.`);
+  if (change && (earlier!.status !== "blocked" || change.state !== "building")) {
+    throw new ToolError(`${change.id} is ${change.state} and ${earlier!.id} is ${earlier!.status}: there is nothing to follow up.`);
+  }
   const { cents, calls } = EFFORT[effort];
   const startedBy = await sessionStartedBy(ctx, parentSessionId);
   const member = memberOf(startedBy);
@@ -508,13 +516,24 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   ].join("\n");
 
   // Always an ordinary task: only request_review_check makes a review check.
-  const task = await ctx.db.createTask({ agent, title, brief, priority, due, ...(followsUp ? { follows_up: followsUp } : {}) });
+  // The mechanic starts from the approved change's own brief, then Ada's follow-up.
+  const taskBrief = change ? `${earlier!.brief}\n\nFollow-up from Ada:\n${brief}` : brief;
+  const task = await ctx.db.createTask({
+    agent,
+    title,
+    brief: taskBrief,
+    priority,
+    due,
+    ...(followsUp ? { follows_up: followsUp } : {}),
+    ...(change ? { kind: "change" as const } : {}),
+  });
+  if (change) await ctx.db.updateChange(change.id, { task_id: task.id });
   try {
     const text = [
       `Task ${task.id} from Ada (priority: ${priority}${due ? `, due ${due}` : ""}${followsUp ? `, following up ${followsUp}` : ""})`,
       `Title: ${title}`,
       "",
-      brief,
+      taskBrief,
       "",
       "When finished, call report_status. Queue any critical action with request_action and continue.",
     ].join("\n");
@@ -523,6 +542,7 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
     return `Assigned ${task.id} to ${cap(agent)} (${effort} effort, $${(cents / 100).toFixed(2)} cap).`;
   } catch (e) {
     await ctx.db.setTask(task.id, "failed");
+    if (change) await ctx.db.updateChange(change.id, { task_id: earlier!.id });
     if (e instanceof AgentUnavailable) throw new ToolError(`${task.id} not started: ${e.message}`);
     throw e;
   }
