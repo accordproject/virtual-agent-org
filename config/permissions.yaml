@@ -73,6 +73,7 @@ agents:
       github: { mode: read }
     builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [vimeo.publish, discord.announce, github.comment, message.person, discord.ops]
+    reads_memory_of: [sage]                    # Sage's WG news brief (decision 49)
   rosa:
     mcp_servers:
       github: { mode: read_plus_triage }
