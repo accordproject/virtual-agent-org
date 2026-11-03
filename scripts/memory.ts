@@ -1,6 +1,6 @@
 // Which memory stores an agent's sessions mount, and how its prompt describes them.
 // The agent's own store is always first (read-write); the shared store and any peer
-// stores from `reads_memory_of` in permissions.yaml follow, read-only (decision 49).
+// stores from `reads_memory_of` in permissions.yaml follow, read-only (decision 54).
 
 /** Where Managed Agents mounts memory stores in the sandbox, one directory per store name. */
 export const MEMORY_MOUNT = "/mnt/memory";

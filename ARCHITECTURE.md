@@ -24,7 +24,7 @@ Design principles:
 - **Job specs are code.** Each role is a markdown spec in this repo. Changes are pull
   requests that the owner merges.
 - **Start small.** Phase 1 runs five agents (Sage joined early for one narrow job,
-  decision 49); others join only when the weekly
+  decision 54); others join only when the weekly
   evaluation shows a gap they would fill.
 
 ## The team

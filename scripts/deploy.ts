@@ -25,7 +25,7 @@ const STATE_PATH = join(ROOT, "gateway/src/generated/deployed.json");
 
 interface State extends DeployedConfig {
   environment_id?: string;
-  /** Unrestricted outbound access, for agents with `networking: open` (decision 49). */
+  /** Unrestricted outbound access, for agents with `networking: open` (decision 54). */
   open_environment_id?: string;
   shared_memory_store_id?: string;
 }
