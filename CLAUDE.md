@@ -104,6 +104,8 @@ only for a fork without the workflow, or when a run fails.
   `people:ids`. Never put ids in `people.yaml`; `npm test` rejects them.
 - **Added a repo?** `repo:add` edits `network.yaml`; after the PR merges, run `gateway:deploy`
   and `deploy:agents` (the agents' list of repos is filled into `context/accord.md` at deploy).
+- **Added an agent, or changed its phase or `title:`?** Run `discord:commands`, so
+  `/ask`, `/pause` and `/stop` list it with its role.
 - **Changed `deployed.json`?** `deploy:agents` writes it, and the gateway bundles it, so
   deploy the gateway afterwards.
 - **Audit log:**

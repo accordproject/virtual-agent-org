@@ -578,3 +578,16 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Changes to one agent close together share their before-and-after figures; each
   result names the others (decision 55). Once settled, the gap goes back to 7 days and
   the start rule to 14.
+
+**58. Registering the Discord slash commands** · RESOLVED: automatic, in the deploy workflow
+
+- The slash commands offer the deployed agents as fixed choices, each shown with its
+  role ("Mira (Maintainer Desk)", from the spec's `title:`). Discord keeps the list it
+  was last sent, so it went stale whenever an agent joined until someone re-ran
+  `npm run discord:commands`. The workflow only warned when the script itself changed.
+- The `deploy` workflow now re-registers them after the agents deploy, whenever
+  `network.yaml`, an agent spec or the Discord command code changes. It uses
+  `DISCORD_APP_ID` and `DISCORD_BOT_TOKEN` from the `production` environment; a fork
+  without them skips the step.
+- The bot token already lets the gateway post as the bot, so holding it in the
+  environment adds no new power. Runs still wait for the owner's approval (decision 49).

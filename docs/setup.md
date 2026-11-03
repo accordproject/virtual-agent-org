@@ -162,11 +162,13 @@ for s in ANTHROPIC_DEPLOY_KEY MIRA_GITHUB_TOKEN VERA_GITHUB_TOKEN OTTO_GITHUB_TO
   gh secret set $s --env production --repo $REPO
 done
 gh secret set PEOPLE_IDS_YAML --env production --repo $REPO < config/people.ids.yaml
+# Optional, with Discord: re-registers the slash commands when agents change.
+for s in DISCORD_APP_ID DISCORD_BOT_TOKEN; do gh secret set $s --env production --repo $REPO; done
 ```
 
 The Cloudflare token needs Workers Scripts: Edit and D1: Edit on the account. When
-`people.ids.yaml` changes, set `PEOPLE_IDS_YAML` again. Discord slash commands are not
-deployed by the workflow; it warns when they change.
+`people.ids.yaml` changes, set `PEOPLE_IDS_YAML` again. Without the Discord secrets the
+workflow skips the slash commands; run `npm run discord:commands` by hand instead.
 
 ## 8. Pass the Phase 0 gate
 

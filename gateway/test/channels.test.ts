@@ -285,15 +285,18 @@ describe("discord bot (decision 15B)", () => {
 
   it("registers commands that list only active agents", async () => {
     const { commandDefinitions } = await import("../src/discordInteractions");
-    const defs = commandDefinitions(["ada", "mira"]);
+    const defs = commandDefinitions([{ name: "ada", title: "Chief of Staff" }, { name: "mira", title: "Maintainer Desk" }]);
     expect(defs.map((d) => d.name)).toEqual(["ada", "ask", "status", "queue", "pause", "stop"]);
     const ask = defs.find((d) => d.name === "ask") as any;
-    expect(ask.options[0].choices.map((c: any) => c.value)).toEqual(["ada", "mira"]);
+    expect(ask.options[0].choices).toEqual([
+      { name: "Ada (Chief of Staff)", value: "ada" },
+      { name: "Mira (Maintainer Desk)", value: "mira" },
+    ]);
   });
 
   it("registers every command for the server and the bot's DMs", async () => {
     const { commandDefinitions } = await import("../src/discordInteractions");
-    for (const d of commandDefinitions(["ada"]) as any[]) {
+    for (const d of commandDefinitions([{ name: "ada", title: "Chief of Staff" }]) as any[]) {
       expect(d.contexts).toEqual([0, 1]); // GUILD, BOT_DM
       expect(d.integration_types).toEqual([0]); // installed in a server
     }
