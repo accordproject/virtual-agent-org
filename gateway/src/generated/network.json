@@ -14,8 +14,8 @@
     "since": null,
     "stale_days": 30,
     "commit_author": {
-      "name": "virtual-agent-org-gateway[bot]",
-      "email": "<app bot id>+virtual-agent-org-gateway[bot]@users.noreply.github.com"
+      "name": "mira-accord-project[bot]",
+      "email": "350694384+mira-accord-project[bot]@users.noreply.github.com"
     },
     "task_cents": {
       "small": 100,

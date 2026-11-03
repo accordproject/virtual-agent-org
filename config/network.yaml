@@ -57,9 +57,9 @@ budgets:
 self_improvement:
   since: null            # ISO date the loop starts; null = off
   stale_days: 30         # matches .github/workflows/stale.yml
-  # Author of the gateway's commits to the network repo. Setup replaces <app bot id>
-  # with the GitHub App's bot user id.
-  commit_author: { name: "virtual-agent-org-gateway[bot]", email: "<app bot id>+virtual-agent-org-gateway[bot]@users.noreply.github.com" }
+  # Author of the gateway's commits to the network repo: the GitHub App's bot user
+  # (gh api "/users/<app slug>[bot]" gives the id).
+  commit_author: { name: "mira-accord-project[bot]", email: "350694384+mira-accord-project[bot]@users.noreply.github.com" }
 
 agents:
   # name: phase in which the agent is first deployed
