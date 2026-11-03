@@ -45,7 +45,13 @@ interface ActionSpec {
   execute(ctx: Ctx, d: Decision, n: Normalised): Promise<ExecResult>;
 }
 
+/** The network's own repo: no action kind or tool may touch it, whatever `repos` says. */
+export function isNetworkRepo(ctx: Ctx, r: RepoRef): boolean {
+  return `${r.owner}/${r.repo}`.toLowerCase() === ctx.network.network_repo?.toLowerCase();
+}
+
 export function inScope(ctx: Ctx, r: RepoRef): boolean {
+  if (isNetworkRepo(ctx, r)) return false;
   const full = `${r.owner}/${r.repo}`.toLowerCase();
   const allowed = [ctx.network.sandbox_repo, ...ctx.network.repos].filter(Boolean).map((s) => s.toLowerCase());
   return allowed.includes(full);
