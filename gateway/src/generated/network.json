@@ -9,6 +9,19 @@
     "budget_cents": 50
   },
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
+  "network_repo": "accordproject/virtual-agent-org",
+  "self_improvement": {
+    "since": null,
+    "stale_days": 30,
+    "commit_author": {
+      "name": "virtual-agent-org-gateway[bot]",
+      "email": "<app bot id>+virtual-agent-org-gateway[bot]@users.noreply.github.com"
+    },
+    "task_cents": {
+      "small": 100,
+      "large": 500
+    }
+  },
   "repos": [
     "accordproject/concerto",
     "accordproject/template-engine",
@@ -75,8 +88,8 @@
       "executor": "manual"
     },
     "spec.change": {
-      "risk": "high",
-      "executor": "manual"
+      "risk": "low",
+      "executor": "task"
     },
     "other": {
       "risk": "high",
@@ -297,6 +310,13 @@
         "message.person",
         "discord.ops"
       ],
+      "model": "claude-sonnet-5-5"
+    },
+    "mechanic": {
+      "name": "mechanic",
+      "title": "Mechanic",
+      "phase": 1,
+      "requestable": [],
       "model": "claude-sonnet-5-5"
     },
     "rosa": {

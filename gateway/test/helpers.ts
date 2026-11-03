@@ -31,6 +31,7 @@ export const NETWORK: NetworkConfig = {
   timezone: "Europe/London",
   monthly_credit_usd: 200,
   sandbox_repo: "accordproject/virtual-agent-org-sandbox",
+  network_repo: "accordproject/virtual-agent-org",
   repos: ["accordproject/concerto"],
   action_kinds: {
     "github.merge": { risk: "medium", executor: "github" },
@@ -41,10 +42,18 @@ export const NETWORK: NetworkConfig = {
     "linkedin.post": { risk: "medium", executor: "manual" },
     "github.approve_ci": { risk: "low", executor: "github", auto: true },
     "github.review": { risk: "low", executor: "github", auto: true },
+    "spec.change": { risk: "low", executor: "task" },
   },
   discord_approval_max_risk: "medium",
   schedules_enabled: true,
   follow_up: { daily_wakes: 5, budget_cents: 50 },
+  self_improvement: {
+    since: null,
+    stale_days: 30,
+    commit_author: { name: "virtual-agent-org-gateway[bot]", email: "1+virtual-agent-org-gateway[bot]@users.noreply.github.com" },
+    task_cents: { small: 100, large: 500 },
+  },
+  model_tiers: { deep: "claude-opus-5-5", standard: "claude-sonnet-5-5", fast: "claude-haiku-5-5" },
   people: [
     { name: "Matt Roberts", roles: ["owner"], github: "mttrbrts", telegram: "555" },
     { name: "Jane Doe", roles: ["tsc_member"], github: "janedoe", telegram: "88", discord: "123456789012345678" },
@@ -55,6 +64,7 @@ export const NETWORK: NetworkConfig = {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
     mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "discord.ops", "linkedin.post"], model: "claude-sonnet-5-5" },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
+    mechanic: { name: "mechanic", title: "Mechanic", phase: 1, requestable: [] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
 };

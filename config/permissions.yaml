@@ -47,7 +47,7 @@ action_kinds:
   discord.ops:         { risk: low,    executor: discord_ops }  # the bot posts to channels.agent_ops; may ping people in people.yaml
   message.person:      { risk: medium, executor: discord_dm }  # DM to people in people.yaml (payload.to: GitHub logins or names); manual if they have no Discord id
   email.send:          { risk: high,   executor: manual }
-  spec.change:         { risk: high,   executor: manual }   # owner merges the PR in virtual-agent-org
+  spec.change:         { risk: low,    executor: task }     # the mechanic opens a PR in virtual-agent-org; the gateway raises risk by change type
   other:               { risk: high,   executor: manual }
 
 agents:
@@ -73,6 +73,11 @@ agents:
       github: { mode: read }
     builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [vimeo.publish, discord.announce, github.comment, message.person, discord.ops]
+  mechanic:
+    # No credentials: the gateway pushes the branch and opens the PR (decision 51).
+    mcp_servers: []
+    builtin_tools: [read, write, edit, glob, bash]
+    requestable: []
   rosa:
     mcp_servers:
       github: { mode: read_plus_triage }

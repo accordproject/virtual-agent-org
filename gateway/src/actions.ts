@@ -730,7 +730,8 @@ export const ACTIONS: Record<string, ActionSpec> = {
 function specFor(ctx: Ctx, kind: string): ActionSpec | { error: string } {
   if (kind === "tool.confirm") return toolConfirm;
   const cfg = ctx.network.action_kinds[kind];
-  if (!cfg || cfg.executor === "manual") return manual;
+  // "task" kinds (spec.change) are carried out by hand until the mechanic task spec exists.
+  if (!cfg || cfg.executor === "manual" || cfg.executor === "task") return manual;
   const spec = ACTIONS[kind];
   if (!spec || spec.executor !== cfg.executor) return { error: `No executor for ${kind}` };
   return spec;

@@ -75,3 +75,52 @@ test("compile carries the follow-up wake limits and the schedules switch, and va
   assert.ok(bad({ follow_up_budget_usd: 5 }).includes("network.yaml: budgets.follow_up_budget_usd must be more than 0 and at most 3"));
   assert.deepEqual(bad({ follow_up_daily_wakes: 0, follow_up_budget_usd: 0.25 }), validate(cfg));
 });
+
+test("validate keeps the network repo out of repos and the sandbox", () => {
+  const cfg = loadAll();
+  const repo = cfg.network.github.network_repo;
+  const withRepos = (repos: string[], sandbox_repo = cfg.network.github.sandbox_repo) =>
+    validate({ ...cfg, network: { ...cfg.network, github: { ...cfg.network.github, repos, sandbox_repo } } });
+  const err = `github.repos: ${repo} is the network's own repo (decision 51)`;
+  assert.ok(withRepos([...cfg.network.github.repos, repo]).includes(err));
+  assert.ok(withRepos(cfg.network.github.repos, repo).includes(`github.sandbox_repo: ${repo} is the network's own repo (decision 51)`));
+  const sandbox = cfg.network.github.sandbox_repo;
+  assert.ok(withRepos([...cfg.network.github.repos, sandbox]).includes(`github.repos: ${sandbox} is the sandbox repo, not a repo in scope (decision 51)`));
+});
+
+test("validate lets only ada request spec.change", () => {
+  const cfg = loadAll();
+  const mira = cfg.permissions.agents.mira;
+  const permissions = { ...cfg.permissions, agents: { ...cfg.permissions.agents, mira: { ...mira, requestable: [...mira.requestable, "spec.change"] } } };
+  assert.ok(validate({ ...cfg, permissions }).includes("mira: only ada may request spec.change"));
+});
+
+test("validate keeps the mechanic without credentials", () => {
+  const cfg = loadAll();
+  const err = "mechanic must have no MCP servers, no requestable kinds, and only read, write, edit, glob and bash";
+  const withMechanic = (patch: object) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, mechanic: { ...cfg.permissions.agents.mechanic, ...patch } } } } as typeof cfg);
+  assert.ok(!validate(cfg).includes(err));
+  assert.ok(withMechanic({ mcp_servers: { github: { mode: "read" } } }).includes(err));
+  assert.ok(withMechanic({ requestable: ["other"] }).includes(err));
+  assert.ok(withMechanic({ builtin_tools: ["read", "web_fetch"] }).includes(err));
+});
+
+test("validate checks self_improvement", () => {
+  const cfg = loadAll();
+  const si = (patch: object) => validate({ ...cfg, network: { ...cfg.network, self_improvement: { ...cfg.network.self_improvement!, ...patch } } });
+  assert.ok(si({ since: "soon" }).includes("self_improvement.since must be an ISO date or null"));
+  assert.ok(!si({ since: "2026-11-10" }).includes("self_improvement.since must be an ISO date or null"));
+  assert.ok(si({ stale_days: 0 }).includes("self_improvement.stale_days must be a whole number from 1 to 365"));
+  const bad = (budgets: object) => validate({ ...cfg, network: { ...cfg.network, budgets: { ...cfg.network.budgets, ...budgets } } });
+  assert.ok(bad({ mechanic_small_usd: 0 }).includes("network.yaml: budgets.mechanic_small_usd must be more than 0 and at most 10"));
+  assert.ok(bad({ mechanic_large_usd: 11 }).includes("network.yaml: budgets.mechanic_large_usd must be more than 0 and at most 10"));
+});
+
+test("compile emits the loop settings", () => {
+  const out = compile(loadAll());
+  assert.deepEqual(out.self_improvement.task_cents, { small: 100, large: 500 });
+  assert.equal(out.self_improvement.since, null);
+  assert.equal(out.network_repo, "accordproject/virtual-agent-org");
+  assert.equal(out.agents.mechanic.requestable.length, 0);
+});
