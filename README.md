@@ -11,7 +11,9 @@ decision queue for the chair's approval.
 [Concerto](https://github.com/accordproject/concerto),
 [Template Engine](https://github.com/accordproject/template-engine) and
 [Template Playground](https://github.com/accordproject/template-playground).
-Agent-drafted messages are labelled as such.
+Agent-drafted messages are labelled as such. A fifth agent, the mechanic, builds
+changes to this repo's own specs and tools that the chair has approved, as pull
+requests he reviews.
 
 ## How it fits together
 

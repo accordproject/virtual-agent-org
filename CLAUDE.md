@@ -8,10 +8,10 @@ is public: write as if anyone can read it.
 
 A network of Claude Managed Agents that helps run the Accord Project. Matt Roberts
 (TSC chair, the owner) instructs **Ada**, the Chief of Staff, from Telegram or Discord.
-Ada delegates to specialists (Mira, Vera, Otto in Phase 1; Rosa, Juno, Sage, Kit, Felix,
-Nell later). A Cloudflare Worker, the **gateway**, connects everything: it runs the
-agents' custom tools, holds the decision queue, executes approved actions with its
-own credentials, and keeps the audit log.
+Ada delegates to specialists (Mira, Vera, Otto and the mechanic in Phase 1; Rosa, Juno,
+Sage, Kit, Felix, Nell later). A Cloudflare Worker, the **gateway**, connects
+everything: it runs the agents' custom tools, holds the decision queue, executes
+approved actions with its own credentials, and keeps the audit log.
 
 ## Rules that never change
 
@@ -74,7 +74,7 @@ Matt writes British English. Keep messages plain and short.
 | `context/accord.md` | Shared read-only context, written to the shared memory store |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
 | `scripts/deploy.ts` | Creates or updates agents, vaults, memory stores and deployments; writes `deployed.json` |
-| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions |
+| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `changes.ts` the self-improvement loop's changes (proposal checks, mechanic tasks, `submit_change`, measuring) |
 | `gateway/test/` | vitest suite with an in-memory D1 and fakes for every external API |
 
 ## Commands
@@ -112,7 +112,7 @@ only for a fork without the workflow, or when a run fails.
 ## Conventions
 
 - **Tests.** Every behaviour change gets a test in the matching `gateway/test/<area>.test.ts`
-  (actions, channels, decisions, edge, review, sessions, tools, vimeo), using
+  (actions, changes, channels, decisions, edge, review, sessions, tools, vimeo), using
   `makeTestCtx()` from `helpers.ts`. Fakes record calls; never hit real APIs in
   tests.
 - **Fetch binding.** Workers reject `fetch` called with the wrong `this`, so every
@@ -154,8 +154,11 @@ only for a fork without the workflow, or when a run fails.
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
 - **Decision 10** (open): long-term funding for the API credits.
-- **Ada's self-improvement loop** (rejection notes → spec-change PRs tested against
-  past decisions) waits for about two weeks of real decisions. The `reviews` and
-  `review_findings` tables (decision 35) hold Mira's side of that evidence.
+- **Self-improvement loop** (decision 52) is built but off. To switch it on: install
+  the gateway's App on this repo without the Workflows permission, set
+  `self_improvement.commit_author` to the App's bot identity and
+  `self_improvement.since` to the start date (`docs/setup.md`, step 9). Not yet
+  verified against the live API: the App's commit and PR calls (`proposeChange` in
+  `github.ts`).
 - **D1 location.** The database is placed in Western Europe by location hint only.
   An EU jurisdiction would need a new database.

@@ -53,7 +53,7 @@ budgets:
   mechanic_small_usd: 1
   mechanic_large_usd: 5
 
-# The self-improvement loop (decision 51).
+# The self-improvement loop (decision 52).
 self_improvement:
   since: null            # ISO date the loop starts; null = off
   stale_days: 30         # matches .github/workflows/stale.yml

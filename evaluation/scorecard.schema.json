@@ -40,13 +40,52 @@
             }
           },
           "kpis": { "type": "object" },
-          "flags": { "type": "array", "items": { "type": "string" } }
+          "flags": { "type": "array", "items": { "type": "string" } },
+          "evidence": {
+            "type": "object",
+            "description": "Weekly only: what went wrong, quoted as data, for Ada's proposals",
+            "properties": {
+              "rejections": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+              "refusals": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+              "denials": { "type": "array", "items": { "$ref": "#/$defs/group" } }
+            }
+          }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "description": "Weekly only: changes measured in the period, from read_audit",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "agent": { "type": "string" },
+          "type": { "type": "string" },
+          "measure": { "type": "string" },
+          "verdict": { "enum": ["better", "same", "worse", "too_little_data"] },
+          "before": { "type": ["number", "null"] },
+          "after": { "type": ["number", "null"] },
+          "before_cases": { "type": "integer" },
+          "after_cases": { "type": "integer" },
+          "overlaps": { "type": "array", "items": { "type": "string" } },
+          "pr_url": { "type": ["string", "null"] }
         }
       }
     },
     "anomalies": { "type": "array", "items": { "type": "string" } }
   },
   "$defs": {
+    "group": {
+      "type": "object",
+      "description": "Rows that say the same thing: a one-line summary, quoted text, and every id",
+      "properties": {
+        "summary": { "type": "string" },
+        "tool": { "type": "string" },
+        "quotes": { "type": "array", "items": { "type": "string" } },
+        "ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "dist": {
       "type": "object",
       "properties": {
