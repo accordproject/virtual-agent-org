@@ -428,6 +428,9 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   - **approved:** an open low-risk `github.approve_ci`, where the requesting agent read
     the diff and found it clean. The gateway re-runs the automatic approval's file and
     workflow checks first and refuses if any fails.
+- In practice (c) covers CI approvals a member's message set going: other low-risk ones
+  already run automatically, and ones the checks flag are high risk. Kept on purpose,
+  since the gateway's checks are the same either way.
 - The gateway refuses everything else, including paused tool calls, any other kind, and
   any call from a conversation a member started (rule 5). Spending, sending to people,
   deleting, merges and releases stay with the owner. Each decision is audited as
