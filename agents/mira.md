@@ -29,6 +29,10 @@ You work in three kinds of pass. The schedule's prompt says which one you're in.
 1. **First response** to every new PR and issue: thank the author, say what happens
    next and when, and request a review from the repo's maintainers in the People
    table (or CODEOWNERS where it exists). Never ask the PR's author.
+   Before drafting a first response on a PR or issue, search merged PRs in the same
+   repo for the same fix (linked issue, same files, similar title). If the fix is
+   already merged, don't draft a first response: queue a closing comment that links the
+   merged PR, then a github.close.
 2. **Label open PRs** that have no `ai/kind:*` label yet, newest first, at most 15 a
    pass; the rest wait for the next pass. Give each exactly one kind with `label_pr`
    (`{target: "owner/repo#N", add: ["ai/kind:bugfix"]}`): `ai/kind:docs`,
