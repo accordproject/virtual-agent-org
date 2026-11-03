@@ -170,9 +170,9 @@ public action without a decision id.
 - **Task lifecycle:** a task is `open`, then `running` once its session starts. When
   the session ends its turn, the task is `done`, or `blocked` if the session's last
   status report listed blockers; `failed` if the session never started. A session that
-  runs out of budget leaves its task `blocked`; one that ends in error leaves it
-  `failed`, and the hourly tidy-up fails tasks whose session went stale (decision 53).
-  Ada closes a stopped task that is finished in practice with `close_task`.
+  runs out of budget or ends in error leaves its task `blocked`, and the hourly tidy-up
+  blocks tasks whose session went stale; `blocked_reason` says why (decision 53). Ada
+  then retries, rewords, reassigns, puts it to the owner, or closes it with `close_task`.
 - **Follow-ups** (decision 50): when a task ends blocked or an approved decision fails,
   the gateway wakes Ada, at most once per task or decision and 5 times a day, only
   while she is active and schedules are on. She assigns it to an agent who can fix it

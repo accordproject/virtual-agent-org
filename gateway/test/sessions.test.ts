@@ -311,23 +311,25 @@ describe("tasks whose session stops without finishing (decision 53)", () => {
     return task.id as string;
   }
 
-  it("blocks a task whose session ran out of budget, and wakes Ada about it", async () => {
+  it("blocks a task whose session ran out of budget, says why, and wakes Ada about it", async () => {
     const { ctx, fakes } = makeTestCtx();
     const id = await started(ctx, fakes, "sesn_b", { status: "idle", stop_reason: { type: "budget_reached" } });
     await processSession(ctx, "sesn_b");
-    expect((await ctx.db.getTask(id))?.status).toBe("blocked");
+    expect(await ctx.db.getTask(id)).toMatchObject({ status: "blocked", blocked_reason: "Ran out of its session budget before finishing" });
     expect(adaWakes(fakes)[0].args[0].text).toContain("Ran out of its session budget before finishing");
   });
 
-  it("fails a task whose session ended in error, without waking Ada", async () => {
+  it("blocks a task whose session ended in error, so Ada decides what happens to it", async () => {
     const { ctx, fakes } = makeTestCtx();
     const gone = await started(ctx, fakes, "sesn_t", { status: "terminated" });
     const retries = await started(ctx, fakes, "sesn_r", { status: "idle", stop_reason: { type: "retries_exhausted" } });
     await processSession(ctx, "sesn_t");
     await processSession(ctx, "sesn_r");
-    expect((await ctx.db.getTask(gone))?.status).toBe("failed");
-    expect((await ctx.db.getTask(retries))?.status).toBe("failed");
-    expect(adaWakes(fakes)).toHaveLength(0);
+    for (const id of [gone, retries]) {
+      expect(await ctx.db.getTask(id)).toMatchObject({ status: "blocked", blocked_reason: "Session ended in error before finishing" });
+    }
+    expect(adaWakes(fakes)).toHaveLength(2);
+    expect((await ctx.db.openTasks()).map((t) => t.id)).toEqual([gone, retries]);
   });
 
   it("leaves running and paused sessions' tasks alone", async () => {
@@ -340,8 +342,8 @@ describe("tasks whose session stops without finishing (decision 53)", () => {
     expect((await ctx.db.getTask(paused))?.status).toBe("running");
   });
 
-  it("fails old tasks at the tidy-up once their session is stale or gone", async () => {
-    const { ctx } = makeTestCtx();
+  it("blocks old tasks at the tidy-up once their session is stale or gone, with the reason, and wakes no one", async () => {
+    const { ctx, fakes } = makeTestCtx();
     const sql = (q: string) => (ctx.db as any).db.prepare(q).run();
     const task = async (sid: string | null, status: string) => {
       const t = await ctx.db.createTask({ agent: "mira", title: "t", brief: "b" });
@@ -358,9 +360,16 @@ describe("tasks whose session stops without finishing (decision 53)", () => {
     await sql("UPDATE sessions SET updated_at = datetime('now', '-8 days') WHERE id = 'sesn_old'");
     await sql(`UPDATE tasks SET created_at = datetime('now', '-8 days') WHERE id = '${orphan}'`);
     await housekeeping(ctx);
-    const status = async (id: string) => (await ctx.db.getTask(id))?.status;
-    expect([await status(stale), await status(live), await status(recent), await status(orphan)]).toEqual(["failed", "running", "running", "failed"]);
+    const state = async (id: string) => {
+      const t = await ctx.db.getTask(id);
+      return [t?.status, t?.blocked_reason];
+    };
+    expect(await state(stale)).toEqual(["blocked", "No activity for 7 days; the session is over"]);
+    expect(await state(orphan)).toEqual(["blocked", "Never started a session"]);
+    expect(await state(live)).toEqual(["running", null]);
+    expect(await state(recent)).toEqual(["running", null]);
     const row: any = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.housekeeping'").first();
-    expect(JSON.parse(row.detail).expired_tasks).toEqual([stale, orphan]);
+    expect(JSON.parse(row.detail).blocked_tasks).toEqual([stale, orphan]);
+    expect(adaWakes(fakes)).toHaveLength(0);
   });
 });
