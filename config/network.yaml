@@ -57,9 +57,9 @@ budgets:
 self_improvement:
   since: 2026-11-03      # ISO date the loop starts; null = off
   stale_days: 30         # matches .github/workflows/stale.yml
-  # While the network settles, Ada may propose a change to the same agent every day and
-  # from the start. Once settled: proposal_gap_days 7, min_days 14.
-  proposal_gap_days: 1   # days between proposals for one agent; 0 = no limit
+  # While the network settles, Ada may propose changes to an agent as often as the owner
+  # asks, from the start. Once settled: proposal_gap_days 7, min_days 14.
+  proposal_gap_days: 0   # days between proposals for one agent; 0 = no limit
   min_decided: 10        # proposals need this many decided decisions by the agent...
   min_days: 0            # ...or this many days since `since`
   # Author of the gateway's commits to the network repo: the GitHub App's bot user

@@ -13,7 +13,7 @@
   "self_improvement": {
     "since": "2026-11-03",
     "stale_days": 30,
-    "proposal_gap_days": 1,
+    "proposal_gap_days": 0,
     "min_decided": 10,
     "min_days": 0,
     "commit_author": {

@@ -571,8 +571,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   loop allowed one proposal per agent a week, and none until an agent had 10 decided
   decisions or the loop had run 14 days.
 - Those limits are now settings in `config/network.yaml`: `proposal_gap_days`,
-  `min_decided` and `min_days`, with defaults 7, 10 and 14. While settling they are 1,
-  10 and 0: Ada may propose for an agent once a day, from the start.
+  `min_decided` and `min_days`, with defaults 7, 10 and 14. While settling they are 0,
+  10 and 0: Ada may propose for an agent as often as needed, from the start.
 - Ada proposes in the weekly evaluation and whenever the owner asks. She still cites
   evidence, and the owner still approves each proposal before Mandla builds it.
 - Changes to one agent close together share their before-and-after figures; each
