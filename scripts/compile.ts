@@ -103,6 +103,7 @@ export function validate(cfg = loadAll()): string[] {
     if (!(Number.isInteger(si.stale_days) && si.stale_days >= 1 && si.stale_days <= 365)) errs.push("self_improvement.stale_days must be a whole number from 1 to 365");
     const a = si.commit_author;
     if (!a || typeof a.name !== "string" || !a.name.trim() || typeof a.email !== "string" || !a.email.includes("@")) errs.push("self_improvement.commit_author needs a name and an email");
+    else if (si.since !== null && /[<>]/.test(a.email)) errs.push("self_improvement.commit_author.email is still a placeholder: set the App's bot email before switching the loop on");
   }
 
   const repos = network.github.repos ?? [];

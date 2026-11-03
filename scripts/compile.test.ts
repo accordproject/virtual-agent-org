@@ -117,6 +117,16 @@ test("validate checks self_improvement", () => {
   assert.ok(bad({ mechanic_large_usd: 11 }).includes("network.yaml: budgets.mechanic_large_usd must be more than 0 and at most 10"));
 });
 
+test("validate refuses the placeholder commit email once the loop is on", () => {
+  const cfg = loadAll();
+  const si = (patch: object) => validate({ ...cfg, network: { ...cfg.network, self_improvement: { ...cfg.network.self_improvement!, ...patch } } });
+  const err = "self_improvement.commit_author.email is still a placeholder: set the App's bot email before switching the loop on";
+  const placeholder = { name: "virtual-agent-org-gateway[bot]", email: "<app bot id>+virtual-agent-org-gateway[bot]@users.noreply.github.com" };
+  assert.ok(!si({ since: null, commit_author: placeholder }).includes(err));
+  assert.ok(si({ since: "2026-11-10", commit_author: placeholder }).includes(err));
+  assert.ok(!si({ since: "2026-11-10", commit_author: { ...placeholder, email: "123456+virtual-agent-org-gateway[bot]@users.noreply.github.com" } }).includes(err));
+});
+
 test("compile emits the loop settings", () => {
   const out = compile(loadAll());
   assert.deepEqual(out.self_improvement.task_cents, { small: 100, large: 500 });
