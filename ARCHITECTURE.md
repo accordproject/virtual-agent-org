@@ -110,7 +110,9 @@ threads, and a maintainer's approval unless the PR is low risk. The card lists t
 These are enforced in code; changing them is the owner's decision.
 
 1. **Ada has no side effects.** She holds no external tools; she acts only through
-   `assign_task`, `send_to_matt` and the decision queue.
+   `assign_task`, `send_to_matt` and the decision queue. With `decide_action` she may
+   mark done, reject superseded, or approve low-risk `github.approve_ci` decisions
+   (decision 52); nothing else.
 2. **Agents never hold credentials for critical actions.** Merging, closing, releasing,
    publishing, posting, emailing, messaging a named person, deleting, spending, and
    spec or permission changes go through `request_action`. The gateway holds those
