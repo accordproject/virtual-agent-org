@@ -111,7 +111,9 @@ async function handleEvent(
         // unable to take new messages. Unexpected failures go to the audit log.
         if (err instanceof ToolDenied) {
           await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_denied", tool: e.name, permission: "deny", detail: err.message });
-        } else if (!(err instanceof ToolError)) {
+        } else if (err instanceof ToolError) {
+          await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_refused", tool: e.name, detail: err.message.slice(0, 300) });
+        } else {
           await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_error", tool: e.name, detail: String(err) });
         }
         result =

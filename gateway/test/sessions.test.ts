@@ -34,6 +34,19 @@ describe("session processing", () => {
     expect(denied.results).toEqual([{ tool: "send_to_matt", permission: "deny" }]);
   });
 
+  it("a tool call refused for bad input is audited as gateway.tool_refused", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    fakes.sessions.s5 = { id: "s5", status: "idle", agent: "agent_mira", stop_reason: { type: "requires_action" } };
+    fakes.events.s5 = [{ id: "e1", type: "agent.custom_tool_use", name: "request_action", input: {} }];
+    await processSession(ctx, "s5");
+    const r = fakes.calls.find((c) => c.method === "sendToolResult")!;
+    expect(r.args[2]).toMatch(/^Error: /);
+    const rows = await (ctx.db as any).db.prepare("SELECT tool, detail FROM audit WHERE event_type = 'gateway.tool_refused'").all();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0].tool).toBe("request_action");
+    expect(rows.results[0].detail).toContain("kind is required");
+  });
+
   it("records a scheduled session's tokens and default model, and never lowers them", async () => {
     const { ctx, fakes } = makeTestCtx();
     const usage = { list_cost: { amount: "42", currency: "USD" }, input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 9000, cache_creation_input_tokens: 50 };

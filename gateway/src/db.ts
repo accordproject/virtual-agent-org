@@ -267,6 +267,18 @@ export class Db {
       .then((r) => r.results);
   }
 
+  /** Custom tool calls the gateway refused for bad input. */
+  refusals(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare(
+        "SELECT ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
+          "WHERE ts >= ? AND ts < ? AND event_type = 'gateway.tool_refused' ORDER BY id LIMIT ?",
+      )
+      .bind(since, until, limit)
+      .all<{ ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .then((r) => r.results);
+  }
+
   /** External (built-in and MCP) tool calls, counted by agent, tool and permission. */
   toolCalls(since: string, until: string) {
     return this.db

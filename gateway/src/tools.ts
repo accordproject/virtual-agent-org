@@ -247,11 +247,12 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   }
   // Open-ended: include rows written this very second, which "now" to the second would cut off.
   const until = input.until ? end : "9999-12-31 23:59:59";
-  const [usage, daily, decisions, denials, toolCalls] = await Promise.all([
+  const [usage, daily, decisions, denials, refusals, toolCalls] = await Promise.all([
     ctx.db.sessionUsage(since, until),
     ctx.db.dailySpend(since, until),
     ctx.db.decisionsBetween(since, until),
     ctx.db.denials(since, until),
+    ctx.db.refusals(since, until),
     ctx.db.toolCalls(since, until),
   ]);
 
@@ -280,6 +281,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started.",
       "Sessions from before token and model recording began show 0 tokens and model 'unknown'.",
       "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected. Tool confirmations are excluded.",
+      "refusals: custom tool calls the gateway refused for bad input.",
       "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
     ],
     agents,
@@ -289,6 +291,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       .filter((d) => d.status === "executed" || d.status === "failed")
       .map((d) => ({ id: d.id, agent: d.agent, kind: d.kind, target: d.target, status: d.status, executed_at: d.executed_at })),
     denials,
+    refusals,
     tool_calls: toolCalls,
   });
 }
