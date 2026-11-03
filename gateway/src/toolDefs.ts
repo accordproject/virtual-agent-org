@@ -132,6 +132,23 @@ export const TOOLS = {
       properties: { status: { type: "string", enum: ["open", "decided", "all"] } },
     },
   },
+  decide_action: {
+    owner: "ada",
+    description:
+      "Decide a queued decision yourself, only in these cases: done (an approved decision that has been carried out or superseded), " +
+      "rejected (an open decision superseded by a later one from the same agent for the same target), approved (an open low-risk " +
+      "github.approve_ci whose requesting agent read the diff and found it clean). The gateway refuses anything else; that goes to Matt. " +
+      "Report each one under \"Decided for you\" in the next check-in.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: str("Decision id, e.g. D-41"),
+        outcome: { type: "string", enum: ["done", "rejected", "approved"] },
+        note: str("Why, in one line Matt can check: what carried it out or superseded it, or what the agent found in the diff"),
+      },
+      required: ["id", "outcome", "note"],
+    },
+  },
   record_evaluation: {
     owner: "ada",
     description: "Store a weekly evaluation for one agent.",

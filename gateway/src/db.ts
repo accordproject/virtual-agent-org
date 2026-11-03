@@ -355,6 +355,14 @@ export class Db {
     return (r.meta?.changes ?? 0) > 0;
   }
 
+  /** The latest decision from the same agent, for the same target, queued after this one. */
+  async laterDecision(d: Pick<Decision, "agent" | "target" | "seq">): Promise<Decision | null> {
+    return this.db
+      .prepare("SELECT * FROM decisions WHERE agent = ? AND target = ? AND seq > ? ORDER BY seq DESC LIMIT 1")
+      .bind(d.agent, d.target, d.seq)
+      .first<Decision>();
+  }
+
   async setNote(id: string, note: string) {
     await this.db.prepare("UPDATE decisions SET note = ? WHERE id = ?").bind(note, id.toUpperCase()).run();
   }

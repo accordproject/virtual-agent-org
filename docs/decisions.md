@@ -414,3 +414,28 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: letting every agent propose changes here (the rules would be editable by
   the agents they limit); no agent writing here at all (every fix waits for the owner
   to write it).
+
+**52. What Ada may decide without the owner** · RESOLVED
+
+- The decision queue filled with items needing no judgement: manual actions already
+  done, requests an agent had replaced, and CI approvals the gateway sent to the owner
+  only because a member's message set the work going.
+- Ada decides three kinds herself with `decide_action(id, outcome, note)` and lists
+  them under "Decided for you" in the next check-in:
+  - **done:** an approved decision that has been carried out or superseded;
+  - **rejected:** an open decision when the same agent has since queued one for the
+    same target (the note records which);
+  - **approved:** an open low-risk `github.approve_ci`, where the requesting agent read
+    the diff and found it clean. The gateway re-runs the automatic approval's file and
+    workflow checks first and refuses if any fails.
+- An approved decision is a manual action waiting for the owner, and its card is the
+  only reminder of it, so marking it done clears that reminder. Kept: Ada's note gives
+  the evidence and the check-in lists each one. Not chosen: limiting (a) to superseded
+  decisions, which would leave every "done" to the owner.
+- In practice (c) covers CI approvals a member's message set going: other low-risk ones
+  already run automatically, and ones the checks flag are high risk. Kept on purpose,
+  since the gateway's checks are the same either way.
+- The gateway refuses everything else, including paused tool calls, any other kind, and
+  any call from a conversation a member started (rule 5). Spending, sending to people,
+  deleting, merges and releases stay with the owner. Each decision is audited as
+  `ada.decided` and her note is kept on the decision.
