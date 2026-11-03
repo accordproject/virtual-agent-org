@@ -105,17 +105,23 @@ jobs:
       - run: npm ci && npm ci --prefix gateway
       - run: npm test
 
-      # deploy.ts reads resource ids from deployed.json. While a PR recording new ids is
-      # unmerged, main doesn't have them, and deploying the agents again would create
-      # duplicates.
+      # deploy.ts reads resource ids from deployed.json. While the ids on the
+      # deploy/resource-ids branch are unmerged, main doesn't have them, and deploying
+      # the agents again would create duplicates. Check the branch, not only the PR:
+      # if opening the PR failed, the branch is there without one.
       - name: No unmerged resource ids
         if: ${{ needs.plan.outputs.agents == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head deploy/resource-ids --state open --json number --jq '.[0].number')
-          if [ -n "$pr" ]; then
-            echo "::error::Merge PR #$pr (deployed resource ids) first, then re-run this deploy."
+          if git fetch --quiet origin deploy/resource-ids 2>/dev/null \
+            && ! git diff --quiet HEAD FETCH_HEAD -- gateway/src/generated/deployed.json; then
+            pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head deploy/resource-ids --state open --json number --jq '.[0].number')
+            if [ -n "$pr" ]; then
+              echo "::error::Merge PR #$pr (deployed resource ids) first, then re-run this deploy."
+            else
+              echo "::error::The deploy/resource-ids branch holds ids main doesn't have. Open a PR from it and merge it (or delete the branch if main's ids are newer), then re-run this deploy."
+            fi
             exit 1
           fi
 
@@ -240,3 +246,11 @@ jobs:
           committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           signoff: true
           delete-branch: true
+      # The branch is pushed before the PR is opened, so if opening it fails the ids
+      # are still safe, and the next deploy refuses to run until they're merged.
+      - name: Say where the ids are
+        if: ${{ failure() }}
+        run: |
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...deploy/resource-ids?expand=1"
+          echo "::error::Couldn't open the resource-ids PR. Open it by hand and merge it before the next deploy: $url"
+          printf 'The new resource ids are on the `deploy/resource-ids` branch, but the PR could not be opened. [Open it](%s) and merge it before the next deploy.\n' "$url" >> "$GITHUB_STEP_SUMMARY"
