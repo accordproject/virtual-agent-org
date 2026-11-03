@@ -78,18 +78,19 @@ schedules:
       Send Diana Lease, who chairs the Tech WG, the briefing for tomorrow's meeting, following
       "Chair's briefing" in your instructions.
 
+  - name: sage-weekly-brief
+    agent: sage
+    cron: "0 7 * * 1"           # Mondays 07:00, before Otto picks the chair's news candidates at 09:00
+    budget_usd: 1.00
+    prompt: >
+      Write this week's WG news brief, following "Standing work" in your instructions.
+
   # Phase 2+
   - name: rosa-community
     agent: rosa
     cron: "0 9,17 * * *"
     budget_usd: 0.75
     prompt: Welcome newcomers, answer questions, and check good-first-issue coverage.
-
-  - name: sage-weekly-brief
-    agent: sage
-    cron: "0 7 * * 1"
-    budget_usd: 1.00
-    prompt: Write the weekly research brief.
 
   - name: juno-weekly
     agent: juno

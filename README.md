@@ -7,7 +7,7 @@ the Chief of Staff, from Telegram or Discord. Ada delegates to specialist agents
 every critical action (merging, publishing, posting, messaging someone) waits in a
 decision queue for the chair's approval.
 
-**Status:** Phase 1, an experiment. Four agents (Ada, Mira, Vera, Otto) work on
+**Status:** Phase 1, an experiment. Five agents (Ada, Mira, Vera, Otto, Sage) work on
 [Concerto](https://github.com/accordproject/concerto),
 [Template Engine](https://github.com/accordproject/template-engine) and
 [Template Playground](https://github.com/accordproject/template-playground).

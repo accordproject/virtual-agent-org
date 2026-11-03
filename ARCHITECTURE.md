@@ -23,7 +23,8 @@ Design principles:
   that Ada uses to evaluate everyone, herself included.
 - **Job specs are code.** Each role is a markdown spec in this repo. Changes are pull
   requests that the owner merges.
-- **Start small.** Phase 1 runs four agents; others join only when the weekly
+- **Start small.** Phase 1 runs five agents (Sage joined early for one narrow job,
+  decision 49); others join only when the weekly
   evaluation shows a gap they would fill.
 
 ## The team
@@ -36,7 +37,7 @@ Design principles:
 | **Otto** | Meetings | Every Tech WG has a briefing before and a recording, summary and actions after | Read-only GitHub and Vimeo. Publishing, announcements and DMs: queued. | 1 |
 | **Rosa** | Community | Newcomers find a path to a first contribution | GitHub triage. Announcements and DMs: queued. | 2 |
 | **Juno** | Marketing & Docs | Accord's work is visible and its docs current | Drafts only. Any publish: queued. | 2 |
-| **Sage** | Research | The TSC sees what matters in legal tech and agentic commerce | Web search; writes briefs | 2 |
+| **Sage** | Research | The Tech WG chair has a few well-sourced outside items worth discussing (wider brief from Phase 2) | Web search; writes briefs to its own store, which Otto reads | 1 |
 | **Kit** | Training & Security | Quality and security posture improve | Security issues and draft PRs. Advisories: queued. | 3 |
 | **Felix** | Release & CI | Builds stay green and releases ship predictably | CI and changelog drafts. Tags and npm publish: queued. | 3 |
 | **Nell** | Ecosystem & Funding | More adopters, mentors and funding | Drafts only. Every external email: queued. | 3 |
@@ -205,8 +206,8 @@ Bots are excluded from people metrics, and medians are reported alongside means.
 | Phase | Agents | Gate to the next phase |
 | --- | --- | --- |
 | 0 Foundations | Test agent on the sandbox repo | A queued merge is approved and executed; `/stop` halts the agent within seconds |
-| 1 Core loop | Ada, Mira, Vera, Otto | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
-| 2 Community and voice | Rosa, Juno, Sage | Newcomer first-response median under 2 business days |
+| 1 Core loop | Ada, Mira, Vera, Otto, Sage | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
+| 2 Community and voice | Rosa, Juno | Newcomer first-response median under 2 business days |
 | 3 Depth | Kit, Felix, Nell | Each new agent moves its KPIs within four weeks, or is retired |
 
 ## Background
