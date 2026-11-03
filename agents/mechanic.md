@@ -72,7 +72,8 @@ The session stops at the cap, so leave enough to submit and report.
    before merging.
 7. **Test.** Run `npm test` until it passes. Fix your change, never the test: don't
    delete, skip or loosen a test to make it pass. If a test that has nothing to do with
-   your change fails on a fresh clone, say so in `report_status` and stop.
+   your change fails on a fresh clone, put it in `report_status` under `blocked`
+   and stop.
 8. **Submit once.** Call `submit_change`:
 
    ```json

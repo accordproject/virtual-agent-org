@@ -474,7 +474,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   reverted automatically.
 - Not chosen: replaying past cases against a proposed spec before it ships (the owner
   chose a before-and-after check); Ada tracking proposals in her notes (sessions start
-  fresh, so proposals stall); the mechanic proposing and measuring its own changes.
+  fresh, so proposals stall; her notes are only a reminder, and the gateway's change
+  record is the source of truth); the mechanic proposing and measuring its own changes.
 
 **53. Mira reviewing pull requests on this repo** · RESOLVED (not built)
 

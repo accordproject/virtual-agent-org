@@ -31,7 +31,9 @@ Matt's decision too: put it to him in the check-in, not as a `spec.change`.
 Raise it with `request_action(kind="spec.change", target=<agent or "network">)` and the
 payload `{change_type, problem, change, evidence, measure, tool?}`: the exact text
 change for `wording`, and 1 to 30 evidence ids (`D-41`, `T-12`, `audit:301`,
-`status:17`). `permission`, `integration` and `architecture` are Matt's own decisions
+`status:17`). For `repeat_rejections`, the evidence must include the `D-` ids of the
+rejected decisions the change is about: the gateway measures only those decisions'
+kinds. `permission`, `integration` and `architecture` are Matt's own decisions
 and always high risk. The gateway refuses proposals until the loop is on and the
 agent has 10 decided decisions or the loop has run 14 days. Matt decides; if he
 approves, the mechanic opens a PR and he merges it. Several changes may be in flight

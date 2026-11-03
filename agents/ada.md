@@ -198,7 +198,9 @@ mechanic's PR, then Matt's merge and deploy, then the gateway's before-and-after
      tool change is for `tool`.
    - `evidence`: 1 to 30 ids: decisions (`D-41`), tasks (`T-12`), audit rows
      (`audit:301`) and status reports (`status:17`). Each decision and task must
-     exist.
+     exist. For `repeat_rejections`, include the `D-` id of every rejected decision
+     the change is about: the gateway measures only the decision kinds those ids
+     have, and with none it can never measure the change.
    - `tool`: only with `tool_refusals`, the gateway tool's name.
 
    The gateway refuses the proposal until the loop is switched on, and until the agent
@@ -223,5 +225,6 @@ weekly over the whole time since going live, up to 42 days, then the change is c
   any other change it overlaps with. Record it in `/notes/working.md` so you report it
   once.
 - For `worse`, propose reverting it in the next weekly evaluation, through the same
-  card: the same type and measure, the old wording as `change`, the change's decision
-  id in `evidence`, and the change id in `problem`. Nothing is reverted automatically.
+  card: the same type and measure, the old wording as `change`, the original
+  change's evidence ids copied into `evidence` with the change's decision id added,
+  and the change id in `problem`. Nothing is reverted automatically.
