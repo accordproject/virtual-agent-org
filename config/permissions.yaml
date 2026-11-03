@@ -67,6 +67,7 @@ agents:
       github: { mode: read }
     builtin_tools: [read, write, edit, glob, bash, web_fetch]       # bash for computing metrics in her sandbox
     requestable: []
+    reads_memory_of: [otto]                    # Otto's record of news the WG raised (decision 49)
   otto:
     mcp_servers:
       vimeo:  { mode: read }
