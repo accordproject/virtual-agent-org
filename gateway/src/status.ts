@@ -24,7 +24,7 @@ export interface NetworkStatus {
   monthCents: number;
   creditUsd: number;
   /** Spec changes building, in review or live and not yet measured. */
-  openChanges?: number;
+  changes?: { id: string; agent: string; state: string; pr_url: string | null }[];
 }
 
 export async function gatherStatus(ctx: Ctx): Promise<NetworkStatus> {
@@ -61,11 +61,14 @@ export async function gatherStatus(ctx: Ctx): Promise<NetworkStatus> {
     agents,
     monthCents: Object.values(spendMonth).reduce((x, y) => x + y, 0),
     creditUsd: ctx.network.monthly_credit_usd,
-    openChanges: changes.length,
+    changes: changes.map((c) => ({ id: c.id, agent: c.agent, state: c.state, pr_url: c.pr_url })),
   };
 }
 
 const usd = (c = 0) => `$${(c / 100).toFixed(2)}`;
+
+/** An open change's agent, state and PR link if it has one. */
+const changeLine = (c: NonNullable<NetworkStatus["changes"]>[number]) => [cap(c.agent), c.state, ...(c.pr_url ? [c.pr_url] : [])].join(" · ");
 
 /** Telegram: plain text, unchanged from the original /status. */
 export function statusPlain(s: NetworkStatus): string {
@@ -76,7 +79,7 @@ export function statusPlain(s: NetworkStatus): string {
         (a.last ? `\n  last report ${a.last.at}: ${a.last.line}` : ""),
     );
   }
-  if (s.openChanges) out.push(`Changes in flight: ${s.openChanges}`);
+  if (s.changes?.length) out.push(["Changes in flight:", ...s.changes.map((c) => `  ${c.id} ${changeLine(c)}`)].join("\n"));
   out.push(`Month to date ${usd(s.monthCents)} of $${s.creditUsd} credits`);
   return out.join("\n");
 }
@@ -108,9 +111,13 @@ const STATE_COLOUR: Record<string, number> = {
 /** Discord: a header, then one card per agent with its whole latest report. */
 export function statusCards(s: NetworkStatus): DiscordPayload {
   const pct = s.creditUsd ? Math.round((s.monthCents / 100 / s.creditUsd) * 100) : 0;
+  const changes = s.changes ?? [];
   const content = [
     `### Agent network · Phase ${s.phase}`,
-    `-# ${s.dryRun ? "DRY RUN: approved actions are logged, not executed" : "Live: approved actions execute"} · ${usd(s.monthCents)} of $${s.creditUsd} credits this month (${pct}%)${s.openChanges ? ` · ${plural(s.openChanges, "change")} in flight` : ""}`,
+    `-# ${s.dryRun ? "DRY RUN: approved actions are logged, not executed" : "Live: approved actions execute"} · ${usd(s.monthCents)} of $${s.creditUsd} credits this month (${pct}%)${changes.length ? ` · ${plural(changes.length, "change")} in flight` : ""}`,
+    // Discord allows 2,000 characters in a message's text.
+    ...changes.slice(0, 10).map((c) => `- ${c.id} · ${changeLine(c)}`),
+    ...(changes.length > 10 ? [`-# ${changes.length - 10} more not shown.`] : []),
   ].join("\n");
   // Discord allows 6,000 characters across a message's cards and 4,096 in one.
   const budget = Math.floor(6000 / Math.max(s.agents.length, 1));

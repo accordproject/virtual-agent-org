@@ -52,9 +52,9 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   const status = session.status === "idle" ? `idle:${session.stop_reason?.type ?? ""}` : session.status;
   await ctx.db.updateSession(sessionId, status, costCents(session), sessionTokens(session));
 
-  if (row?.task_id && session.status === "idle" && session.stop_reason?.type === "end_turn") {
-    await finishTask(ctx, row.task_id, sessionId);
-  }
+  const ended =
+    status === "idle:end_turn" ? "end_turn" : status === "idle:budget_reached" ? "budget reached" : status === "terminated" ? "session ended" : null;
+  if (row?.task_id && ended) await finishTask(ctx, row.task_id, sessionId, ended);
   // Tell Matt once, when the session first runs out, not on every later pass.
   if (status === "idle:budget_reached" && row?.status !== "idle:budget_reached") {
     await ctx.tg.send(ctx.ownerChatId, `${cap(agent)} hit its session budget and paused (${sessionId}).`);
@@ -65,16 +65,19 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
  * A task's session ended its turn. The task is blocked if the session's last status
  * report listed blockers, and Ada is woken to follow it up (decision 50); otherwise it
  * is done, and so is a blocked task it was assigned to follow up. Runs on every pass
- * over an idle session, so it acts only when the status changes.
+ * over an idle session, so it acts only when the status changes. A change task's
+ * session that ran out of budget or was ended counts as ending too, so its change
+ * doesn't stay building.
  */
-async function finishTask(ctx: Ctx, taskId: string, sessionId: string) {
+async function finishTask(ctx: Ctx, taskId: string, sessionId: string, ended: "end_turn" | "budget reached" | "session ended") {
   const task = await ctx.db.getTask(taskId);
   if (!task || ["done", "blocked", "failed", "cancelled"].includes(task.status)) return;
+  if (ended !== "end_turn" && task.kind !== "change") return;
   const blockers = (await ctx.db.sessionBlockers(sessionId)) ?? [];
   // A change task that ends with the change still building never opened its PR.
   const change = task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
   if (change?.state === "building") {
-    blockers.unshift(`${change.id}: no change submitted`);
+    blockers.unshift(`${change.id}: no change submitted${ended === "end_turn" ? "" : ` (${ended})`}`);
     // The second attempt to end this way closes the change; Ada still puts it to the owner.
     const again = !!task.follows_up?.startsWith("T-");
     await ctx.db.setTask(task.id, "blocked");

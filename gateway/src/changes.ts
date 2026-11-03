@@ -18,15 +18,26 @@ export const EVIDENCE_ID = /^(D-\d+|T-\d+|audit:\d+|status:\d+)$/;
 
 /** Kinds that say nothing about an agent's judgement, so don't count as evidence. */
 const NOT_EVIDENCE = NOT_JUDGEMENT;
+/** Kinds left out of a change's measure: proposals themselves, and kinds that aren't judgement. */
+const NOT_MEASURED = ["spec.change", ...NOT_JUDGEMENT];
 const MIN_DECIDED = 10;
 const MIN_DAYS = 14;
+/** At most one proposal per target in this many days (the rubric's one a week). */
+const PROPOSAL_DAYS = 7;
 const DAY = 86_400_000;
 
 /** Changes to these types touch more than wording, so get a larger budget and the deep tier. */
 const isLarge = (type: string) => !["wording", "tier"].includes(type);
 
+/** A mechanic task's budget and model for a change of this type, first attempt or follow-up. */
+export function changeBudget(ctx: Ctx, type: string): { cents: number; model?: string } {
+  const cents = ctx.network.self_improvement?.task_cents ?? { small: 100, large: 500 };
+  const model = isLarge(type) ? ctx.network.model_tiers?.deep : undefined;
+  return { cents: isLarge(type) ? cents.large : cents.small, ...(model ? { model } : {}) };
+}
+
 export function changeRisk(target: string, type: string): Risk {
-  if (OWNER_TYPES.includes(type) || target === "mechanic") return "high";
+  if (OWNER_TYPES.includes(type) || target.toLowerCase() === "mechanic") return "high";
   return type === "tool" ? "medium" : "low";
 }
 
@@ -40,6 +51,11 @@ export async function proposalGuard(ctx: Ctx, target: string): Promise<string | 
   if (!since || Number.isNaN(start)) return "The self-improvement loop is off (self_improvement.since isn't set). Don't propose changes yet.";
   const now = Date.now();
   if (now < start) return `The self-improvement loop starts on ${since}. Propose changes after that.`;
+  const weekAgo = new Date(now - PROPOSAL_DAYS * DAY).toISOString().slice(0, 19).replace("T", " ");
+  const last = await ctx.db.latestDecisionFor("spec.change", target, weekAgo);
+  if (last) {
+    return `${target} already has a proposal from the last ${PROPOSAL_DAYS} days: ${last.id}. Propose at most one change per agent a week; put more evidence into the next one.`;
+  }
   if (now - start >= MIN_DAYS * DAY) return null;
   const n = await ctx.db.countDecided(target === "network" ? null : target, NOT_EVIDENCE);
   if (n >= MIN_DECIDED) return null;
@@ -59,7 +75,21 @@ export async function missingEvidence(ctx: Ctx, evidence: string[]): Promise<str
 }
 
 const BOUNDARIES =
-  "Change only what the decision approved. Don't change files under .github/ or gateway/src/generated/ by hand; run npm run compile if config changed. Never weaken a test. Submit once with submit_change, then report_status.";
+  "Change only what the decision approved. Don't change files under .github/ or gateway/src/generated/ by hand; if config changed, run npm run compile and include the regenerated gateway/src/generated/network.json. Never weaken a test. Submit once with submit_change, then report_status.";
+
+/**
+ * repeat_rejections measures the kinds of the rejected decisions in the evidence, so it
+ * needs at least one by the target (any agent for the network). Null if there is one.
+ */
+export async function repeatEvidence(ctx: Ctx, target: string, p: Payload): Promise<string | null> {
+  if (p.measure !== "repeat_rejections") return null;
+  for (const id of ((p.evidence as string[]) ?? []).filter((e) => e.startsWith("D-"))) {
+    const d = await ctx.db.getDecision(id);
+    if (d && d.status === "rejected" && !NOT_MEASURED.includes(d.kind) && (target === "network" || d.agent === target)) return null;
+  }
+  const who = target === "network" ? "any agent" : target;
+  return `repeat_rejections needs the D- id of at least one decision by ${who} that was rejected (not a ${NOT_MEASURED.join(", ")}): the gateway measures the kinds of those decisions. Add one, or pick another measure.`;
+}
 
 /** The mechanic's brief: the approved payload, the ids, and fixed boundaries. */
 export function changeBrief(change: Pick<Change, "id" | "agent">, decision: Pick<Decision, "id">, p: Payload): string {
@@ -90,7 +120,7 @@ export async function startChange(ctx: Ctx, d: Decision, n: Normalised): Promise
   const kinds = new Set<string>();
   for (const id of evidence.filter((e) => e.startsWith("D-"))) {
     const e = await ctx.db.getDecision(id);
-    if (e) kinds.add(e.kind);
+    if (e && !NOT_MEASURED.includes(e.kind)) kinds.add(e.kind);
   }
   const type = p.change_type as string;
   const change = await ctx.db.createChange({
@@ -101,9 +131,7 @@ export async function startChange(ctx: Ctx, d: Decision, n: Normalised): Promise
     ...(typeof p.tool === "string" ? { tool: p.tool } : {}),
     kinds: [...kinds].sort(),
   });
-  const cents = ctx.network.self_improvement?.task_cents ?? { small: 100, large: 500 };
-  const budget = isLarge(type) ? cents.large : cents.small;
-  const model = isLarge(type) ? ctx.network.model_tiers?.deep : undefined;
+  const { cents: budget, model } = changeBudget(ctx, type);
   const brief = changeBrief(change, d, p);
 
   const task = await ctx.db.createTask({ agent: "mechanic", title: `${change.id}: ${type} change to ${n.target}`, brief, kind: "change" });
@@ -132,6 +160,10 @@ const MAX_BODY = 20_000;
 const CONVENTIONAL = /^(feat|fix|docs|chore|test|refactor|perf|build|ci|style|revert)(\([\w.\/-]+\))?!?: \S/;
 /** Paths the mechanic may never write: CI and the deploy run, and files compile.ts generates. */
 const FORBIDDEN = [".github/", "gateway/src/generated/"];
+/** Except network.json: a config change must carry it, and CI checks it matches a fresh compile. */
+const GENERATED_CONFIG = "gateway/src/generated/network.json";
+/** The forbidden directory a path is in or names, if any. */
+const forbiddenDir = (path: string) => (path === GENERATED_CONFIG ? undefined : FORBIDDEN.find((dir) => `${path.toLowerCase()}/`.startsWith(dir)));
 
 type ChangeFile = { path: string; content: string | null };
 
@@ -153,7 +185,7 @@ export function changeFileProblems(input: unknown): { files: ChangeFile[]; probl
     else if (path.startsWith("/")) problems.push(`${at}: give the path from the repo root, not an absolute path`);
     else if (path.includes("..")) problems.push(`${at}: paths may not contain ..`);
     else if (path.split("/").some((seg) => seg === "" || seg === ".")) problems.push(`${at}: give a plain path, without empty or . parts`);
-    else if (FORBIDDEN.some((dir) => path.toLowerCase().startsWith(dir))) problems.push(`${at}: files under ${FORBIDDEN.find((dir) => path.toLowerCase().startsWith(dir))} can't be changed by a submitted change`);
+    else if (forbiddenDir(path)) problems.push(`${at}: files under ${forbiddenDir(path)} can't be changed by a submitted change`);
     if (hasContent === del) problems.push(`${at}: give exactly one of content or delete: true`);
     if (path && seen.has(path)) problems.push(`${path} more than once`);
     seen.add(path);
@@ -208,7 +240,11 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
 
   const ref = parseTarget(ctx.network.network_repo);
   if (!ref) throw new ToolError("The network repo isn't configured (network_repo). Report it in report_status.");
-  if (ctx.dryRun) return `DRY RUN: would open a PR for ${change.id} on ${ref.owner}/${ref.repo} with ${files.length} file${files.length === 1 ? "" : "s"}.`;
+  if (ctx.dryRun) {
+    // Closed, so the task ends done rather than blocked for want of a PR.
+    await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "dry run" });
+    return `DRY RUN: would open a PR for ${change.id} on ${ref.owner}/${ref.repo} with ${files.length} file${files.length === 1 ? "" : "s"}. ${change.id} is closed; call report_status and stop.`;
+  }
 
   const decision = await ctx.db.getDecision(change.decision_id);
   const author = ctx.network.self_improvement?.commit_author;
@@ -246,6 +282,7 @@ const WINDOW_DAYS = 14;
 const RETRY_DAYS = 7;
 const LAST_DAY = WINDOW_DAYS + 28;
 const MIN_CASES = 5;
+const STUCK_DAYS = 7;
 const RATE_STEP = 0.05;
 const COST_STEP = 0.15;
 /** Rates such as 0.5 - 0.45 fall a hair short of 0.05 in floating point. */
@@ -274,7 +311,7 @@ export function verdictFor(measure: string, before: Window, after: Window, appro
 
 /**
  * The change's measure for the `days` before and after it went live, the verdict, and the
- * other changes to the same agent that went live within those windows.
+ * other changes to the same agent (or the network) that went live within those windows.
  */
 export async function measureChange(ctx: Ctx, c: Change, days = WINDOW_DAYS) {
   const live = msOf(c.live_at!);
@@ -302,20 +339,34 @@ function safeKinds(raw: string): string[] {
 }
 
 /**
- * The cron's pass over changes: closes those whose PR has been open past stale_days, and
- * measures those live for 14 days. Results are stored for get_status; nothing is sent.
- * Never throws.
+ * The cron's pass over changes: closes those still building after 7 days or whose PR has
+ * been open past stale_days, and measures those live for 14 days. Results are stored for
+ * get_status; nothing is sent. Never throws.
  */
 export async function tickChanges(ctx: Ctx, now = new Date()): Promise<void> {
   const t = now.getTime();
   const fail = (e: unknown, change?: string) =>
     ctx.db.audit({ event_type: "gateway.changes_error", detail: { ...(change ? { change } : {}), error: e instanceof Error ? e.message : String(e) } }).catch(() => {});
   try {
+    // A backstop for a mechanic task that ended without the gateway hearing of it.
+    for (const c of await ctx.db.changesIn(["building"])) {
+      if (t - msOf(c.created_at) < STUCK_DAYS * DAY) continue;
+      try {
+        await ctx.db.updateChange(c.id, { state: "closed", closed_reason: "stuck building" });
+        await ctx.db.audit({ agent: c.agent, event_type: "gateway.change_closed", detail: { change: c.id, reason: "stuck building" } });
+      } catch (e) {
+        await fail(e, c.id);
+      }
+    }
     const staleDays = ctx.network.self_improvement?.stale_days ?? 30;
     for (const c of await ctx.db.changesIn(["pr_open"])) {
       if (!c.pr_opened_at || t - msOf(c.pr_opened_at) < staleDays * DAY) continue;
-      await ctx.db.updateChange(c.id, { state: "closed", closed_reason: "stale" });
-      await ctx.db.audit({ agent: c.agent, event_type: "gateway.change_closed", detail: { change: c.id, reason: "stale", pr: c.pr_url } });
+      try {
+        await ctx.db.updateChange(c.id, { state: "closed", closed_reason: "stale" });
+        await ctx.db.audit({ agent: c.agent, event_type: "gateway.change_closed", detail: { change: c.id, reason: "stale", pr: c.pr_url } });
+      } catch (e) {
+        await fail(e, c.id);
+      }
     }
     for (const c of await ctx.db.changesIn(["live"])) {
       if (!c.live_at) continue;

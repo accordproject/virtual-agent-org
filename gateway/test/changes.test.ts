@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ActionInvalid, validateAction } from "../src/actions";
+import { ActionInvalid, actionRisk, validateAction } from "../src/actions";
 import { changeBrief, tickChanges, verdictFor } from "../src/changes";
 import type { Ctx } from "../src/context";
 import { approve } from "../src/controls";
@@ -28,6 +28,9 @@ describe("changes", () => {
 });
 
 const DAY = 86_400_000;
+const run = (ctx: Ctx, q: string, ...args: unknown[]) => (ctx.db as any).db.prepare(q).bind(...args).run();
+/** Moves a decision's request back `days`, out of the one-proposal-a-week window. */
+const backdate = (ctx: Ctx, id: string, days = 8) => run(ctx, "UPDATE decisions SET created_at = datetime('now', ?) WHERE id = ?", `-${days} days`, id);
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 /** A test network with the loop switched on at `since`, and the mechanic deployed. */
@@ -117,7 +120,45 @@ describe("spec.change proposals", () => {
       const out = await propose(ctx, target, { ...PAYLOAD, change_type });
       const id = out.match(/D-\d+/)![0];
       expect((await ctx.db.getDecision(id))?.risk, `${target} ${change_type}`).toBe(risk);
+      await backdate(ctx, id);
     }
+  });
+
+  it("a type's risk holds when spec.change is carried out by hand", () => {
+    const { ctx } = makeTestCtx({ network: { ...NETWORK, action_kinds: { ...NETWORK.action_kinds, "spec.change": { risk: "low", executor: "manual" } } } });
+    const n = validateAction(ctx, "spec.change", "mira", { ...PAYLOAD, change_type: "permission" });
+    expect(actionRisk(ctx, "spec.change", n)).toBe("high");
+    expect(actionRisk(ctx, "spec.change", validateAction(ctx, "spec.change", "mira", PAYLOAD))).toBe("low");
+  });
+
+  it("one proposal per agent a week", async () => {
+    const { ctx } = loopCtx();
+    await decided(ctx, "mira", 10);
+    const first = (await propose(ctx, "mira", PAYLOAD)).match(/D-\d+/)![0];
+    await ctx.db.decide(first, "rejected");
+    const refused = propose(ctx, "mira", PAYLOAD);
+    await expect(refused).rejects.toBeInstanceOf(ToolError);
+    await expect(refused).rejects.toThrow(new RegExp(`mira already has a proposal from the last 7 days: ${first}`));
+    // Other targets have their own week.
+    expect(await propose(ctx, "network", PAYLOAD)).toMatch(/^Queued as D-\d+/);
+    await backdate(ctx, first);
+    expect(await propose(ctx, "mira", PAYLOAD)).toMatch(/^Queued as D-\d+/);
+  });
+
+  it("repeat_rejections needs a rejected decision by the target", async () => {
+    const { ctx } = loopCtx();
+    await decided(ctx, "mira", 10); // D-2, D-4, ... are rejected
+    const [otto] = await decided(ctx, "otto", 2).then((ids) => ids.slice(1)); // D-12, rejected
+    const repeat = { ...PAYLOAD, measure: "repeat_rejections" };
+    const msg = /repeat_rejections needs the D- id of at least one decision by mira that was rejected/;
+    await expect(propose(ctx, "mira", { ...repeat, evidence: ["D-1", "audit:3"] })).rejects.toThrow(msg);
+    await expect(propose(ctx, "mira", { ...repeat, evidence: [otto] })).rejects.toThrow(msg);
+    const tc = await ctx.db.createDecision({ agent: "mira", kind: "tool.confirm", target: "bash", summary: "s", rationale: "r", risk: "high" });
+    await ctx.db.decide(tc.id, "rejected");
+    await expect(propose(ctx, "mira", { ...repeat, evidence: [tc.id] })).rejects.toThrow(msg);
+    expect(await propose(ctx, "mira", { ...repeat, evidence: ["D-1", "D-2"] })).toMatch(/^Queued as D-\d+/);
+    // For the network, any agent's rejection will do.
+    expect(await propose(ctx, "network", { ...repeat, evidence: [otto] })).toMatch(/^Queued as D-\d+/);
   });
 
   it("proposals wait for the loop to start and for evidence", async () => {
@@ -166,7 +207,8 @@ describe("spec.change proposals", () => {
     const reply = await approve(ctx, id);
     const change = (await ctx.db.getChange("C-1"))!;
     expect(change).toMatchObject({ agent: "mira", decision_id: id, change_type: "wording", measure: "approval_rate", state: "building" });
-    expect(JSON.parse(change.kinds)).toEqual(["github.comment", "github.review"]);
+    // Kinds that say nothing about judgement are left out of the measure.
+    expect(JSON.parse(change.kinds)).toEqual(["github.comment"]);
     const task = (await ctx.db.openTasks("mechanic"))[0];
     expect(task).toMatchObject({ id: change.task_id, kind: "change", status: "running" });
     const sessions = fakes.calls.filter((c) => c.method === "createSession").map((c) => c.args[0] as any);
@@ -180,6 +222,7 @@ describe("spec.change proposals", () => {
     expect(d.result).toContain(task.id);
     expect(reply).toContain("C-1");
 
+    await backdate(ctx, id);
     const tool = await propose(ctx, "mira", { ...PAYLOAD, change_type: "tool" });
     await approve(ctx, tool.match(/D-\d+/)![0]);
     const second = fakes.calls.filter((c) => c.method === "createSession").map((c) => c.args[0] as any)[1];
@@ -204,7 +247,7 @@ describe("spec.change proposals", () => {
       { ...PAYLOAD, measure: "tool_refusals", tool: "label_pr", evidence: ["D-1", "audit:7"] },
     );
     for (const s of ["C-3", "D-12", "mira", "wording", PAYLOAD.problem, PAYLOAD.change, "D-1, audit:7", "tool_refusals", "label_pr"]) expect(brief).toContain(s);
-    expect(brief).toContain("Change only what the decision approved. Don't change files under .github/ or gateway/src/generated/ by hand; run npm run compile if config changed. Never weaken a test. Submit once with submit_change, then report_status.");
+    expect(brief).toContain("Change only what the decision approved. Don't change files under .github/ or gateway/src/generated/ by hand; if config changed, run npm run compile and include the regenerated gateway/src/generated/network.json. Never weaken a test. Submit once with submit_change, then report_status.");
   });
 });
 
@@ -240,13 +283,27 @@ describe("submit_change", () => {
 
   it("submit_change refuses unsafe paths before calling GitHub", async () => {
     const { ctx, session, gh } = await building();
-    const bad = [".github/workflows/ci.yml", "../x", "/etc/x", "gateway/src/generated/network.json", "", "agents\\mira.md"];
+    const bad = [".github/workflows/ci.yml", "../x", "/etc/x", "gateway/src/generated/deployed.json", "", "agents\\mira.md"];
     const files = [...bad.map((path) => ({ path, content: "x" })), { path: "a.md", content: "x" }, { path: "a.md", delete: true }, { path: "b.md" }, { path: "c.md", content: "x", delete: true }];
     const err = await submit(ctx, session, { files }).catch((e) => e);
     expect(err).toBeInstanceOf(ToolError);
     for (const p of [...bad.slice(0, 4), "files[4] has an empty path", "agents\\mira.md: use /", "a.md more than once", "b.md: give exactly one", "c.md: give exactly one"]) expect(err.message).toContain(p);
+    // Bare directory names, other cases and odd spellings of them are refused too.
+    const dirs = [{ path: ".github", delete: true }, { path: ".GITHUB/x", content: "x" }, { path: "./.github/x", content: "x" }, { path: "a//b", content: "x" }, { path: "gateway/src/generated", delete: true }];
+    const more = await submit(ctx, session, { files: dirs }).catch((e) => e);
+    expect(more).toBeInstanceOf(ToolError);
+    for (const p of [".github: files under .github/", ".GITHUB/x: files under .github/", "./.github/x: give a plain path", "a//b: give a plain path", "gateway/src/generated: files under gateway/src/generated/"]) expect(more.message).toContain(p);
     expect(gh.proposed).toHaveLength(0);
     expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+  });
+
+  it("submit_change accepts the regenerated network.json, and nothing else generated", async () => {
+    const { ctx, session, gh } = await building();
+    const err = await submit(ctx, session, { files: [{ path: "gateway/src/generated/network.json", content: "{}" }, { path: "gateway/src/generated/other.json", content: "{}" }] }).catch((e) => e);
+    expect(err.message).not.toContain("network.json");
+    expect(err.message).toContain("gateway/src/generated/other.json: files under gateway/src/generated/");
+    expect(await submit(ctx, session, { files: [...INPUT.files, { path: "gateway/src/generated/network.json", content: "{}" }] })).toContain("/pull/1");
+    expect(gh.proposed[0][1].files.map((f: any) => f.path)).toEqual(["agents/mira.md", "gateway/src/generated/network.json"]);
   });
 
   it("submit_change checks the title and body", async () => {
@@ -313,11 +370,17 @@ describe("submit_change", () => {
     expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
   });
 
-  it("dry run doesn't open a PR", async () => {
-    const { ctx, session, gh } = await building(true);
+  it("dry run doesn't open a PR, and closes the change so the task ends done", async () => {
+    const { ctx, fakes, session, gh } = await building(true);
     expect(await submit(ctx, session)).toMatch(/^DRY RUN: would open a PR for C-1/);
     expect(gh.proposed).toHaveLength(0);
-    expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+    expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "closed", closed_reason: "dry run" });
+    fakes.sessions[session] = { id: session, status: "idle", agent: { id: "agent_mechanic" }, stop_reason: { type: "end_turn" } };
+    fakes.events[session] = [];
+    await processSession(ctx, session);
+    const task = (await ctx.db.sessionTask(session))!;
+    expect((await ctx.db.getTask(task.id))?.status).toBe("done");
+    expect(fakes.calls.filter((c) => c.method === "createSession" && (c.args[0] as any).agentId === "agent_ada")).toHaveLength(0);
   });
 
   it("proposeChange makes one commit through the Git data API", async () => {
@@ -363,17 +426,23 @@ describe("mechanic tasks that end without a PR", () => {
     handleTool(ctx, "ada", "sesn_ada", "assign_task", {
       agent, title: "Retry C-1", objective: "Finish the change", output: "A PR", done_when: "submit_change succeeded", effort: "small", follows_up,
     });
-  /** C-1 approved, its mechanic session ended without submitting. */
-  async function blocked() {
+  /** C-1 approved, its mechanic task running. */
+  async function approved(change_type = "wording") {
     const gh = fakeGitHub();
     const { ctx, fakes } = loopCtx(undefined, { dryRun: false, github: async () => gh as any });
     await decided(ctx, "mira", 10);
-    const out = await propose(ctx, "mira", { ...PAYLOAD, evidence: ["D-1", "D-2"] });
+    const out = await propose(ctx, "mira", { ...PAYLOAD, change_type, evidence: ["D-1", "D-2"] });
     await approve(ctx, out.match(/D-\d+/)![0]);
     const task = (await ctx.db.openTasks("mechanic"))[0];
-    await end(ctx, fakes, task.session_id!);
     return { ctx, fakes, task, gh };
   }
+  /** C-1 approved, its mechanic session ended without submitting. */
+  async function blocked(change_type = "wording") {
+    const r = await approved(change_type);
+    await end(r.ctx, r.fakes, r.task.session_id!);
+    return r;
+  }
+  const mechanicSessions = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_mechanic").map((c: any) => c.args[0]);
   const wakes = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_ada");
 
   it("a mechanic task that ends without submitting is blocked", async () => {
@@ -383,6 +452,50 @@ describe("mechanic tasks that end without a PR", () => {
     expect(audit.results[0].detail).toContain("C-1: no change submitted");
     expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
     expect(wakes(fakes).length).toBeGreaterThan(0);
+  });
+
+  it("a mechanic session that runs out of budget or is ended is blocked like one that ends its turn", async () => {
+    const endings: [object, string][] = [
+      [{ status: "idle", stop_reason: { type: "budget_reached" } }, "C-1: no change submitted (budget reached)"],
+      [{ status: "terminated" }, "C-1: no change submitted (session ended)"],
+    ];
+    for (const [session, blocker] of endings) {
+      const { ctx, fakes, task } = await approved();
+      const sid = task.session_id!;
+      fakes.sessions[sid] = { id: sid, agent: { id: "agent_mechanic" }, ...session };
+      fakes.events[sid] = [];
+      await processSession(ctx, sid);
+      expect((await ctx.db.getTask(task.id))?.status).toBe("blocked");
+      const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
+      expect(audit.results[0].detail).toContain(blocker);
+      expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+      expect(wakes(fakes).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("a change follow-up gets the change's budget and tier, not Ada's effort", async () => {
+    const small = await blocked();
+    await follow(small.ctx, "mechanic", small.task.id);
+    expect(mechanicSessions(small.fakes).at(-1)).toMatchObject({ budgetCents: 100 });
+    expect(mechanicSessions(small.fakes).at(-1).model).toBeUndefined();
+    expect(mechanicSessions(small.fakes).at(-1).text).toContain("$1.00");
+
+    const large = await blocked("tool");
+    await follow(large.ctx, "mechanic", large.task.id);
+    expect(mechanicSessions(large.fakes).at(-1)).toMatchObject({ budgetCents: 500, model: NETWORK.model_tiers!.deep });
+  });
+
+  it("a member can't set the mechanic going through Ada", async () => {
+    const { ctx, task, fakes } = await blocked();
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "ada", origin: "telegram", started_by: "member:telegram:Jane Doe" });
+    const before = mechanicSessions(fakes).length;
+    const out = handleTool(ctx, "ada", "sesn_m", "assign_task", {
+      agent: "mechanic", title: "Retry C-1", objective: "Finish", output: "A PR", done_when: "done", effort: "small", follows_up: task.id,
+    });
+    await expect(out).rejects.toBeInstanceOf(ToolDenied);
+    await expect(out).rejects.toThrow("Jane Doe is a member");
+    expect(mechanicSessions(fakes)).toHaveLength(before);
+    expect((await ctx.db.getChange("C-1"))?.task_id).toBe(task.id);
   });
 
   it("a follow-up of a blocked change task takes over the change", async () => {
@@ -535,6 +648,47 @@ describe("measuring changes", () => {
     expect(await ctx.db.getChange(id)).toMatchObject({ state: "closed", closed_reason: "stale" });
   });
 
+  it("a change still building after 7 days is closed", async () => {
+    const { ctx } = loopCtx();
+    const stuck = await change(ctx, "mira", {});
+    const recent = await change(ctx, "mira", {});
+    await sql(ctx, "UPDATE changes SET created_at = ? WHERE id = ?", "2026-10-01 00:00:00", stuck);
+    await sql(ctx, "UPDATE changes SET created_at = ? WHERE id = ?", "2026-10-02 00:00:00", recent);
+    await tickChanges(ctx, new Date("2026-10-07T23:00:00Z"));
+    expect((await ctx.db.getChange(stuck))?.state).toBe("building");
+    await tickChanges(ctx, new Date("2026-10-08T00:00:01Z"));
+    expect(await ctx.db.getChange(stuck)).toMatchObject({ state: "closed", closed_reason: "stuck building" });
+    expect((await ctx.db.getChange(recent))?.state).toBe("building");
+    const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.change_closed'").all();
+    expect(audit.results.map((r: any) => JSON.parse(r.detail))).toEqual([{ change: stuck, reason: "stuck building" }]);
+  });
+
+  it("one stale close failing doesn't stop the others", async () => {
+    const { ctx } = loopCtx();
+    const a = await change(ctx, "mira", { state: "pr_open", pr_opened_at: "2026-09-01 00:00:00" });
+    const b = await change(ctx, "mira", { state: "pr_open", pr_opened_at: "2026-09-01 00:00:00" });
+    const update = ctx.db.updateChange.bind(ctx.db);
+    (ctx.db as any).updateChange = async (id: string, f: any) => {
+      if (id === a) throw new Error("D1 hiccup");
+      return update(id, f);
+    };
+    await tickChanges(ctx, new Date("2026-10-15T00:00:00Z"));
+    expect(await ctx.db.getChange(b)).toMatchObject({ state: "closed", closed_reason: "stale" });
+    const rows = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.changes_error'").all();
+    expect(JSON.parse(rows.results[0].detail)).toEqual({ change: a, error: "D1 hiccup" });
+  });
+
+  it("changes to the network overlap every agent's", async () => {
+    const { ctx } = loopCtx();
+    const mira = await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00" });
+    const net = await change(ctx, "network", { state: "live", live_at: "2026-10-05 00:00:00" });
+    const vera = await change(ctx, "vera", { state: "live", live_at: "2026-10-08 00:00:00" });
+    await tickChanges(ctx, new Date("2026-10-25T00:00:00Z"));
+    expect(JSON.parse((await ctx.db.getChange(mira))!.overlaps!)).toEqual([net]);
+    expect(JSON.parse((await ctx.db.getChange(net))!.overlaps!)).toEqual([mira, vera]);
+    expect(JSON.parse((await ctx.db.getChange(vera))!.overlaps!)).toEqual([net]);
+  });
+
   it("overlapping changes name each other", async () => {
     const { ctx } = loopCtx();
     const a = await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00" });
@@ -575,16 +729,44 @@ describe("measuring changes", () => {
     expect(mira.changes.map((c: any) => c.id)).toEqual([building, recent]);
   });
 
-  it("read_audit lists changes measured in its period, and /status counts open ones", async () => {
+  it("read_audit lists changes measured in its period, and /status lists open ones", async () => {
     const { ctx } = loopCtx();
     await change(ctx, "mira", { state: "measured", measured_at: "2026-10-15 00:00:00", verdict: "better", overlaps: "[]" });
     await change(ctx, "mira", { state: "measured", measured_at: "2026-09-15 00:00:00", verdict: "worse", overlaps: "[]" });
-    await change(ctx, "vera", { state: "pr_open" });
-    await change(ctx, "vera", { state: "live" });
+    await change(ctx, "vera", { state: "pr_open", pr_url: "https://github.com/accordproject/virtual-agent-org/pull/9" });
+    await change(ctx, "network", { state: "live" });
     const out = JSON.parse(await handleTool(ctx, "vera", "sesn_v", "read_audit", { since: "2026-10-01", until: "2026-10-31" }));
     expect(out.changes.map((c: any) => [c.id, c.verdict])).toEqual([["C-1", "better"]]);
     const st = await gatherStatus(ctx);
-    expect(statusPlain(st)).toContain("Changes in flight: 2");
-    expect(statusCards(st).content).toContain("2 changes in flight");
+    const plain = statusPlain(st);
+    expect(plain).toContain("Changes in flight:\n  C-3 Vera · pr_open · https://github.com/accordproject/virtual-agent-org/pull/9\n  C-4 Network · live");
+    const cards = statusCards(st).content;
+    expect(cards).toContain("2 changes in flight");
+    expect(cards).toContain("- C-3 · Vera · pr_open · https://github.com/accordproject/virtual-agent-org/pull/9");
+    expect(cards).toContain("- C-4 · Network · live");
+  });
+
+  it("read_audit lists blocked reports and dismissed findings in its period", async () => {
+    const { ctx } = loopCtx();
+    await ctx.db.addStatus({ agent: "mira", session_id: "s1", done: [], doing: [], blocked: ["No CI on concerto#5"] });
+    await ctx.db.addStatus({ agent: "otto", session_id: "s2", done: ["x"], doing: [], blocked: [] });
+    await ctx.db.addStatus({ agent: "mira", session_id: "s3", done: [], doing: [], blocked: ["Old"] });
+    await sql(ctx, "UPDATE statuses SET created_at = ?", "2026-10-10 09:00:00");
+    await sql(ctx, "UPDATE statuses SET created_at = ? WHERE id = 3", "2026-09-10 09:00:00");
+    const finding = (id: string, outcome: string | null, at: string | null) =>
+      sql(
+        ctx,
+        "INSERT INTO review_findings (id, seq, review_id, target, severity, area, summary, outcome, outcome_note, outcome_at) VALUES (?, 1, 'R-1', 'accordproject/concerto#5', 'nit', 'style', 'Rename x', ?, 'Not our style', ?)",
+        id, outcome, at,
+      );
+    await finding("F-1", "dismissed", "2026-10-12 10:00:00");
+    await finding("F-2", "acted", "2026-10-12 10:00:00");
+    await finding("F-3", "dismissed", "2026-09-12 10:00:00");
+    await finding("F-4", null, null);
+    const out = JSON.parse(await handleTool(ctx, "vera", "sesn_v", "read_audit", { since: "2026-10-01", until: "2026-10-31" }));
+    expect(out.blocked_reports).toEqual([{ id: "status:1", agent: "mira", blockers: ["No CI on concerto#5"], created_at: "2026-10-10 09:00:00" }]);
+    expect(out.dismissed_findings).toEqual([
+      { id: "F-1", target: "accordproject/concerto#5", area: "style", summary: "Rename x", outcome_note: "Not our style" },
+    ]);
   });
 });

@@ -310,6 +310,29 @@ export class Db {
       .then((r) => r.results);
   }
 
+  /** Status reports in [since, until) that listed blockers, cited as status:<id>. */
+  blockedReports(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare("SELECT id, agent, blocked, created_at FROM statuses WHERE created_at >= ? AND created_at < ? AND blocked != '[]' ORDER BY id LIMIT ?")
+      .bind(since, until, limit)
+      .all<{ id: number; agent: string; blocked: string; created_at: string }>()
+      .then((r) =>
+        r.results.map((s) => ({ id: `status:${s.id}`, agent: s.agent, blockers: JSON.parse(s.blocked) as string[], created_at: s.created_at })).filter((s) => s.blockers.length),
+      );
+  }
+
+  /** Review findings dismissed in [since, until). */
+  dismissedFindings(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare(
+        "SELECT id, target, area, summary, outcome_note FROM review_findings " +
+          "WHERE outcome = 'dismissed' AND outcome_at >= ? AND outcome_at < ? ORDER BY seq LIMIT ?",
+      )
+      .bind(since, until, limit)
+      .all<Pick<Finding, "id" | "target" | "area" | "summary" | "outcome_note">>()
+      .then((r) => r.results);
+  }
+
   /** External (built-in and MCP) tool calls, counted by agent, tool and permission. */
   toolCalls(since: string, until: string) {
     return this.db
@@ -405,6 +428,14 @@ export class Db {
     return row?.n ?? 0;
   }
 
+  /** The newest decision of `kind` for `target` requested since `since`, whatever its status. */
+  latestDecisionFor(kind: string, target: string, since: string) {
+    return this.db
+      .prepare("SELECT * FROM decisions WHERE kind = ? AND target = ? AND created_at >= ? ORDER BY seq DESC LIMIT 1")
+      .bind(kind, target, since)
+      .first<Decision>();
+  }
+
   /** Moves an open decision to approved/rejected. Returns false if it was not open. */
   async decide(id: string, status: "approved" | "rejected", note?: string): Promise<boolean> {
     const r = await this.db
@@ -495,11 +526,14 @@ export class Db {
     return res.results;
   }
 
-  /** Ids of other changes to `agent` that went live in [from, to]. */
+  /**
+   * Ids of other changes that went live in [from, to] and share `agent`'s figures: its own
+   * and the network's, or every agent's when `agent` is the network.
+   */
   async changesLiveBetween(agent: string, exceptId: string, from: string, to: string): Promise<string[]> {
     const res = await this.db
-      .prepare("SELECT id FROM changes WHERE agent = ? AND id != ? AND live_at >= ? AND live_at <= ? ORDER BY seq")
-      .bind(agent, exceptId, from, to)
+      .prepare("SELECT id FROM changes WHERE (? = 'network' OR agent IN (?, 'network')) AND id != ? AND live_at >= ? AND live_at <= ? ORDER BY seq")
+      .bind(agent, agent, exceptId, from, to)
       .all<{ id: string }>();
     return res.results.map((r) => r.id);
   }

@@ -816,10 +816,12 @@ export function validateAction(ctx: Ctx, kind: string, target: string, payload: 
   return spec.validate(ctx, typeof target === "string" ? target : "", (payload ?? {}) as Payload);
 }
 
-/** The risk a checked request carries at least: the kind's floor, raised by the request itself. */
+/**
+ * The risk a checked request carries at least: the kind's floor, raised by the request
+ * itself. The kind's own rule applies even when it is carried out by hand.
+ */
 export function actionRisk(ctx: Ctx, kind: string, n: Normalised): Risk {
-  const spec = specFor(ctx, kind);
-  const own = "error" in spec ? "low" : (spec.risk?.(n) ?? "low");
+  const own = ACTIONS[kind]?.risk?.(n) ?? "low";
   return maxRisk(toRisk(ctx.network.action_kinds[kind]?.risk), own);
 }
 

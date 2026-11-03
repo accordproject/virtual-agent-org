@@ -3,7 +3,7 @@
 
 import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, startSession } from "./agents";
-import { missingEvidence, proposalGuard, submitChange } from "./changes";
+import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
@@ -267,7 +267,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   }
   // Open-ended: include rows written this very second, which "now" to the second would cut off.
   const until = input.until ? end : "9999-12-31 23:59:59";
-  const [usage, daily, decisions, denials, refusals, toolCalls, changes] = await Promise.all([
+  const [usage, daily, decisions, denials, refusals, toolCalls, changes, blocked, dismissed] = await Promise.all([
     ctx.db.sessionUsage(since, until),
     ctx.db.dailySpend(since, until),
     ctx.db.decisionsBetween(since, until),
@@ -275,6 +275,8 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     ctx.db.refusals(since, until),
     ctx.db.toolCalls(since, until),
     ctx.db.changesMeasured(since, until),
+    ctx.db.blockedReports(since, until),
+    ctx.db.dismissedFindings(since, until),
   ]);
 
   type Totals = { sessions: number; cost_cents: number } & Record<(typeof TOKEN_FIELDS)[number], number>;
@@ -304,7 +306,9 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected. Tool confirmations are excluded.",
       "refusals: custom tool calls the gateway refused for bad input. Cite a refusal or denial as audit:<id>.",
       "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
-      "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent that went live within those windows.",
+      "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent, or to the network, that went live within those windows.",
+      "blocked_reports: status reports that listed blockers. Cite one by its id (status:<id>).",
+      "dismissed_findings: Mira's review findings dismissed in this period, with the note saying why. Cite one by its id (F-<n>) in the text; it isn't an evidence id.",
     ],
     agents,
     daily_spend: daily,
@@ -316,6 +320,8 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     refusals,
     tool_calls: toolCalls,
     changes: changes.map(changeView),
+    blocked_reports: blocked,
+    dismissed_findings: dismissed,
   });
 }
 
@@ -363,6 +369,8 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     const refusal = await proposalGuard(ctx, n.target);
     if (refusal) throw new ToolError(`Not queued. ${refusal}`);
     const gone = await missingEvidence(ctx, n.payload.evidence as string[]);
+    const repeat = gone.length ? null : await repeatEvidence(ctx, n.target, n.payload);
+    if (repeat) gone.push(repeat);
     if (gone.length) throw new ToolError(`Not queued. Fix the request and call again:\n- ${gone.join("\n- ")}`);
   }
   const d = await ctx.db.createDecision({
@@ -521,9 +529,15 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   if (change && (earlier!.status !== "blocked" || change.state !== "building")) {
     throw new ToolError(`${change.id} is ${change.state} and ${earlier!.id} is ${earlier!.status}: there is nothing to follow up.`);
   }
-  const { cents, calls } = EFFORT[effort];
   const startedBy = await sessionStartedBy(ctx, parentSessionId);
   const member = memberOf(startedBy);
+  // Rule 5: a member may ask about the network, never set changing it going.
+  if (member && agent === "mechanic") {
+    throw new ToolDenied(`${member.name} is a member: they can't set the mechanic going. Answer them, and follow up the change from your own check-in.`);
+  }
+  // A change task keeps the change's own budget and tier, whatever effort Ada names.
+  const { calls } = EFFORT[effort];
+  const { cents, model } = change ? changeBudget(ctx, change.change_type) : { cents: EFFORT[effort].cents, model: undefined };
 
   const brief = [
     `Objective: ${objective}`,
@@ -557,7 +571,7 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
       "",
       "When finished, call report_status. Queue any critical action with request_action and continue.",
     ].join("\n");
-    const sessionId = await startSession(ctx, agent, text, "task", startedBy, { taskId: task.id, budgetCents: cents });
+    const sessionId = await startSession(ctx, agent, text, "task", startedBy, { taskId: task.id, budgetCents: cents, ...(model ? { model } : {}) });
     await ctx.db.setTask(task.id, "running", sessionId);
     return `Assigned ${task.id} to ${cap(agent)} (${effort} effort, $${(cents / 100).toFixed(2)} cap).`;
   } catch (e) {
