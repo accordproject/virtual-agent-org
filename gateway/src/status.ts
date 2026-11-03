@@ -23,18 +23,21 @@ export interface NetworkStatus {
   agents: AgentStatusRow[];
   monthCents: number;
   creditUsd: number;
+  /** Spec changes building, in review or live and not yet measured. */
+  openChanges?: number;
 }
 
 export async function gatherStatus(ctx: Ctx): Promise<NetworkStatus> {
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().replace("T", " ").slice(0, 19);
   const monthStart = new Date().toISOString().slice(0, 8) + "01 00:00:00";
-  const [controls, statuses, tasks, open, spendWeek, spendMonth] = await Promise.all([
+  const [controls, statuses, tasks, open, spendWeek, spendMonth, changes] = await Promise.all([
     ctx.db.allAgentStatuses(),
     ctx.db.latestStatuses(),
     ctx.db.openTasks(),
     ctx.db.listDecisions({ status: "open" }),
     ctx.db.spendByAgent(weekAgo),
     ctx.db.spendByAgent(monthStart),
+    ctx.db.changesIn(["building", "pr_open", "live"]),
   ]);
   const agents = Object.values(ctx.network.agents)
     .filter((a) => a.phase <= ctx.network.current_phase)
@@ -58,6 +61,7 @@ export async function gatherStatus(ctx: Ctx): Promise<NetworkStatus> {
     agents,
     monthCents: Object.values(spendMonth).reduce((x, y) => x + y, 0),
     creditUsd: ctx.network.monthly_credit_usd,
+    openChanges: changes.length,
   };
 }
 
@@ -72,6 +76,7 @@ export function statusPlain(s: NetworkStatus): string {
         (a.last ? `\n  last report ${a.last.at}: ${a.last.line}` : ""),
     );
   }
+  if (s.openChanges) out.push(`Changes in flight: ${s.openChanges}`);
   out.push(`Month to date ${usd(s.monthCents)} of $${s.creditUsd} credits`);
   return out.join("\n");
 }
@@ -105,7 +110,7 @@ export function statusCards(s: NetworkStatus): DiscordPayload {
   const pct = s.creditUsd ? Math.round((s.monthCents / 100 / s.creditUsd) * 100) : 0;
   const content = [
     `### Agent network · Phase ${s.phase}`,
-    `-# ${s.dryRun ? "DRY RUN: approved actions are logged, not executed" : "Live: approved actions execute"} · ${usd(s.monthCents)} of $${s.creditUsd} credits this month (${pct}%)`,
+    `-# ${s.dryRun ? "DRY RUN: approved actions are logged, not executed" : "Live: approved actions execute"} · ${usd(s.monthCents)} of $${s.creditUsd} credits this month (${pct}%)${s.openChanges ? ` · ${plural(s.openChanges, "change")} in flight` : ""}`,
   ].join("\n");
   // Discord allows 6,000 characters across a message's cards and 4,096 in one.
   const budget = Math.floor(6000 / Math.max(s.agents.length, 1));

@@ -4,7 +4,7 @@
 import { safeJson, type ExecResult, type Normalised, type Payload } from "./actions";
 import { AgentUnavailable, startSession } from "./agents";
 import type { Ctx } from "./context";
-import type { Change, Decision } from "./db";
+import { NOT_JUDGEMENT, type Change, type Decision } from "./db";
 import { parseTarget } from "./github";
 import type { Risk } from "./risk";
 import { ToolError } from "./tools";
@@ -17,7 +17,7 @@ export const MEASURES = ["approval_rate", "repeat_rejections", "tool_refusals", 
 export const EVIDENCE_ID = /^(D-\d+|T-\d+|audit:\d+|status:\d+)$/;
 
 /** Kinds that say nothing about an agent's judgement, so don't count as evidence. */
-const NOT_EVIDENCE = ["tool.confirm", "github.review", "github.approve_ci"];
+const NOT_EVIDENCE = NOT_JUDGEMENT;
 const MIN_DECIDED = 10;
 const MIN_DAYS = 14;
 const DAY = 86_400_000;
@@ -234,4 +234,119 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
   await ctx.db.updateChange(change.id, { state: "pr_open", pr_url: pr.html_url, pr_opened_at: at });
   await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.change_pr_opened", detail: { change: change.id, decision: change.decision_id, pr: pr.html_url } });
   return `Opened ${pr.html_url} for ${change.id}. The owner reviews it; call report_status and stop.`;
+}
+
+// ---- measuring -------------------------------------------------------------
+
+export type Window = { value: number | null; cases: number };
+export type Verdict = NonNullable<Change["verdict"]>;
+
+const WINDOW_DAYS = 14;
+/** too_little_data is tried again weekly, until 28 days after the after-window ends. */
+const RETRY_DAYS = 7;
+const LAST_DAY = WINDOW_DAYS + 28;
+const MIN_CASES = 5;
+const RATE_STEP = 0.05;
+const COST_STEP = 0.15;
+/** Rates such as 0.5 - 0.45 fall a hair short of 0.05 in floating point. */
+const EPS = 1e-9;
+
+const d1 = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+const msOf = (t: string) => Date.parse(`${t.replace(" ", "T")}Z`);
+
+/**
+ * Compares a change's measure before and after it went live. Rates move by 0.05 to count;
+ * cost per approval by 15%, and a cheaper result is still worse if the approval rate fell
+ * by 0.05. Only the approval rate is better higher.
+ */
+export function verdictFor(measure: string, before: Window, after: Window, approval?: { before: Window; after: Window }): Verdict {
+  if (before.cases < MIN_CASES || after.cases < MIN_CASES || before.value === null || after.value === null) return "too_little_data";
+  if (measure === "cost_per_approval") {
+    const a = approval;
+    if (a && a.before.value !== null && a.after.value !== null && a.before.value - a.after.value >= RATE_STEP - EPS) return "worse";
+    if (before.value === 0) return after.value > 0 ? "worse" : "same";
+    const rel = (after.value - before.value) / before.value;
+    return rel <= -COST_STEP + EPS ? "better" : rel >= COST_STEP - EPS ? "worse" : "same";
+  }
+  const gain = measure === "approval_rate" ? after.value - before.value : before.value - after.value;
+  return gain >= RATE_STEP - EPS ? "better" : gain <= -RATE_STEP + EPS ? "worse" : "same";
+}
+
+/**
+ * The change's measure for the `days` before and after it went live, the verdict, and the
+ * other changes to the same agent that went live within those windows.
+ */
+export async function measureChange(ctx: Ctx, c: Change, days = WINDOW_DAYS) {
+  const live = msOf(c.live_at!);
+  const span = days * DAY;
+  const [from, at, to] = [d1(live - span), d1(live), d1(live + span)];
+  const m = { agent: c.agent, measure: c.measure, ...(c.tool ? { tool: c.tool } : {}), kinds: safeKinds(c.kinds) };
+  const before = await ctx.db.measureWindow(m, from, at);
+  const after = await ctx.db.measureWindow(m, at, to);
+  let approval: { before: Window; after: Window } | undefined;
+  if (c.measure === "cost_per_approval") {
+    const a = { ...m, measure: "approval_rate" };
+    approval = { before: await ctx.db.measureWindow(a, from, at), after: await ctx.db.measureWindow(a, at, to) };
+  }
+  const overlaps = await ctx.db.changesLiveBetween(c.agent, c.id, from, to);
+  return { before, after, verdict: verdictFor(c.measure, before, after, approval), overlaps };
+}
+
+function safeKinds(raw: string): string[] {
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The cron's pass over changes: closes those whose PR has been open past stale_days, and
+ * measures those live for 14 days. Results are stored for get_status; nothing is sent.
+ * Never throws.
+ */
+export async function tickChanges(ctx: Ctx, now = new Date()): Promise<void> {
+  const t = now.getTime();
+  const fail = (e: unknown, change?: string) =>
+    ctx.db.audit({ event_type: "gateway.changes_error", detail: { ...(change ? { change } : {}), error: e instanceof Error ? e.message : String(e) } }).catch(() => {});
+  try {
+    const staleDays = ctx.network.self_improvement?.stale_days ?? 30;
+    for (const c of await ctx.db.changesIn(["pr_open"])) {
+      if (!c.pr_opened_at || t - msOf(c.pr_opened_at) < staleDays * DAY) continue;
+      await ctx.db.updateChange(c.id, { state: "closed", closed_reason: "stale" });
+      await ctx.db.audit({ agent: c.agent, event_type: "gateway.change_closed", detail: { change: c.id, reason: "stale", pr: c.pr_url } });
+    }
+    for (const c of await ctx.db.changesIn(["live"])) {
+      if (!c.live_at) continue;
+      const age = t - msOf(c.live_at);
+      if (age < WINDOW_DAYS * DAY) continue;
+      if (c.measured_at && t - msOf(c.measured_at) < RETRY_DAYS * DAY) continue;
+      try {
+        // A retry widens both windows to all the time since going live, so it can find more cases.
+        const days = c.measured_at ? Math.min(age / DAY, LAST_DAY) : WINDOW_DAYS;
+        const r = await measureChange(ctx, c, days);
+        const short = r.verdict === "too_little_data";
+        const state = !short ? "measured" : age >= LAST_DAY * DAY ? "closed" : "live";
+        await ctx.db.updateChange(c.id, {
+          state,
+          measured_at: d1(t),
+          before: r.before.value,
+          after: r.after.value,
+          before_cases: r.before.cases,
+          after_cases: r.after.cases,
+          verdict: r.verdict,
+          overlaps: JSON.stringify(r.overlaps),
+          ...(state === "closed" ? { closed_reason: "too little data" } : {}),
+        });
+        if (state !== "live") {
+          await ctx.db.audit({ agent: c.agent, event_type: `gateway.change_${state}`, detail: { change: c.id, verdict: r.verdict, before: r.before, after: r.after, overlaps: r.overlaps } });
+        }
+      } catch (e) {
+        await fail(e, c.id);
+      }
+    }
+  } catch (e) {
+    await fail(e);
+  }
 }

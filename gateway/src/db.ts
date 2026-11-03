@@ -5,6 +5,9 @@ import type { Tokens } from "./managed";
 export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "failed";
 export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 
+/** Decision kinds that say nothing about an agent's judgement, left out of approval measures. */
+export const NOT_JUDGEMENT = ["tool.confirm", "github.review", "github.approve_ci"];
+
 export interface Decision {
   id: string;
   seq: number;
@@ -490,6 +493,93 @@ export class Db {
       .bind(...states)
       .all<Change>();
     return res.results;
+  }
+
+  /** Ids of other changes to `agent` that went live in [from, to]. */
+  async changesLiveBetween(agent: string, exceptId: string, from: string, to: string): Promise<string[]> {
+    const res = await this.db
+      .prepare("SELECT id FROM changes WHERE agent = ? AND id != ? AND live_at >= ? AND live_at <= ? ORDER BY seq")
+      .bind(agent, exceptId, from, to)
+      .all<{ id: string }>();
+    return res.results.map((r) => r.id);
+  }
+
+  /** Changes still open, plus those measured or closed since `since`; one agent's, or all. */
+  async recentChanges(since: string, agent?: string): Promise<Change[]> {
+    const res = await this.db
+      .prepare(
+        "SELECT * FROM changes WHERE (state NOT IN ('measured', 'closed') OR COALESCE(measured_at, updated_at) >= ?)" +
+          (agent ? " AND agent = ?" : "") + " ORDER BY seq",
+      )
+      .bind(...(agent ? [since, agent] : [since]))
+      .all<Change>();
+    return res.results;
+  }
+
+  /** Changes measured in [since, until). */
+  async changesMeasured(since: string, until: string): Promise<Change[]> {
+    const res = await this.db
+      .prepare("SELECT * FROM changes WHERE measured_at >= ? AND measured_at < ? ORDER BY seq")
+      .bind(since, until)
+      .all<Change>();
+    return res.results;
+  }
+
+  /**
+   * One side of a change's measure over [since, until): the figure, and how many cases it
+   * rests on. `agent: "network"` counts every agent. Decisions count by when they were decided.
+   */
+  async measureWindow(
+    m: { agent: string; measure: string; tool?: string; kinds: string[] },
+    since: string,
+    until: string,
+  ): Promise<{ value: number | null; cases: number }> {
+    const agent = m.agent === "network" ? null : m.agent;
+    const ratio = (n: number, cases: number) => ({ value: cases ? n / cases : null, cases });
+
+    if (m.measure === "tool_refusals") {
+      const row = await this.db
+        .prepare(
+          "SELECT SUM(event_type = 'agent.custom_tool_use') AS calls, SUM(event_type IN ('gateway.tool_refused', 'gateway.tool_denied')) AS refused " +
+            "FROM audit WHERE tool = ? AND ts >= ? AND ts < ?" + (agent ? " AND agent = ?" : ""),
+        )
+        .bind(m.tool ?? "", since, until, ...(agent ? [agent] : []))
+        .first<{ calls: number | null; refused: number | null }>();
+      return ratio(row?.refused ?? 0, row?.calls ?? 0);
+    }
+
+    const where = ["status IN ('approved', 'executed', 'failed', 'rejected')", "decided_at >= ?", "decided_at < ?"];
+    const args: unknown[] = [since, until];
+    if (agent) {
+      where.push("agent = ?");
+      args.push(agent);
+    }
+    if (m.measure === "repeat_rejections") {
+      if (!m.kinds.length) return { value: null, cases: 0 };
+      where.push(`kind IN (${m.kinds.map(() => "?").join(",")})`);
+      args.push(...m.kinds);
+    } else {
+      where.push(`kind NOT IN (${NOT_JUDGEMENT.map(() => "?").join(",")})`);
+      args.push(...NOT_JUDGEMENT);
+    }
+    const d = await this.db
+      .prepare(
+        "SELECT COUNT(*) AS decided, SUM(status IN ('approved', 'executed', 'failed')) AS approved, SUM(status = 'rejected') AS rejected " +
+          `FROM decisions WHERE ${where.join(" AND ")}`,
+      )
+      .bind(...args)
+      .first<{ decided: number; approved: number | null; rejected: number | null }>();
+    const decided = d?.decided ?? 0;
+    const approved = d?.approved ?? 0;
+    if (m.measure === "approval_rate") return ratio(approved, decided);
+    if (m.measure === "repeat_rejections") return ratio(d?.rejected ?? 0, decided);
+
+    // cost_per_approval: list cost of the sessions started in the window per approved decision.
+    const cost = await this.db
+      .prepare("SELECT SUM(cost_cents) AS cents FROM sessions WHERE created_at >= ? AND created_at < ?" + (agent ? " AND agent = ?" : ""))
+      .bind(since, until, ...(agent ? [agent] : []))
+      .first<{ cents: number | null }>();
+    return ratio(cost?.cents ?? 0, approved);
   }
 
   /** The task a session was started for, if any. */

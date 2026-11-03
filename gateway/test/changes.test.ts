@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ActionInvalid, validateAction } from "../src/actions";
-import { changeBrief } from "../src/changes";
+import { changeBrief, tickChanges, verdictFor } from "../src/changes";
 import type { Ctx } from "../src/context";
 import { approve } from "../src/controls";
 import { GitHub } from "../src/github";
 import { handleTool, ToolDenied, ToolError } from "../src/tools";
 import { processSession } from "../src/sessions";
+import { gatherStatus, statusCards, statusPlain } from "../src/status";
 import { DEPLOYED, NETWORK, fakeGitHub, makeTestCtx } from "./helpers";
 
 describe("changes", () => {
@@ -426,5 +427,164 @@ describe("mechanic tasks that end without a PR", () => {
     expect(wakes(fakes).length).toBe(before + 1);
     expect(JSON.stringify(wakes(fakes).at(-1).args[0])).toContain(next.id);
     await expect(follow(ctx, "mechanic", next.id)).rejects.toThrow(/closed/);
+  });
+});
+
+describe("measuring changes", () => {
+  const sql = (ctx: Ctx, q: string, ...args: unknown[]) => (ctx.db as any).db.prepare(q).bind(...args).run();
+  const w = (value: number | null, cases = 10) => ({ value, cases });
+
+  /** A decision for `agent` decided with `status` at `at` (D1 time). */
+  async function decidedOn(ctx: Ctx, agent: string, at: string, status: string, kind = "github.comment") {
+    const d = await ctx.db.createDecision({ agent, kind, target: "accordproject/concerto#1", summary: "s", rationale: "r", risk: "low" });
+    await sql(ctx, "UPDATE decisions SET status = ?, decided_at = ? WHERE id = ?", status, at, d.id);
+  }
+  /** A change in `state` with its own timestamps. */
+  async function change(ctx: Ctx, agent: string, fields: Record<string, unknown>, measure = "approval_rate") {
+    const c = await ctx.db.createChange({ agent, decision_id: "D-99", change_type: "wording", measure, kinds: ["github.comment"] });
+    await ctx.db.updateChange(c.id, fields);
+    return c.id;
+  }
+
+  it("verdictFor compares rates by 0.05 and cost by 15%", () => {
+    const cases: [string, ReturnType<typeof w>, ReturnType<typeof w>, string][] = [
+      ["approval_rate", w(0.5), w(0.55), "better"],
+      ["approval_rate", w(0.5), w(0.54), "same"],
+      ["approval_rate", w(0.5), w(0.45), "worse"],
+      ["approval_rate", w(0.5), w(0.46), "same"],
+      ["repeat_rejections", w(0.5), w(0.45), "better"],
+      ["repeat_rejections", w(0.5), w(0.55), "worse"],
+      ["repeat_rejections", w(0.5), w(0.52), "same"],
+      ["tool_refusals", w(0.2), w(0.1), "better"],
+      ["tool_refusals", w(0.1), w(0.2), "worse"],
+      ["cost_per_approval", w(100), w(85), "better"],
+      ["cost_per_approval", w(100), w(86), "same"],
+      ["cost_per_approval", w(100), w(115), "worse"],
+      ["cost_per_approval", w(100), w(114), "same"],
+      ["approval_rate", w(0.5, 4), w(0.9), "too_little_data"],
+      ["approval_rate", w(0.5), w(0.9, 4), "too_little_data"],
+      ["tool_refusals", w(null, 0), w(0.1), "too_little_data"],
+    ];
+    for (const [m, b, a, v] of cases) expect([m, b.value, a.value, verdictFor(m, b, a)]).toEqual([m, b.value, a.value, v]);
+    // Cheaper is worse if fewer decisions are approved.
+    expect(verdictFor("cost_per_approval", w(100), w(80), { before: w(0.6), after: w(0.55) })).toBe("worse");
+    expect(verdictFor("cost_per_approval", w(100), w(80), { before: w(0.6), after: w(0.56) })).toBe("better");
+  });
+
+  it("tickChanges measures a change 14 days after it went live", async () => {
+    const { ctx } = loopCtx();
+    const id = await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00" });
+    for (let i = 0; i < 6; i++) await decidedOn(ctx, "mira", "2026-09-20 10:00:00", i < 3 ? "approved" : "rejected");
+    for (let i = 0; i < 6; i++) await decidedOn(ctx, "mira", "2026-10-05 10:00:00", i < 5 ? "executed" : "rejected");
+    // Not counted: other agents, tool confirmations, and anything outside the windows.
+    await decidedOn(ctx, "vera", "2026-10-05 10:00:00", "rejected");
+    await decidedOn(ctx, "mira", "2026-10-05 10:00:00", "rejected", "tool.confirm");
+    await decidedOn(ctx, "mira", "2026-09-10 10:00:00", "rejected");
+
+    await tickChanges(ctx, new Date("2026-10-14T23:00:00Z"));
+    expect((await ctx.db.getChange(id))?.state).toBe("live");
+    await tickChanges(ctx, new Date("2026-10-15T00:00:01Z"));
+    const c = (await ctx.db.getChange(id))!;
+    expect(c).toMatchObject({ state: "measured", before: 0.5, before_cases: 6, after_cases: 6, verdict: "better", measured_at: "2026-10-15 00:00:01" });
+    expect(c.after).toBeCloseTo(5 / 6);
+    expect(JSON.parse(c.overlaps!)).toEqual([]);
+  });
+
+  it("measures refused calls to a tool and cost per approval", async () => {
+    const { ctx } = loopCtx();
+    const tool = await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00", tool: "request_action" }, "tool_refusals");
+    const cost = await change(ctx, "vera", { state: "live", live_at: "2026-10-01 00:00:00" }, "cost_per_approval");
+    const call = (at: string, event_type: string, t = "request_action") =>
+      sql(ctx, "INSERT INTO audit (ts, agent, event_type, tool) VALUES (?, 'mira', ?, ?)", at, event_type, t);
+    for (let i = 0; i < 5; i++) await call("2026-09-25 10:00:00", "agent.custom_tool_use");
+    await call("2026-09-25 10:00:00", "gateway.tool_refused");
+    await call("2026-09-25 10:00:00", "gateway.tool_denied");
+    await call("2026-09-25 10:00:00", "gateway.tool_refused", "label_pr");
+    for (let i = 0; i < 5; i++) await call("2026-10-03 10:00:00", "agent.custom_tool_use");
+
+    for (let i = 0; i < 5; i++) await decidedOn(ctx, "vera", "2026-09-25 10:00:00", "approved");
+    for (let i = 0; i < 5; i++) await decidedOn(ctx, "vera", "2026-10-03 10:00:00", "approved");
+    await sql(ctx, "INSERT INTO sessions (id, agent, origin, cost_cents, created_at) VALUES ('s1', 'vera', 'task', 500, '2026-09-25 09:00:00')");
+    await sql(ctx, "INSERT INTO sessions (id, agent, origin, cost_cents, created_at) VALUES ('s2', 'vera', 'task', 300, '2026-10-03 09:00:00')");
+
+    await tickChanges(ctx, new Date("2026-10-16T00:00:00Z"));
+    expect(await ctx.db.getChange(tool)).toMatchObject({ state: "measured", before: 0.4, after: 0, before_cases: 5, after_cases: 5, verdict: "better" });
+    expect(await ctx.db.getChange(cost)).toMatchObject({ state: "measured", before: 100, after: 60, before_cases: 5, after_cases: 5, verdict: "better" });
+  });
+
+  it("too little data stays live, is tried again weekly, then closes", async () => {
+    const { ctx } = loopCtx();
+    const id = await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00" });
+    for (let i = 0; i < 2; i++) await decidedOn(ctx, "mira", "2026-09-25 10:00:00", "approved");
+    await tickChanges(ctx, new Date("2026-10-15T01:00:00Z"));
+    expect(await ctx.db.getChange(id)).toMatchObject({ state: "live", verdict: "too_little_data", before_cases: 2, after_cases: 0, measured_at: "2026-10-15 01:00:00" });
+    await tickChanges(ctx, new Date("2026-10-21T01:00:00Z"));
+    expect((await ctx.db.getChange(id))?.measured_at).toBe("2026-10-15 01:00:00");
+    await tickChanges(ctx, new Date("2026-10-22T01:00:00Z"));
+    expect(await ctx.db.getChange(id)).toMatchObject({ state: "live", measured_at: "2026-10-22 01:00:00" });
+    await tickChanges(ctx, new Date("2026-11-12T01:00:00Z"));
+    expect(await ctx.db.getChange(id)).toMatchObject({ state: "closed", closed_reason: "too little data", verdict: "too_little_data" });
+  });
+
+  it("a stale PR closes its change after 30 days", async () => {
+    const { ctx } = loopCtx();
+    const id = await change(ctx, "mira", { state: "pr_open", pr_opened_at: "2026-09-01 00:00:00", pr_url: "https://github.com/x/y/pull/1" });
+    await tickChanges(ctx, new Date("2026-09-30T23:00:00Z"));
+    expect((await ctx.db.getChange(id))?.state).toBe("pr_open");
+    await tickChanges(ctx, new Date("2026-10-01T00:00:01Z"));
+    expect(await ctx.db.getChange(id)).toMatchObject({ state: "closed", closed_reason: "stale" });
+  });
+
+  it("overlapping changes name each other", async () => {
+    const { ctx } = loopCtx();
+    const a = await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00" });
+    const b = await change(ctx, "mira", { state: "live", live_at: "2026-10-10 00:00:00" });
+    const later = await change(ctx, "mira", { state: "live", live_at: "2026-11-01 00:00:00" });
+    await change(ctx, "vera", { state: "live", live_at: "2026-10-05 00:00:00" });
+    await tickChanges(ctx, new Date("2026-10-25T00:00:00Z"));
+    expect(JSON.parse((await ctx.db.getChange(a))!.overlaps!)).toEqual([b]);
+    expect(JSON.parse((await ctx.db.getChange(b))!.overlaps!)).toEqual([a]);
+    expect((await ctx.db.getChange(later))?.state).toBe("live");
+  });
+
+  it("tickChanges never throws", async () => {
+    const { ctx } = loopCtx();
+    await change(ctx, "mira", { state: "live", live_at: "2026-10-01 00:00:00" });
+    (ctx.db as any).measureWindow = async () => {
+      throw new Error("D1 down");
+    };
+    await expect(tickChanges(ctx, new Date("2026-10-20T00:00:00Z"))).resolves.toBeUndefined();
+    const rows = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.changes_error'").all();
+    expect(rows.results[0].detail).toContain("D1 down");
+  });
+
+  it("get_status shows open and recent changes", async () => {
+    const { ctx } = loopCtx();
+    const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString().slice(0, 19).replace("T", " ");
+    const building = await change(ctx, "mira", {});
+    const recent = await change(ctx, "mira", { state: "measured", measured_at: ago(3), before: 0.5, after: 0.6, verdict: "better", overlaps: "[]" });
+    await change(ctx, "mira", { state: "measured", measured_at: ago(20), verdict: "same", overlaps: "[]" });
+    const closed = await change(ctx, "vera", { state: "closed", closed_reason: "stale" });
+    const old = await change(ctx, "vera", { state: "closed", closed_reason: "stale" });
+    await sql(ctx, "UPDATE changes SET updated_at = ? WHERE id = ?", ago(30), old);
+
+    const st = JSON.parse(await handleTool(ctx, "ada", "sesn_x", "get_status", {}));
+    expect(st.changes.map((c: any) => c.id)).toEqual([building, recent, closed]);
+    expect(st.changes[1]).toMatchObject({ agent: "mira", type: "wording", state: "measured", verdict: "better", before: 0.5, after: 0.6, overlaps: [] });
+    const mira = JSON.parse(await handleTool(ctx, "ada", "sesn_x", "get_status", { agent: "mira" }));
+    expect(mira.changes.map((c: any) => c.id)).toEqual([building, recent]);
+  });
+
+  it("read_audit lists changes measured in its period, and /status counts open ones", async () => {
+    const { ctx } = loopCtx();
+    await change(ctx, "mira", { state: "measured", measured_at: "2026-10-15 00:00:00", verdict: "better", overlaps: "[]" });
+    await change(ctx, "mira", { state: "measured", measured_at: "2026-09-15 00:00:00", verdict: "worse", overlaps: "[]" });
+    await change(ctx, "vera", { state: "pr_open" });
+    await change(ctx, "vera", { state: "live" });
+    const out = JSON.parse(await handleTool(ctx, "vera", "sesn_v", "read_audit", { since: "2026-10-01", until: "2026-10-31" }));
+    expect(out.changes.map((c: any) => [c.id, c.verdict])).toEqual([["C-1", "better"]]);
+    const st = await gatherStatus(ctx);
+    expect(statusPlain(st)).toContain("Changes in flight: 2");
+    expect(statusCards(st).content).toContain("2 changes in flight");
   });
 });

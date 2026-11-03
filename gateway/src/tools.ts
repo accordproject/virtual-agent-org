@@ -5,7 +5,7 @@ import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./ac
 import { AgentUnavailable, postDecision, startSession } from "./agents";
 import { missingEvidence, proposalGuard, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
-import type { Decision, StartedBy } from "./db";
+import type { Change, Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import { memberOf } from "./people";
@@ -141,15 +141,17 @@ const HANDLERS: Record<ToolName, Handler> = {
 
   get_status: async (ctx, { input }) => {
     const who = typeof input.agent === "string" && input.agent ? input.agent.toLowerCase() : undefined;
-    const [statuses, tasks, controls] = await Promise.all([
+    const fortnightAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+    const [statuses, tasks, controls, changes] = await Promise.all([
       ctx.db.latestStatuses(who),
       ctx.db.openTasks(who),
       ctx.db.allAgentStatuses(),
+      ctx.db.recentChanges(fortnightAgo, who),
     ]);
     const active = Object.values(ctx.network.agents)
       .filter((a) => a.phase <= ctx.network.current_phase)
       .map((a) => a.name);
-    return JSON.stringify({ active_agents: active, controls, statuses, open_tasks: tasks });
+    return JSON.stringify({ active_agents: active, controls, statuses, open_tasks: tasks, changes: changes.map(changeView) });
   },
 
   get_scorecard: async (ctx, { input }) => {
@@ -230,6 +232,21 @@ const HANDLERS: Record<ToolName, Handler> = {
 };
 
 
+/** A change as get_status and read_audit show it. */
+function changeView(c: Change) {
+  let overlaps: unknown = [];
+  try {
+    overlaps = c.overlaps ? JSON.parse(c.overlaps) : [];
+  } catch {
+    // Left as none: the column is only ever written by tickChanges.
+  }
+  return {
+    id: c.id, agent: c.agent, type: c.change_type, state: c.state, pr_url: c.pr_url, measure: c.measure, tool: c.tool,
+    verdict: c.verdict, before: c.before, after: c.after, before_cases: c.before_cases, after_cases: c.after_cases,
+    overlaps, closed_reason: c.closed_reason,
+  };
+}
+
 /** D1's timestamp form ("YYYY-MM-DD HH:MM:SS", UTC) for an ISO date or date-time. */
 function d1Time(v: string, field: string): string {
   const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v);
@@ -250,13 +267,14 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   }
   // Open-ended: include rows written this very second, which "now" to the second would cut off.
   const until = input.until ? end : "9999-12-31 23:59:59";
-  const [usage, daily, decisions, denials, refusals, toolCalls] = await Promise.all([
+  const [usage, daily, decisions, denials, refusals, toolCalls, changes] = await Promise.all([
     ctx.db.sessionUsage(since, until),
     ctx.db.dailySpend(since, until),
     ctx.db.decisionsBetween(since, until),
     ctx.db.denials(since, until),
     ctx.db.refusals(since, until),
     ctx.db.toolCalls(since, until),
+    ctx.db.changesMeasured(since, until),
   ]);
 
   type Totals = { sessions: number; cost_cents: number } & Record<(typeof TOKEN_FIELDS)[number], number>;
@@ -286,6 +304,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected. Tool confirmations are excluded.",
       "refusals: custom tool calls the gateway refused for bad input.",
       "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
+      "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent that went live within those windows.",
     ],
     agents,
     daily_spend: daily,
@@ -296,6 +315,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     denials,
     refusals,
     tool_calls: toolCalls,
+    changes: changes.map(changeView),
   });
 }
 
