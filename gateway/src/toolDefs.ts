@@ -187,7 +187,8 @@ export const TOOLS = {
     description:
       "The gateway's records for the agent audit, for one period of up to 92 days: each agent's spend (list cost in US cents), tokens, " +
       "models used and session origins; spend per day; decision outcomes with rejection notes; executed actions with their decision ids; " +
-      "tool denials; and external tool calls by tool and permission. Read-only.",
+      "tool denials and refusals; external tool calls by tool and permission; measured changes; status reports that listed blockers; " +
+      "and dismissed review findings. Read-only.",
     input_schema: {
       type: "object",
       properties: {

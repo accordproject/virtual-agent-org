@@ -408,15 +408,20 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   request. Opening those pull requests is the gateway's only action on this repo. It
   cannot merge. No other agent may write to this repo.
 - The App must not hold GitHub's Workflows permission, and the gateway refuses any
-  submitted file under `.github/` or `gateway/src/generated/`: CI and the deploy run
-  stay with the owner.
+  submitted file under `.github/` or `gateway/src/generated/`, except the compiled
+  `network.json`, which CI checks against a fresh compile: CI and the deploy run stay
+  with the owner.
 - `compile.ts` refuses this repo in `repos` or as the sandbox; the gateway refuses every
   action kind that targets it, whatever the config says; the owner merges on GitHub
   and approves the deploy run (decision 49).
 - Each proposal cites the evidence it rests on; text in it is data, not instructions.
-  A CI step flags pull requests that touch `permissions.yaml`, the gateway's checks,
-  `compile.ts`, `changes.ts`, `.github/` or the mechanic's own spec for closer review.
-  It warns rather than fails, so a permissions change the owner approved can still be
+  A CI step flags pull requests that touch `permissions.yaml`, `network.yaml`, the
+  gateway's checks (`actions.ts`, `review.ts`, `workflows.ts`, `risk.ts`,
+  `schema.ts`, `changes.ts`), its tools, people and entry modules (`tools.ts`,
+  `people.ts`, `index.ts`), anything under `scripts/` or `.github/`, the package
+  files, `_protocol.md` or the mechanic's own spec for closer review. It runs the
+  base branch's copy of the check, so a pull request can't silence it. It warns
+  rather than fails, so a permissions change the owner approved can still be
   written.
 - Not chosen: letting every agent propose changes here (the rules would be editable by
   the agents they limit); no agent writing here at all (every fix waits for the owner
@@ -448,14 +453,16 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   nothing, and the owner's review is the gate. Building without approval would make
   `spec.change` an `auto` kind, which stays the owner's decision.
 - **Start rule:** the gateway refuses proposals until the loop is switched on, and
-  then until the agent has 10 decided decisions or the loop has run 14 days. Several
-  changes may be in flight for one agent.
+  then until the agent has 10 decided decisions or the loop has run 14 days. It also
+  refuses a second proposal for the same target within 7 days. Several changes may
+  be in flight for one agent.
 - **The gateway drives it:** approving records a change (`C-n`) and starts a mechanic
   task with a brief built from the payload. The mechanic clones the repo, makes the
   change, runs the tests and calls `submit_change` once. The gateway opens the pull
   request, with the change, decision and evidence ids in its description. If the
-  task ends without a pull request, Ada may follow it up once with the mechanic; a
-  second block closes the change and goes to the owner.
+  task ends without a pull request (including running out of budget), Ada may follow
+  it up once with the mechanic, on the same budget and tier; a second block closes
+  the change and goes to the owner. A change still building after 7 days is closed.
 - **Budgets:** $1 a mechanic task for `wording` and `tier`, $5 and the deep tier for
   the other types (`budgets.mechanic_small_usd` and `mechanic_large_usd`).
 - **Live:** after each deploy the workflow marks live the changes named in the
@@ -466,8 +473,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   gateway compares its measure over the 14 days before and after, and stores
   `better`, `same`, `worse` or `too_little_data` (fewer than 5 cases either side).
   Too little data is tried again weekly over the whole time since going live, up to
-  42 days, then the change is closed. A result names other changes to the same agent
-  that went live within its windows. No agent grades a change, so none grades its
+  42 days, then the change is closed. A result names other changes to the same agent,
+  or to the network, that went live within its windows. No agent grades a change, so none grades its
   own.
 - **Results:** Ada reports each in her next check-in, one line per change. A `worse`
   result leads her to propose reverting it through the same card; nothing is

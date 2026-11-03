@@ -129,8 +129,9 @@ These are enforced in code; changing them is the owner's decision.
 can never be in `repos` or the sandbox. Every action kind refuses it as a target. The
 gateway's one action here is opening the mechanic's pull requests for changes the
 owner approved; the owner reviews, merges and approves the deploy. CI flags pull
-requests that touch the safety files (permissions, the gateway's checks, `compile.ts`,
-the mechanic's spec, `.github/`).
+requests that touch the safety files (permissions and `network.yaml`, the gateway's
+checks and tools, `scripts/`, the package files, the protocol, the mechanic's spec,
+`.github/`), using the base branch's copy of the check.
 
 What is not enforced in code: agents with a write-capable GitHub token (Mira now, Rosa
 later) can comment, label and open issues directly through the GitHub tool, limited by

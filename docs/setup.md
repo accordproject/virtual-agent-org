@@ -213,6 +213,10 @@ Phase 1 is running.
    organisation.
 5. Run `npm test`, then deploy the gateway and the agents.
 
+To turn the loop off, set `self_improvement.since` back to `null` and deploy the
+gateway. That stops new proposals, but proposal cards already in the queue stay
+valid: approving one still starts the mechanic. Reject them.
+
 The mechanic's budgets are `budgets.mechanic_small_usd` and `mechanic_large_usd`. The
 `deploy` workflow records which changes each deploy made live; it already holds the
 D1 credential it needs.

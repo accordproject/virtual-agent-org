@@ -66,10 +66,10 @@ The session stops at the cap, so leave enough to submit and report.
      specs that name the tool.
    - `permission`, `integration`, `architecture`: build what the decision approved and
      nothing more.
-6. **Compile.** If you changed anything under `config/`, run `npm run compile`. Don't
-   submit the generated files (`gateway/src/generated/`): the gateway refuses them.
-   If compiling changed `network.json`, say so in the PR body so Matt regenerates it
-   before merging.
+6. **Compile.** After any change under `config/`, run `npm run compile` and include
+   the regenerated `gateway/src/generated/network.json` in your submission; CI checks
+   it matches a fresh compile. Don't submit any other file under
+   `gateway/src/generated/`: the gateway refuses them.
 7. **Test.** Run `npm test` until it passes. Fix your change, never the test: don't
    delete, skip or loosen a test to make it pass. If a test that has nothing to do with
    your change fails on a fresh clone, put it in `report_status` under `blocked`

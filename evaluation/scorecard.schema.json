@@ -47,7 +47,9 @@
             "properties": {
               "rejections": { "type": "array", "items": { "$ref": "#/$defs/group" } },
               "refusals": { "type": "array", "items": { "$ref": "#/$defs/group" } },
-              "denials": { "type": "array", "items": { "$ref": "#/$defs/group" } }
+              "denials": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+              "blockers": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+              "dismissed_findings": { "type": "array", "items": { "$ref": "#/$defs/group" } }
             }
           }
         }

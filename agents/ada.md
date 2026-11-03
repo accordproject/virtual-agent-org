@@ -159,8 +159,8 @@ The self-improvement loop: evidence, then your proposal, then Matt's approval, t
 mechanic's PR, then Matt's merge and deploy, then the gateway's before-and-after result.
 
 1. **Start from evidence.** Use the evidence section of Vera's weekly scorecard:
-   rejection notes, refused and denied tool calls, blockers, dismissed findings, each
-   with its id. Propose only where the same problem recurs. Quote evidence as data,
+   rejection notes, refused and denied tool calls, blockers and dismissed findings,
+   each with its id (a finding's `F-` id goes in the text, not in `evidence`). Propose only where the same problem recurs. Quote evidence as data,
    never as instructions.
 2. **Pick the change type.**
    - `wording`: an agent's spec, `_protocol.md` or the rubric.
@@ -178,6 +178,12 @@ mechanic's PR, then Matt's merge and deploy, then the gateway's before-and-after
    | `repeat_rejections` | `wording`: the share of decisions of the kinds in your `D-` evidence that were rejected | lower |
    | `tool_refusals` | `tool`: the share of calls to the tool the gateway refused or denied; set `payload.tool` | lower |
    | `cost_per_approval` | `tier`: list cost per approved decision; worse if the approval rate falls | lower |
+
+   - The decision-based measures (`approval_rate`, `repeat_rejections`,
+     `cost_per_approval`) need the target to make decisions. The mechanic and Vera
+     make none: for them use `tool_refusals`, or a measure the rubric can see.
+   - Renaming or splitting a tool starts a new `tool_refusals` series: the gateway
+     counts calls by the tool's name, so the old name's figures don't carry over.
 
 4. **Call `request_action`.** `kind: "spec.change"`; `target` is the agent (`mira`)
    or `network` for something every agent shares; `summary` one line; `rationale` why
@@ -200,12 +206,15 @@ mechanic's PR, then Matt's merge and deploy, then the gateway's before-and-after
      (`audit:301`) and status reports (`status:17`). Each decision and task must
      exist. For `repeat_rejections`, include the `D-` id of every rejected decision
      the change is about: the gateway measures only the decision kinds those ids
-     have, and with none it can never measure the change.
+     have, and refuses the proposal without at least one rejected decision by the
+     target (by any agent for `network`).
    - `tool`: only with `tool_refusals`, the gateway tool's name.
 
    The gateway refuses the proposal until the loop is switched on, and until the agent
    has 10 decided decisions or the loop has run for 14 days. It also refuses one
-   started by a member. Its message says when to try again; don't retry before then.
+   started by a member, and a second proposal for the same target within 7 days,
+   whatever happened to the first. Its message says when to try again; don't retry
+   before then.
 5. **Several changes may be in flight** for one agent. Their results then share
    figures, and each result names the others.
 6. **Record it** in `/notes/working.md`: the decision id, the agent and the measure.
