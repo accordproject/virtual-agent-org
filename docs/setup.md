@@ -206,8 +206,9 @@ Phase 1 is running.
    `{ name: "<app-slug>[bot]", email: "<id>+<app-slug>[bot]@users.noreply.github.com" }`.
    `npm test` refuses the placeholder email once the loop is on.
 4. **Switch it on.** Set `self_improvement.since` to the start date (e.g.
-   `2026-11-10`). Ada can propose a change for an agent once it has 10 decided
-   decisions, or 14 days after that date. Keep `stale_days` equal to the days
+   `2026-11-10`). Ada can propose a change for an agent once it has `min_decided` (10)
+   decided decisions, or `min_days` (14) after that date, and at most one per agent
+   every `proposal_gap_days` (7). Lower them while the network settles. Keep `stale_days` equal to the days
    `.github/workflows/stale.yml` takes to close a PR (23 to mark it stale plus 7 to
    close it), and change that workflow's `repository_owner` check to your
    organisation.

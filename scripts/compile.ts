@@ -101,6 +101,10 @@ export function validate(cfg = loadAll()): string[] {
   else {
     if (si.since !== null && !(typeof si.since === "string" && /^\d{4}-\d{2}-\d{2}(T[\d:.+Z-]+)?$/.test(si.since) && !Number.isNaN(Date.parse(si.since)))) errs.push("self_improvement.since must be an ISO date or null");
     if (!(Number.isInteger(si.stale_days) && si.stale_days >= 1 && si.stale_days <= 365)) errs.push("self_improvement.stale_days must be a whole number from 1 to 365");
+    for (const [k, max] of [["proposal_gap_days", 30], ["min_decided", 100], ["min_days", 60]] as const) {
+      const v = si[k];
+      if (v !== undefined && !(Number.isInteger(v) && v >= 0 && v <= max)) errs.push(`self_improvement.${k} must be a whole number from 0 to ${max}`);
+    }
     const a = si.commit_author;
     if (!a || typeof a.name !== "string" || !a.name.trim() || typeof a.email !== "string" || !a.email.includes("@")) errs.push("self_improvement.commit_author needs a name and an email");
     else if (si.since !== null && /[<>]/.test(a.email)) errs.push("self_improvement.commit_author.email is still a placeholder: set the App's bot email before switching the loop on");
@@ -231,6 +235,9 @@ export function compile(cfg = loadAll()) {
     self_improvement: {
       since: network.self_improvement?.since ?? null,
       stale_days: network.self_improvement?.stale_days ?? 30,
+      proposal_gap_days: network.self_improvement?.proposal_gap_days ?? 7,
+      min_decided: network.self_improvement?.min_decided ?? 10,
+      min_days: network.self_improvement?.min_days ?? 14,
       commit_author: network.self_improvement?.commit_author,
       task_cents: {
         small: Math.round((network.budgets.mechanic_small_usd ?? 1) * 100),

@@ -20,10 +20,6 @@ export const EVIDENCE_ID = /^(D-\d+|T-\d+|audit:\d+|status:\d+)$/;
 const NOT_EVIDENCE = NOT_JUDGEMENT;
 /** Kinds left out of a change's measure: proposals themselves, and kinds that aren't judgement. */
 const NOT_MEASURED = ["spec.change", ...NOT_JUDGEMENT];
-const MIN_DECIDED = 10;
-const MIN_DAYS = 14;
-/** At most one proposal per target in this many days (the rubric's one a week). */
-const PROPOSAL_DAYS = 7;
 const DAY = 86_400_000;
 
 /** Changes to these types touch more than wording, so get a larger budget and the deep tier. */
@@ -42,26 +38,30 @@ export function changeRisk(target: string, type: string): Risk {
 }
 
 /**
- * Whether Ada may propose a change to `target` yet: the loop must be on and started, and
- * there must be evidence (10 decided decisions, or 14 days since the start). Null if allowed.
+ * Whether Ada may propose a change to `target` yet: the loop must be on and started, the
+ * target's last proposal at least `proposal_gap_days` old, and there must be evidence
+ * (`min_decided` decided decisions, or `min_days` since the start). Null if allowed.
  */
 export async function proposalGuard(ctx: Ctx, target: string): Promise<string | null> {
   const since = ctx.network.self_improvement?.since;
   const start = since ? Date.parse(since) : NaN;
   if (!since || Number.isNaN(start)) return "The self-improvement loop is off (self_improvement.since isn't set). Don't propose changes yet.";
+  const { proposal_gap_days: gap = 7, min_decided: minDecided = 10, min_days: minDays = 14 } = ctx.network.self_improvement!;
   const now = Date.now();
   if (now < start) return `The self-improvement loop starts on ${since}. Propose changes after that.`;
-  const weekAgo = new Date(now - PROPOSAL_DAYS * DAY).toISOString().slice(0, 19).replace("T", " ");
-  const last = await ctx.db.latestDecisionFor("spec.change", target, weekAgo);
-  if (last) {
-    return `${target} already has a proposal from the last ${PROPOSAL_DAYS} days: ${last.id}. Propose at most one change per agent a week; put more evidence into the next one.`;
+  if (gap > 0) {
+    const cutoff = new Date(now - gap * DAY).toISOString().slice(0, 19).replace("T", " ");
+    const last = await ctx.db.latestDecisionFor("spec.change", target, cutoff);
+    if (last) {
+      return `${target} already has a proposal from the last ${gap} days: ${last.id}. Propose at most one change per agent every ${gap} days; put more evidence into the next one.`;
+    }
   }
-  if (now - start >= MIN_DAYS * DAY) return null;
+  if (now - start >= minDays * DAY) return null;
   const n = await ctx.db.countDecided(target === "network" ? null : target, NOT_EVIDENCE);
-  if (n >= MIN_DECIDED) return null;
+  if (n >= minDecided) return null;
   const who = target === "network" ? "The network" : target;
-  const from = new Date(start + MIN_DAYS * DAY).toISOString().slice(0, 10);
-  return `Not enough evidence yet: ${who} has ${n} decided decisions. Proposals need ${MIN_DECIDED}, or ${MIN_DAYS} days since the loop started on ${since} (from ${from}).`;
+  const from = new Date(start + minDays * DAY).toISOString().slice(0, 10);
+  return `Not enough evidence yet: ${who} has ${n} decided decisions. Proposals need ${minDecided}, or ${minDays} days since the loop started on ${since} (from ${from}).`;
 }
 
 /** Problems with the D- and T- ids in the evidence: each must still exist. */

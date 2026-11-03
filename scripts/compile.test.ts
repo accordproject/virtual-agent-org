@@ -133,6 +133,10 @@ test("validate checks self_improvement", () => {
   assert.ok(si({ since: "soon" }).includes("self_improvement.since must be an ISO date or null"));
   assert.ok(!si({ since: "2026-11-10" }).includes("self_improvement.since must be an ISO date or null"));
   assert.ok(si({ stale_days: 0 }).includes("self_improvement.stale_days must be a whole number from 1 to 365"));
+  assert.ok(si({ proposal_gap_days: -1 }).includes("self_improvement.proposal_gap_days must be a whole number from 0 to 30"));
+  assert.ok(si({ min_decided: 1.5 }).includes("self_improvement.min_decided must be a whole number from 0 to 100"));
+  assert.ok(si({ min_days: 61 }).includes("self_improvement.min_days must be a whole number from 0 to 60"));
+  assert.ok(!si({ proposal_gap_days: 0, min_decided: 0, min_days: 0 }).some((e) => e.includes("whole number from 0")));
   const bad = (budgets: object) => validate({ ...cfg, network: { ...cfg.network, budgets: { ...cfg.network.budgets, ...budgets } } });
   assert.ok(bad({ mechanic_small_usd: 0 }).includes("network.yaml: budgets.mechanic_small_usd must be more than 0 and at most 10"));
   assert.ok(bad({ mechanic_large_usd: 11 }).includes("network.yaml: budgets.mechanic_large_usd must be more than 0 and at most 10"));
@@ -153,6 +157,8 @@ test("compile emits the loop settings", () => {
   const out = compile(all);
   assert.deepEqual(out.self_improvement.task_cents, { small: 100, large: 500 });
   assert.equal(out.self_improvement.since, all.network.self_improvement?.since ?? null);
+  const { proposal_gap_days, min_decided, min_days } = out.self_improvement;
+  assert.deepEqual([proposal_gap_days, min_decided, min_days], [all.network.self_improvement?.proposal_gap_days ?? 7, all.network.self_improvement?.min_decided ?? 10, all.network.self_improvement?.min_days ?? 14]);
   assert.equal(out.network_repo, "accordproject/virtual-agent-org");
   assert.equal(out.agents.mandla.requestable.length, 0);
 });
