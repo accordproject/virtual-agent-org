@@ -30,7 +30,8 @@
       ],
       "memory_store_ids": [
         "memstore_01TSRBB6kgifWrTvvFSLab72",
-        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp",
+        "memstore_014xvBZzpaNPLxL4xXdHPwyN"
       ],
       "session_budget_cents": 100
     },
@@ -42,6 +43,27 @@
       ],
       "memory_store_ids": [
         "memstore_014xvBZzpaNPLxL4xXdHPwyN",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp",
+        "memstore_01F6D5Pn6MZEQCLoDaUpFohg"
+      ],
+      "session_budget_cents": 100
+    },
+    "mandla": {
+      "agent_id": "agent_019f5RtFyYVoyy5nRLT3febe",
+      "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+      "vault_ids": [],
+      "memory_store_ids": [
+        "memstore_01QyBAKT2kPFpcYcdVrZzhkF",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+      ],
+      "session_budget_cents": 100
+    },
+    "sage": {
+      "agent_id": "agent_018RTRGYrpc7StP7muKigVtg",
+      "environment_id": "env_01KQDhjAz6GABwDM5wHesHmC",
+      "vault_ids": [],
+      "memory_store_ids": [
+        "memstore_01F6D5Pn6MZEQCLoDaUpFohg",
         "memstore_016a2PyDfBhNYKi7QkXfsiTp"
       ],
       "session_budget_cents": 100
@@ -83,8 +105,17 @@
     "otto-wg-briefing": {
       "id": "depl_015q3zXTctvxizav9tnoctyN",
       "agent": "otto"
+    },
+    "otto-recordings": {
+      "id": "depl_01Ri9ZtUWqfJiLRgqDvcqEkn",
+      "agent": "otto"
+    },
+    "sage-weekly-brief": {
+      "id": "depl_01TouPLP1uyuwQxg8wzDngqs",
+      "agent": "sage"
     }
   },
   "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
-  "shared_memory_store_id": "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+  "shared_memory_store_id": "memstore_016a2PyDfBhNYKi7QkXfsiTp",
+  "open_environment_id": "env_01KQDhjAz6GABwDM5wHesHmC"
 }
