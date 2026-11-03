@@ -38,12 +38,40 @@ export interface Task {
   status: string;
   session_id: string | null;
   /** review_check only when the gateway started it for one PR at one commit (decision 2A). */
-  kind: "task" | "review_check";
+  kind: "task" | "review_check" | "change";
   review_target: string | null;
   review_sha: string | null;
   /** The task or decision (T-12, D-41) this task was assigned to follow up, if any. */
   follows_up: string | null;
   created_at: string;
+}
+
+export interface Change {
+  id: string;
+  seq: number;
+  /** The agent changed, or 'network'. */
+  agent: string;
+  decision_id: string;
+  change_type: string;
+  measure: string;
+  tool: string | null;
+  /** Decision kinds named in the evidence (JSON array). */
+  kinds: string;
+  state: "building" | "pr_open" | "live" | "measured" | "closed";
+  task_id: string | null;
+  pr_url: string | null;
+  pr_opened_at: string | null;
+  live_at: string | null;
+  measured_at: string | null;
+  before: number | null;
+  after: number | null;
+  before_cases: number | null;
+  after_cases: number | null;
+  verdict: "better" | "same" | "worse" | "too_little_data" | null;
+  overlaps: string | null;
+  closed_reason: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Review {
@@ -101,7 +129,7 @@ export class Db {
 
   // ---- counters -----------------------------------------------------------
 
-  async next(counter: "decision" | "task" | "review" | "finding"): Promise<number> {
+  async next(counter: "decision" | "task" | "review" | "finding" | "change"): Promise<number> {
     const row = await this.db
       .prepare("UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value")
       .bind(counter)
@@ -399,14 +427,53 @@ export class Db {
     due?: string;
     review?: { target: string; sha: string };
     follows_up?: string;
+    kind?: "change";
   }): Promise<Task> {
     const seq = await this.next("task");
     const id = `T-${seq}`;
     await this.db
       .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha, follows_up) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : "task", t.review?.target ?? null, t.review?.sha ?? null, t.follows_up ?? null)
+      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : (t.kind ?? "task"), t.review?.target ?? null, t.review?.sha ?? null, t.follows_up ?? null)
       .run();
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
+  }
+
+  // ---- changes ------------------------------------------------------------
+
+  async createChange(c: { agent: string; decision_id: string; change_type: string; measure: string; tool?: string; kinds: string[] }): Promise<Change> {
+    const seq = await this.next("change");
+    const id = `C-${seq}`;
+    await this.db
+      .prepare("INSERT INTO changes (id, seq, agent, decision_id, change_type, measure, tool, kinds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, seq, c.agent, c.decision_id, c.change_type, c.measure, c.tool ?? null, JSON.stringify(c.kinds))
+      .run();
+    return (await this.getChange(id))!;
+  }
+
+  async getChange(id: string): Promise<Change | null> {
+    return this.db.prepare("SELECT * FROM changes WHERE id = ?").bind(id).first<Change>();
+  }
+
+  async changeForTask(taskId: string): Promise<Change | null> {
+    return this.db.prepare("SELECT * FROM changes WHERE task_id = ?").bind(taskId).first<Change>();
+  }
+
+  async updateChange(id: string, fields: Partial<Omit<Change, "id" | "seq">>): Promise<void> {
+    const entries = Object.entries(fields).filter(([k, v]) => v !== undefined && k !== "updated_at");
+    const sets = [...entries.map(([k]) => `${k} = ?`), "updated_at = datetime('now')"];
+    await this.db
+      .prepare(`UPDATE changes SET ${sets.join(", ")} WHERE id = ?`)
+      .bind(...entries.map(([, v]) => v), id)
+      .run();
+  }
+
+  async changesIn(states: Change["state"][]): Promise<Change[]> {
+    if (!states.length) return [];
+    const res = await this.db
+      .prepare(`SELECT * FROM changes WHERE state IN (${states.map(() => "?").join(",")}) ORDER BY seq`)
+      .bind(...states)
+      .all<Change>();
+    return res.results;
   }
 
   /** The task a session was started for, if any. */
