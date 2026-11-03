@@ -1,10 +1,11 @@
 // Handlers for the custom tools agents call. The gateway is the enforcement point:
 // it checks who may call what before doing anything.
 
-import { ActionInvalid, validateAction, type Normalised } from "./actions";
+import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, refreshDecisionCard, startSession } from "./agents";
+import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
-import type { Decision, StartedBy } from "./db";
+import type { Change, Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import { memberOf } from "./people";
@@ -60,6 +61,8 @@ const HANDLERS: Record<ToolName, Handler> = {
   request_review_check: (ctx, { sessionId, input }) => requestReviewCheck(ctx, sessionId, input),
 
   submit_review: (ctx, { sessionId, input }) => submitReview(ctx, sessionId, input),
+
+  submit_change: (ctx, { agent, sessionId, input }) => submitChange(ctx, agent, sessionId, input),
 
   pr_facts: async (ctx, { input }) => {
     const ref = prRef(ctx, input.target);
@@ -138,15 +141,17 @@ const HANDLERS: Record<ToolName, Handler> = {
 
   get_status: async (ctx, { input }) => {
     const who = typeof input.agent === "string" && input.agent ? input.agent.toLowerCase() : undefined;
-    const [statuses, tasks, controls] = await Promise.all([
+    const fortnightAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+    const [statuses, tasks, controls, changes] = await Promise.all([
       ctx.db.latestStatuses(who),
       ctx.db.openTasks(who),
       ctx.db.allAgentStatuses(),
+      ctx.db.recentChanges(fortnightAgo, who),
     ]);
     const active = Object.values(ctx.network.agents)
       .filter((a) => a.phase <= ctx.network.current_phase)
       .map((a) => a.name);
-    return JSON.stringify({ active_agents: active, controls, statuses, open_tasks: tasks });
+    return JSON.stringify({ active_agents: active, controls, statuses, open_tasks: tasks, changes: changes.map(changeView) });
   },
 
   get_scorecard: async (ctx, { input }) => {
@@ -231,6 +236,21 @@ const HANDLERS: Record<ToolName, Handler> = {
 };
 
 
+/** A change as get_status and read_audit show it. */
+function changeView(c: Change) {
+  let overlaps: unknown = [];
+  try {
+    overlaps = c.overlaps ? JSON.parse(c.overlaps) : [];
+  } catch {
+    // Left as none: the column is only ever written by tickChanges.
+  }
+  return {
+    id: c.id, agent: c.agent, type: c.change_type, state: c.state, pr_url: c.pr_url, measure: c.measure, tool: c.tool,
+    verdict: c.verdict, before: c.before, after: c.after, before_cases: c.before_cases, after_cases: c.after_cases,
+    overlaps, closed_reason: c.closed_reason,
+  };
+}
+
 /** D1's timestamp form ("YYYY-MM-DD HH:MM:SS", UTC) for an ISO date or date-time. */
 function d1Time(v: string, field: string): string {
   const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v);
@@ -251,12 +271,16 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   }
   // Open-ended: include rows written this very second, which "now" to the second would cut off.
   const until = input.until ? end : "9999-12-31 23:59:59";
-  const [usage, daily, decisions, denials, toolCalls] = await Promise.all([
+  const [usage, daily, decisions, denials, refusals, toolCalls, changes, blocked, dismissed] = await Promise.all([
     ctx.db.sessionUsage(since, until),
     ctx.db.dailySpend(since, until),
     ctx.db.decisionsBetween(since, until),
     ctx.db.denials(since, until),
+    ctx.db.refusals(since, until),
     ctx.db.toolCalls(since, until),
+    ctx.db.changesMeasured(since, until),
+    ctx.db.blockedReports(since, until),
+    ctx.db.dismissedFindings(since, until),
   ]);
 
   type Totals = { sessions: number; cost_cents: number } & Record<(typeof TOKEN_FIELDS)[number], number>;
@@ -284,7 +308,11 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started.",
       "Sessions from before token and model recording began show 0 tokens and model 'unknown'.",
       "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected. Tool confirmations are excluded.",
+      "refusals: custom tool calls the gateway refused for bad input. Cite a refusal or denial as audit:<id>.",
       "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
+      "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent, or to the network, that went live within those windows.",
+      "blocked_reports: status reports that listed blockers. Cite one by its id (status:<id>).",
+      "dismissed_findings: Mira's review findings dismissed in this period, with the note saying why. Cite one by its id (F-<n>) in the text; it isn't an evidence id.",
     ],
     agents,
     daily_spend: daily,
@@ -293,7 +321,11 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       .filter((d) => d.status === "executed" || d.status === "failed")
       .map((d) => ({ id: d.id, agent: d.agent, kind: d.kind, target: d.target, status: d.status, executed_at: d.executed_at })),
     denials,
+    refusals,
     tool_calls: toolCalls,
+    changes: changes.map(changeView),
+    blocked_reports: blocked,
+    dismissed_findings: dismissed,
   });
 }
 
@@ -304,7 +336,6 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     throw new ToolDenied(`You may not request ${kind}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
   const declared: Risk = toRisk(input.risk);
-  const floor = toRisk(ctx.network.action_kinds[kind]?.risk);
   if (kind === "github.merge" && agent === "mira" && ctx.network.review_check_required && !(await isReviewCheck(ctx, sessionId))) {
     throw new ToolError("Merge proposals come from the review check. Call request_review_check with your draft review instead.");
   }
@@ -319,7 +350,7 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   }
   let rationale = s(input.rationale, "rationale");
   if (member) rationale = `⚠ Prompted by ${member.name} (member) via ${member.platform}.\n\n${rationale}`;
-  let risk = maxRisk(declared, floor);
+  let risk = maxRisk(declared, actionRisk(ctx, kind, n));
   let reviewId: string | undefined;
   if (kind === "github.merge") {
     // Decision 35: the gateway checks the PR itself, and refuses rather than queue a merge that can't go ahead.
@@ -335,6 +366,16 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     risk = maxRisk(risk, f.risk === "high" ? "high" : "medium");
     rationale = `${rationale}\n\nGateway checks at ${f.sha.slice(0, 7)} (${f.risk} risk: ${f.risk_reasons.join("; ")}):\n${checklist(checks)}`;
     reviewId = review?.id;
+  }
+  if (kind === "spec.change") {
+    // Rule 5: a member may ask about the network, never set changing it going.
+    if (member) throw new ToolDenied(`${member.name} is a member: they can't ask for a change to the network. Answer them, and leave proposals to your weekly evaluation.`);
+    const refusal = await proposalGuard(ctx, n.target);
+    if (refusal) throw new ToolError(`Not queued. ${refusal}`);
+    const gone = await missingEvidence(ctx, n.payload.evidence as string[]);
+    const repeat = gone.length ? null : await repeatEvidence(ctx, n.target, n.payload);
+    if (repeat) gone.push(repeat);
+    if (gone.length) throw new ToolError(`Not queued. Fix the request and call again:\n- ${gone.join("\n- ")}`);
   }
   const d = await ctx.db.createDecision({
     agent,
@@ -531,6 +572,13 @@ async function closeTask(ctx: Ctx, sessionId: string, input: Input): Promise<str
   }
   await ctx.db.setTask(id, "cancelled");
   await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "ada.closed_task", detail: { task: id, of: task.agent, note } });
+  // A change nobody is building any more is closed now, not left for the 7-day backstop (decision 55).
+  const change = task.kind === "change" ? await ctx.db.changeForTask(id) : null;
+  if (change?.state === "building") {
+    await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "closed by Ada" });
+    await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "gateway.change_closed", detail: { change: change.id, reason: "closed by Ada" } });
+    return `${id} closed, and with it ${change.id}. Report both under "Decided for you".`;
+  }
   return `${id} closed. Report it under "Decided for you".`;
 }
 
@@ -555,9 +603,23 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   const priority = typeof input.priority === "string" ? input.priority : "normal";
   const due = typeof input.due === "string" ? input.due : undefined;
   const followsUp = await followUpOf(ctx, s(input.follows_up, "follows_up", false));
-  const { cents, calls } = EFFORT[effort];
+  // Mandla only works on approved changes: a follow-up of a blocked change task takes the change over.
+  const earlier = followsUp?.startsWith("T-") ? await ctx.db.getTask(followsUp) : null;
+  const change = earlier?.kind === "change" ? await ctx.db.changeForTask(earlier.id) : null;
+  if (agent === "mandla" && !change) throw new ToolError("Mandla only works on approved changes: propose one with spec.change.");
+  if (change && agent !== "mandla") throw new ToolError(`${earlier!.id} is a change task: only Mandla can follow it up.`);
+  if (change && (earlier!.status !== "blocked" || change.state !== "building")) {
+    throw new ToolError(`${change.id} is ${change.state} and ${earlier!.id} is ${earlier!.status}: there is nothing to follow up.`);
+  }
   const startedBy = await sessionStartedBy(ctx, parentSessionId);
   const member = memberOf(startedBy);
+  // Rule 5: a member may ask about the network, never set changing it going.
+  if (member && agent === "mandla") {
+    throw new ToolDenied(`${member.name} is a member: they can't set Mandla going. Answer them, and follow up the change from your own check-in.`);
+  }
+  // A change task keeps the change's own budget and tier, whatever effort Ada names.
+  const { calls } = EFFORT[effort];
+  const { cents, model } = change ? changeBudget(ctx, change.change_type) : { cents: EFFORT[effort].cents, model: undefined };
 
   const brief = [
     `Objective: ${objective}`,
@@ -570,21 +632,33 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   ].join("\n");
 
   // Always an ordinary task: only request_review_check makes a review check.
-  const task = await ctx.db.createTask({ agent, title, brief, priority, due, ...(followsUp ? { follows_up: followsUp } : {}) });
+  // Mandla starts from the approved change's own brief, then Ada's follow-up.
+  const taskBrief = change ? `${earlier!.brief}\n\nFollow-up from Ada:\n${brief}` : brief;
+  const task = await ctx.db.createTask({
+    agent,
+    title,
+    brief: taskBrief,
+    priority,
+    due,
+    ...(followsUp ? { follows_up: followsUp } : {}),
+    ...(change ? { kind: "change" as const } : {}),
+  });
+  if (change) await ctx.db.updateChange(change.id, { task_id: task.id });
   try {
     const text = [
       `Task ${task.id} from Ada (priority: ${priority}${due ? `, due ${due}` : ""}${followsUp ? `, following up ${followsUp}` : ""})`,
       `Title: ${title}`,
       "",
-      brief,
+      taskBrief,
       "",
       "When finished, call report_status. Queue any critical action with request_action and continue.",
     ].join("\n");
-    const sessionId = await startSession(ctx, agent, text, "task", startedBy, { taskId: task.id, budgetCents: cents });
+    const sessionId = await startSession(ctx, agent, text, "task", startedBy, { taskId: task.id, budgetCents: cents, ...(model ? { model } : {}) });
     await ctx.db.setTask(task.id, "running", sessionId);
     return `Assigned ${task.id} to ${cap(agent)} (${effort} effort, $${(cents / 100).toFixed(2)} cap).`;
   } catch (e) {
     await ctx.db.setTask(task.id, "failed");
+    if (change) await ctx.db.updateChange(change.id, { task_id: earlier!.id });
     if (e instanceof AgentUnavailable) throw new ToolError(`${task.id} not started: ${e.message}`);
     throw e;
   }

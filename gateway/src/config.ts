@@ -6,7 +6,7 @@ import deployed from "./generated/deployed.json";
 
 export interface ActionKind {
   risk: Risk;
-  executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual";
+  executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual" | "task";
   /** Executed at once, without the owner, after the gateway's own safety checks. Only github.approve_ci and github.review. */
   auto?: boolean;
 }
@@ -46,6 +46,8 @@ export interface NetworkConfig {
   timezone: string;
   monthly_credit_usd: number;
   sandbox_repo: string;
+  /** The network's own code (decision 51); never one of `repos`. */
+  network_repo: string;
   repos: string[];
   action_kinds: Record<string, ActionKind>;
   agents: Record<string, AgentConfig>;
@@ -69,6 +71,13 @@ export interface NetworkConfig {
    * wakes per UTC day, and each wake's session budget. Absent or 0 wakes = off.
    */
   follow_up?: { daily_wakes: number; budget_cents: number };
+  /** The self-improvement loop (decision 55). `since` null = off; task_cents are Mandla's session budgets. */
+  self_improvement?: {
+    since: string | null;
+    stale_days: number;
+    commit_author: { name: string; email: string };
+    task_cents: { small: number; large: number };
+  };
   /** Model ids by tier, from models.yaml, for sessions the gateway starts on a stronger model. */
   model_tiers?: Record<string, string>;
 }

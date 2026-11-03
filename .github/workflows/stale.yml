@@ -1,0 +1,30 @@
+name: stale
+# Closes pull requests with no activity: marked stale after 23 days, closed 7 days
+# later (30 in all, matching stale_days). Issues, and PRs labelled keep-open, are left alone.
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    if: ${{ github.repository_owner == 'accordproject' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      # actions/stale keeps its progress between runs in the Actions cache.
+      actions: write
+    steps:
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9.1.0
+        with:
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 23
+          days-before-pr-close: 7
+          stale-pr-label: stale
+          exempt-pr-labels: keep-open
+          stale-pr-message: This pull request has had no activity for 23 days. It will be closed in 7 days unless something happens.
+          close-pr-message: Closed for inactivity.

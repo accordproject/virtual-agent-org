@@ -3,12 +3,15 @@
 // executor runs, so what Matt approves is what happens. Critical credentials live here,
 // never in agent sandboxes.
 
+import { CHANGE_TYPES, EVIDENCE_ID, MEASURES, OWNER_TYPES, changeRisk, startChange } from "./changes";
 import type { ActionKind, Person } from "./config";
 import type { Ctx } from "./context";
 import type { Decision } from "./db";
 import { parseTarget, type RepoRef } from "./github";
 import { resolveMentions } from "./people";
 import { GATEWAY_LABEL, checklist, failed, mergeChecks, prFacts } from "./review";
+import { maxRisk, toRisk, type Risk } from "./risk";
+import { isToolName } from "./toolDefs";
 import { toSeconds, type Chapter } from "./vimeo";
 
 export interface ExecResult {
@@ -43,9 +46,17 @@ interface ActionSpec {
   validate(ctx: Ctx, target: string, payload: Payload): Normalised;
   describe(target: string, payload: Payload): ActionView;
   execute(ctx: Ctx, d: Decision, n: Normalised): Promise<ExecResult>;
+  /** A risk floor that depends on the request itself, above the kind's own. */
+  risk?(n: Normalised): Risk;
+}
+
+/** The network's own repo: no action kind or tool may touch it, whatever `repos` says. */
+export function isNetworkRepo(ctx: Ctx, r: RepoRef): boolean {
+  return `${r.owner}/${r.repo}`.toLowerCase() === ctx.network.network_repo?.toLowerCase();
 }
 
 export function inScope(ctx: Ctx, r: RepoRef): boolean {
+  if (isNetworkRepo(ctx, r)) return false;
   const full = `${r.owner}/${r.repo}`.toLowerCase();
   const allowed = [ctx.network.sandbox_repo, ...ctx.network.repos].filter(Boolean).map((s) => s.toLowerCase());
   return allowed.includes(full);
@@ -643,6 +654,61 @@ const messagePerson: ActionSpec = {
   },
 };
 
+// ---- the self-improvement loop ------------------------------------------------
+
+/** A proposal to change an agent (or the network): checked here, built by Mandla once approved. */
+const specChange: ActionSpec = {
+  executor: "task",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const t = target.trim().toLowerCase();
+    if (t !== "network" && !ctx.network.agents[t]) f.problems.push("target must be an agent, e.g. mira, or network");
+    const type = f.text("change_type", { required: true });
+    if (type !== undefined && !CHANGE_TYPES.includes(type)) f.problems.push(`payload.change_type must be one of ${CHANGE_TYPES.join(", ")}`);
+    const problem = f.text("problem", { required: true, max: 2_000 });
+    const change = f.text("change", { required: true, max: 20_000 });
+    const evidence = evidenceIds(f);
+    const measure = f.text("measure", { required: true });
+    if (measure !== undefined && !MEASURES.includes(measure)) f.problems.push(`payload.measure must be one of ${MEASURES.join(", ")}`);
+    const tool = f.text("tool");
+    if (measure === "tool_refusals" && tool === undefined) f.problems.push("payload.tool is required for tool_refusals");
+    if (tool !== undefined && measure !== undefined && measure !== "tool_refusals") f.problems.push("payload.tool is only for tool_refusals");
+    else if (tool !== undefined && !isToolName(tool)) f.problems.push(`${tool} is not a gateway tool`);
+    f.done();
+    return { target: t, payload: compact({ change_type: type, problem, change, evidence, measure, tool }) };
+  },
+  describe(target, p) {
+    const type = str(p.change_type);
+    const lines = [
+      `Spec change: ${target}, ${type}${OWNER_TYPES.includes(type) ? " (owner-only type)" : ""}`,
+      `Evidence: ${nameList(p.evidence)}`,
+      `Measure: ${str(p.measure)}${p.tool ? ` (${str(p.tool)})` : ""}`,
+      "Approving starts a task for Mandla that opens a PR on the network repo; nothing merges without your review.",
+    ];
+    const blocks = [
+      { title: "Problem", text: str(p.problem) },
+      { title: "Change", text: str(p.change) },
+    ];
+    return withRest({ lines, blocks }, p, ["change_type", "problem", "change", "evidence", "measure", "tool"]);
+  },
+  execute: (ctx, d, n) => startChange(ctx, d, n),
+  risk: (n) => changeRisk(n.target, str(n.payload.change_type)),
+};
+
+/** The evidence: 1 to 30 ids of decisions, tasks, audit rows or status reports. */
+function evidenceIds(f: Fields): string[] | undefined {
+  const v = f.raw("evidence");
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
+    f.problems.push("payload.evidence must be a list of ids, e.g. [\"D-12\", \"audit:301\"]");
+    return undefined;
+  }
+  const ids = [...new Set((v as string[]).map((x) => x.trim()))];
+  if (ids.length < 1 || ids.length > 30) f.problems.push("payload.evidence needs 1 to 30 ids");
+  const bad = ids.filter((x) => !EVIDENCE_ID.test(x));
+  if (bad.length) f.problems.push(`payload.evidence: ${bad.map((x) => `"${x}"`).join(", ")} ${bad.length > 1 ? "are not ids" : "is not an id"} such as D-12, T-4, audit:301 or status:17`);
+  return ids;
+}
+
 // ---- manual and tool confirmations ----------------------------------------------
 
 const label = (k: string) => k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, " ");
@@ -717,7 +783,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
   "discord.ops": discordOps,
   "message.person": messagePerson,
   "email.send": manual,
-  "spec.change": manual,
+  "spec.change": specChange,
   other: manual,
   "tool.confirm": toolConfirm,
 };
@@ -748,6 +814,15 @@ export function validateAction(ctx: Ctx, kind: string, target: string, payload: 
   const spec = specFor(ctx, kind);
   if ("error" in spec) throw new ActionInvalid([spec.error]);
   return spec.validate(ctx, typeof target === "string" ? target : "", (payload ?? {}) as Payload);
+}
+
+/**
+ * The risk a checked request carries at least: the kind's floor, raised by the request
+ * itself. The kind's own rule applies even when it is carried out by hand.
+ */
+export function actionRisk(ctx: Ctx, kind: string, n: Normalised): Risk {
+  const own = ACTIONS[kind]?.risk?.(n) ?? "low";
+  return maxRisk(toRisk(ctx.network.action_kinds[kind]?.risk), own);
 }
 
 /** What approving this decision does, field by field, for the approval card. */

@@ -68,7 +68,7 @@ jobs:
           people=$(flag '^config/people\.yaml$')
           migrations=$(flag '^gateway/migrations/')
           gateway=$(flag '^(gateway/|config/|scripts/(compile|lib|repos)\.ts$)')
-          agents=$(flag '^(agents/|context/|config/|scripts/(deploy|compile|lib|repos)\.ts$|gateway/src/(toolDefs|managed|config)\.ts$)')
+          agents=$(flag '^(agents/|context/|evaluation/|config/|scripts/(deploy|compile|lib|repos)\.ts$|gateway/src/(toolDefs|managed|config)\.ts$)')
           out people "$people"
           out migrations "$migrations"
           out gateway "$gateway"
@@ -94,6 +94,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
@@ -176,6 +178,11 @@ jobs:
         if: ${{ steps.agents.outcome == 'success' && steps.ids.outputs.changed == 'true' }}
         run: npm run gateway:deploy
 
+      # Marks the changes in the commits just deployed as live (self-improvement loop).
+      - name: Record deployed changes
+        if: ${{ success() && env.DRY_RUN != 'true' }}
+        run: npx tsx scripts/record-deploy.ts
+
       - name: Keep the new ids
         if: ${{ !cancelled() && steps.ids.outputs.changed == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -204,6 +211,8 @@ jobs:
           add-paths: gateway/src/generated/deployed.json
           commit-message: "chore(deploy): record deployed resource ids"
           title: "chore(deploy): record deployed resource ids"
+          # The stale workflow leaves keep-open PRs alone; agent deploys wait on this one.
+          labels: keep-open
           body: |
             The deploy run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} created Managed Agents resources. This records their ids so the next deploy updates them instead of creating new ones.
 

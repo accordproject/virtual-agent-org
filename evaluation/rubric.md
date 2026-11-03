@@ -12,16 +12,36 @@ Each dimension is scored 1–4. Evidence is required for every score.
 
 ## Proposal (at most one per agent per week)
 
-Pick the single change most likely to improve the lowest score. Typical proposals:
+Pick the single change most likely to improve the lowest score, resting on recurring
+evidence from the scorecard's evidence section. Ada and Mandla are evaluated
+and proposed for like everyone else. Typical proposals, with their change type and
+measure:
 
-- Move a task to a cheaper tier when quality has scored 3+ for two weeks.
-- Move a task up a tier when quality scored 1–2 and the cause is reasoning, not data.
-- Tighten or clarify the spec where a rejection note recurs.
-- Add or remove a requestable action kind.
-- Retire an agent whose impact has scored 1–2 for four weeks after its first month.
+| Proposal | `change_type` | `measure` |
+| --- | --- | --- |
+| Tighten or clarify the spec where a rejection note recurs | `wording` | `repeat_rejections` or `approval_rate` |
+| Move work to a cheaper tier when quality has scored 3+ for two weeks | `tier` | `cost_per_approval` |
+| Move work up a tier when quality scored 1–2 and the cause is reasoning, not data | `tier` | `cost_per_approval` |
+| Fix a tool agents keep calling wrongly: its description, or split or combine tools | `tool` | `tool_refusals` (name the `tool`) |
+| Add or remove a requestable action kind or a tool an agent holds | `permission` (Matt's own) | `approval_rate` |
 
-Raise it with `request_action(kind="spec.change")`, including the exact text change
-and the evidence. Matt decides.
+Retiring an agent whose impact has scored 1–2 for four weeks after its first month is
+Matt's decision too: put it to him in the check-in, not as a `spec.change`.
+
+Raise it with `request_action(kind="spec.change", target=<agent or "network">)` and the
+payload `{change_type, problem, change, evidence, measure, tool?}`: the exact text
+change for `wording`, and 1 to 30 evidence ids (`D-41`, `T-12`, `audit:301`,
+`status:17`). For `repeat_rejections`, the evidence must include the `D-` ids of the
+rejected decisions the change is about: the gateway measures only those decisions'
+kinds. `permission`, `integration` and `architecture` are Matt's own decisions
+and always high risk. The gateway refuses proposals until the loop is on and the
+agent has 10 decided decisions or the loop has run 14 days. Matt decides; if he
+approves, Mandla opens a PR and he merges it. Several changes may be in flight
+for one agent; their results then share figures and name each other.
+
+14 days after going live the gateway reports `better`, `same`, `worse` or
+`too_little_data`. Score the next week's Impact with the result in mind, and propose
+reverting a `worse` change.
 
 ## Recording
 

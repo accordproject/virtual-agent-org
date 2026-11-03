@@ -218,7 +218,8 @@ export const TOOLS = {
     description:
       "The gateway's records for the agent audit, for one period of up to 92 days: each agent's spend (list cost in US cents), tokens, " +
       "models used and session origins; spend per day; decision outcomes with rejection notes; executed actions with their decision ids; " +
-      "tool denials; and external tool calls by tool and permission. Read-only.",
+      "tool denials and refusals; external tool calls by tool and permission; measured changes; status reports that listed blockers; " +
+      "and dismissed review findings. Read-only.",
     input_schema: {
       type: "object",
       properties: {
@@ -358,6 +359,37 @@ export const TOOLS = {
         note: str("The reverting or fixing PR, or who closed it and why. Optional"),
       },
       required: ["target", "outcome"],
+    },
+  },
+
+  // ---- mandla ----
+  submit_change: {
+    owner: "mandla",
+    description:
+      "Submit the finished change once. Give every changed file's whole new content, or delete: true to remove it. The gateway " +
+      "checks the paths (nothing under .github/ or gateway/src/generated/, no '..', no absolute paths; at most 50 files and " +
+      "500,000 characters), commits them to a branch change/c-n and opens one PR on the network's repo for the owner to review.",
+    input_schema: {
+      type: "object",
+      properties: {
+        change: str("The change id from your brief, e.g. C-3"),
+        title: str("PR title and commit subject in Conventional Commits form, at most 100 characters, e.g. docs(mira): thank the contributor first"),
+        body: str("What changed and why, citing the decision and evidence ids; at most 20,000 characters"),
+        files: {
+          type: "array",
+          description: "Every file the change touches, as a path from the repo root",
+          items: {
+            type: "object",
+            properties: {
+              path: str("Path from the repo root, e.g. agents/mira.md"),
+              content: str("The file's whole new content"),
+              delete: { type: "boolean", description: "true to delete the file; then omit content" },
+            },
+            required: ["path"],
+          },
+        },
+      },
+      required: ["change", "title", "body", "files"],
     },
   },
 } satisfies Record<string, ToolSpec>;

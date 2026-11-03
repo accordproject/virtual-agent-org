@@ -181,7 +181,47 @@ Then move to Phase 1: set `current_phase: 1` and `schedules_enabled: true`, add 
 repos with `npm run repo:add owner/name` (it checks the GitHub side), and run
 `npm run gateway:deploy` and `npm run deploy:agents`.
 
-## 9. Repo settings worth turning on
+## 9. Switch on the self-improvement loop
+
+The loop (decision 55) lets Ada propose changes to the network's own specs, tiers and
+tools; once you approve one, Mandla builds it and the gateway's App opens a pull
+request on your copy of this repo. It is off until you set a start date. Do this once
+Phase 1 is running.
+
+1. **Install the App on this repo.** In the gateway App's installation settings, add
+   your copy of this repo to the repositories it can reach. Set
+   `github.network_repo` in `config/network.yaml` to it. Don't add it to `repos`;
+   `npm test` refuses that.
+2. **Check the App lacks the Workflows permission.** In the App's settings, under
+   Repository permissions, Workflows must be "No access". Then the App can't change
+   CI or the deploy workflow, even by mistake.
+3. **Set the commit author** to the App's bot identity, so its commits carry a DCO
+   sign-off that matches the author. Find the bot's user id:
+
+   ```sh
+   gh api "users/<app-slug>%5Bbot%5D" --jq .id
+   ```
+
+   and set `self_improvement.commit_author` in `config/network.yaml` to
+   `{ name: "<app-slug>[bot]", email: "<id>+<app-slug>[bot]@users.noreply.github.com" }`.
+   `npm test` refuses the placeholder email once the loop is on.
+4. **Switch it on.** Set `self_improvement.since` to the start date (e.g.
+   `2026-11-10`). Ada can propose a change for an agent once it has 10 decided
+   decisions, or 14 days after that date. Keep `stale_days` equal to the days
+   `.github/workflows/stale.yml` takes to close a PR (23 to mark it stale plus 7 to
+   close it), and change that workflow's `repository_owner` check to your
+   organisation.
+5. Run `npm test`, then deploy the gateway and the agents.
+
+To turn the loop off, set `self_improvement.since` back to `null` and deploy the
+gateway. That stops new proposals, but proposal cards already in the queue stay
+valid: approving one still starts Mandla. Reject them.
+
+Mandla's budgets are `budgets.mechanic_small_usd` and `mechanic_large_usd`. The
+`deploy` workflow records which changes each deploy made live; it already holds the
+D1 credential it needs.
+
+## 10. Repo settings worth turning on
 
 - Secret scanning and push protection.
 - Branch protection on `main`: pull requests, the `ci` check and the DCO check. The

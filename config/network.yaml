@@ -14,6 +14,8 @@ github:
   org: accordproject
   # Phase 0 runs only against the sandbox repo. Add real repos in Phase 1.
   sandbox_repo: accordproject/virtual-agent-org-sandbox
+  # The network's own code (decision 51). Never in repos: only Mandla's tasks touch it.
+  network_repo: accordproject/virtual-agent-org
   # Add a repo with `npm run repo:add owner/name`; it also checks the GitHub side.
   repos:
     - accordproject/concerto
@@ -46,6 +48,18 @@ budgets:
   follow_up_daily_wakes: 5
   # Session budget for each wake (USD).
   follow_up_budget_usd: 0.50
+  # Session budget for each of Mandla's tasks (USD): small is wording and tier changes,
+  # large is tool changes and the owner-only types.
+  mechanic_small_usd: 1
+  mechanic_large_usd: 5
+
+# The self-improvement loop (decision 55).
+self_improvement:
+  since: 2026-11-03      # ISO date the loop starts; null = off
+  stale_days: 30         # matches .github/workflows/stale.yml
+  # Author of the gateway's commits to the network repo: the GitHub App's bot user
+  # (gh api "/users/<app slug>[bot]" gives the id).
+  commit_author: { name: "mira-accord-project[bot]", email: "350694384+mira-accord-project[bot]@users.noreply.github.com" }
 
 agents:
   # name: phase in which the agent is first deployed
@@ -53,6 +67,7 @@ agents:
   mira: 1
   vera: 1
   otto: 1
+  mandla: 1
   rosa: 2
   juno: 2
   sage: 1

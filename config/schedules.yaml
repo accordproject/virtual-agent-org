@@ -13,7 +13,7 @@ schedules:
       assign each blocked task, failed decision and task idle more than 4 days to an agent
       who can fix it, or put it to Matt as a decision, never twice for the same id. Then send
       Matt one check-in message with send_to_matt in the standard format, with the
-      follow-ups listed.
+      follow-ups and any new change results listed.
 
   - name: ada-weekly-evaluation
     agent: ada
@@ -22,7 +22,7 @@ schedules:
     prompt: >
       Run the weekly evaluation for every active agent using evaluation/rubric.md.
       Record each evaluation with record_evaluation and raise at most one spec.change
-      request per agent.
+      request per agent, following "Proposing a change" in your instructions.
 
   - name: mira-triage
     agent: mira
@@ -61,7 +61,8 @@ schedules:
     cron: "0 14 * * 5"          # before Ada's evaluation
     budget_usd: 1.50
     prompt: >
-      Build the weekly scorecard per agent: KPIs, decision outcomes, spend and cost per outcome.
+      Build the weekly scorecard per agent: KPIs, decision outcomes, spend and cost per
+      outcome, the evidence section and the change results.
 
   - name: otto-tech-wg
     agent: otto

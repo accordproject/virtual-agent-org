@@ -73,7 +73,7 @@ export function validate(cfg = loadAll()): string[] {
   if (!["discord", "telegram", "both"].includes(app)) errs.push(`approvals_app must be discord, telegram or both, not "${app}"`);
 
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
-    if (!["github", "discord", "discord_ops", "discord_dm", "vimeo", "manual"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
+    if (!["github", "discord", "discord_ops", "discord_dm", "vimeo", "manual", "task"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
     // Only kinds the gateway has its own safety checks for may skip the owner.
     if (v.auto && !AUTO_KINDS.includes(k)) errs.push(`action kind ${k}: auto is only allowed for ${AUTO_KINDS.join(" and ")}`);
   }
@@ -84,6 +84,27 @@ export function validate(cfg = loadAll()): string[] {
   if (wakes !== undefined && !(Number.isInteger(wakes) && wakes >= 0 && wakes <= 50)) errs.push("network.yaml: budgets.follow_up_daily_wakes must be a whole number from 0 to 50");
   const wakeUsd = network.budgets.follow_up_budget_usd;
   if (wakeUsd !== undefined && !(typeof wakeUsd === "number" && wakeUsd > 0 && wakeUsd <= 3)) errs.push("network.yaml: budgets.follow_up_budget_usd must be more than 0 and at most 3");
+
+  const own = network.github.network_repo;
+  if (!REPO_RE.test(String(own))) errs.push(`github.network_repo: "${own}" should be owner/name`);
+  else {
+    if (network.github.sandbox_repo === own) errs.push(`github.sandbox_repo: ${own} is the network's own repo (decision 51)`);
+    if ((network.github.repos ?? []).includes(own)) errs.push(`github.repos: ${own} is the network's own repo (decision 51)`);
+  }
+  if ((network.github.repos ?? []).includes(network.github.sandbox_repo)) errs.push(`github.repos: ${network.github.sandbox_repo} is the sandbox repo, not a repo in scope (decision 51)`);
+  for (const k of ["mechanic_small_usd", "mechanic_large_usd"] as const) {
+    const v = network.budgets[k];
+    if (!(typeof v === "number" && v > 0 && v <= 10)) errs.push(`network.yaml: budgets.${k} must be more than 0 and at most 10`);
+  }
+  const si = network.self_improvement;
+  if (!si) errs.push("network.yaml: self_improvement is required");
+  else {
+    if (si.since !== null && !(typeof si.since === "string" && /^\d{4}-\d{2}-\d{2}(T[\d:.+Z-]+)?$/.test(si.since) && !Number.isNaN(Date.parse(si.since)))) errs.push("self_improvement.since must be an ISO date or null");
+    if (!(Number.isInteger(si.stale_days) && si.stale_days >= 1 && si.stale_days <= 365)) errs.push("self_improvement.stale_days must be a whole number from 1 to 365");
+    const a = si.commit_author;
+    if (!a || typeof a.name !== "string" || !a.name.trim() || typeof a.email !== "string" || !a.email.includes("@")) errs.push("self_improvement.commit_author needs a name and an email");
+    else if (si.since !== null && /[<>]/.test(a.email)) errs.push("self_improvement.commit_author.email is still a placeholder: set the App's bot email before switching the loop on");
+  }
 
   const repos = network.github.repos ?? [];
   if (!Array.isArray(repos)) errs.push("github.repos must be a list");
@@ -168,6 +189,17 @@ export function validate(cfg = loadAll()): string[] {
   }
   if (ada && (ada.networking ?? "limited") !== "limited") errs.push("ada must stay on limited networking");
 
+  // Only Ada asks for spec changes; the gateway turns them into Mandla's tasks (decision 51).
+  for (const [n, p] of Object.entries(permissions.agents)) {
+    if (n !== "ada" && p.requestable.includes("spec.change")) errs.push(`${n}: only ada may request spec.change`);
+  }
+  // Mandla works in a sandbox on the network's code and holds no credentials (decision 51).
+  const mech = permissions.agents.mandla;
+  const mechTools = ["read", "write", "edit", "glob", "bash"];
+  if (mech && ((Array.isArray(mech.mcp_servers) ? mech.mcp_servers.length : Object.keys(mech.mcp_servers).length) || mech.requestable.length || mech.builtin_tools.some((t) => !mechTools.includes(t)))) {
+    errs.push("mandla must have no MCP servers, no requestable kinds, and only read, write, edit, glob and bash");
+  }
+
   const seen = new Set<string>();
   for (const s of schedules.schedules) {
     if (seen.has(s.name)) errs.push(`schedule ${s.name}: duplicate name`);
@@ -195,6 +227,16 @@ export function compile(cfg = loadAll()) {
       budget_cents: Math.round((network.budgets.follow_up_budget_usd ?? 0.5) * 100),
     },
     sandbox_repo: network.github.sandbox_repo,
+    network_repo: network.github.network_repo,
+    self_improvement: {
+      since: network.self_improvement?.since ?? null,
+      stale_days: network.self_improvement?.stale_days ?? 30,
+      commit_author: network.self_improvement?.commit_author,
+      task_cents: {
+        small: Math.round((network.budgets.mechanic_small_usd ?? 1) * 100),
+        large: Math.round((network.budgets.mechanic_large_usd ?? 5) * 100),
+      },
+    },
     repos: network.github.repos ?? [],
     action_kinds: permissions.action_kinds,
     discord_approval_max_risk: permissions.discord_approval_max_risk ?? "none",

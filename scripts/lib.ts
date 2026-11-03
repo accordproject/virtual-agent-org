@@ -35,8 +35,9 @@ export function loadSpecs(): Record<string, Spec> {
 
 export interface NetworkYaml {
   network: { name: string; timezone: string; current_phase: number; schedules_enabled?: boolean };
-  github: { org: string; sandbox_repo: string; repos: string[] };
-  budgets: { monthly_credit_usd: number; member_daily_messages?: number; follow_up_daily_wakes?: number; follow_up_budget_usd?: number };
+  github: { org: string; sandbox_repo: string; network_repo: string; repos: string[] };
+  budgets: { monthly_credit_usd: number; member_daily_messages?: number; follow_up_daily_wakes?: number; follow_up_budget_usd?: number; mechanic_small_usd?: number; mechanic_large_usd?: number };
+  self_improvement?: { since: string | null; stale_days: number; commit_author: { name: string; email: string } };
   agents: Record<string, number>;
 }
 export interface ModelsYaml {
@@ -47,7 +48,7 @@ export interface PermissionsYaml {
   discord_approval_max_risk?: "none" | "low" | "medium";
   approvals_app?: "discord" | "telegram" | "both";
   review_check_required?: boolean;
-  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual"; auto?: boolean }>;
+  action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual" | "task"; auto?: boolean }>;
   agents: Record<
     string,
     {

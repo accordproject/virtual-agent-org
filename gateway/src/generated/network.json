@@ -9,6 +9,19 @@
     "budget_cents": 50
   },
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
+  "network_repo": "accordproject/virtual-agent-org",
+  "self_improvement": {
+    "since": "2026-11-03",
+    "stale_days": 30,
+    "commit_author": {
+      "name": "mira-accord-project[bot]",
+      "email": "350694384+mira-accord-project[bot]@users.noreply.github.com"
+    },
+    "task_cents": {
+      "small": 100,
+      "large": 500
+    }
+  },
   "repos": [
     "accordproject/concerto",
     "accordproject/template-engine",
@@ -75,8 +88,8 @@
       "executor": "manual"
     },
     "spec.change": {
-      "risk": "high",
-      "executor": "manual"
+      "risk": "low",
+      "executor": "task"
     },
     "other": {
       "risk": "high",
@@ -297,6 +310,13 @@
         "message.person",
         "discord.ops"
       ],
+      "model": "claude-sonnet-5-5"
+    },
+    "mandla": {
+      "name": "mandla",
+      "title": "Mechanic",
+      "phase": 1,
+      "requestable": [],
       "model": "claude-sonnet-5-5"
     },
     "rosa": {

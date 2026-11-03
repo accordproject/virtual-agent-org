@@ -4,6 +4,7 @@ import { NETWORK as COMPILED } from "../src/config";
 import type { Ctx } from "../src/context";
 import { executeDecision } from "../src/executors";
 import { decisionCard, discordCard, discordCardFits } from "../src/format";
+import { handleTool } from "../src/tools";
 import { HEAD, NETWORK, makeTestCtx } from "./helpers";
 
 /** The test network with every kind the gateway knows, as permissions.yaml sets them. */
@@ -248,5 +249,18 @@ describe("execution checks the stored request again", () => {
     ctx.network = { ...ctx.network, action_kinds: { ...ctx.network.action_kinds, "github.comment": { risk: "low", executor: "manual" } } };
     const d = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: PR, summary: "s", rationale: "r", risk: "low", payload: { text: "Thanks" } });
     expect(await executeDecision(ctx, d)).toMatchObject({ ok: true, manual: true });
+  });
+
+  it("no action kind targets the network's own repo, even if it is listed", async () => {
+    const own = "accordproject/virtual-agent-org";
+    const { ctx } = testCtx({ network: { ...NETWORK, action_kinds: ALL_KINDS, repos: [...NETWORK.repos, own], network_repo: own } });
+    const refused = [`${own} is not in the configured repos`];
+    for (const kind of ["github.comment", "github.merge", "github.close"]) {
+      expect(problems(ctx, kind, `${own}#1`, { sha: HEAD, text: "hi" }), kind).toEqual(expect.arrayContaining(refused));
+    }
+    expect(problems(ctx, "github.docs_pr", own, { path: "AGENTS.md", content: "# Agents" })).toEqual(expect.arrayContaining(refused));
+    expect(problems(ctx, "github.comment", `${own.toUpperCase()}#1`, { text: "hi" })).toEqual(expect.arrayContaining([expect.stringContaining("is not in the configured repos")]));
+    await expect(handleTool(ctx, "mira", "s", "label_pr", { target: `${own}#1`, labels: ["x"] })).rejects.toThrow("is not in the configured repos");
+    await expect(handleTool(ctx, "mira", "s", "pr_queue", { repo: own })).rejects.toThrow("is not in the configured repos");
   });
 });

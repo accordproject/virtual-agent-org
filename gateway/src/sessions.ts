@@ -68,8 +68,10 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
  * session's last status report listed blockers, and Ada is woken to follow it up
  * (decision 50); otherwise it is done, and so is a blocked task it was assigned to
  * follow up. A session that ran out of budget or ended in error leaves its task
- * blocked on that, so Ada decides what happens to it (decision 53). Runs on every pass over an idle
- * session, so it acts only when the status changes.
+ * blocked on that, so Ada decides what happens to it (decision 53). A change task
+ * whose change is still building never opened its PR, so it is blocked however its
+ * session stopped, and a second such block closes the change (decision 55). Runs on
+ * every pass over an idle session, so it acts only when the status changes.
  */
 /** Why the gateway left a task blocked, as Ada reads it in get_status. */
 export const STOPPED = {
@@ -82,13 +84,22 @@ export const STOPPED = {
 async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "finished" | "budget" | "ended") {
   const task = await ctx.db.getTask(taskId);
   if (!task || ["done", "blocked", "failed", "cancelled"].includes(task.status)) return;
-  const reason = { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
+  const change = task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
+  const unsubmitted = change?.state === "building";
+  const reason = unsubmitted
+    ? `${change.id}: no change submitted${{ finished: "", budget: " (budget reached)", ended: " (session ended)" }[end]}`
+    : { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
   const blockers = (await ctx.db.sessionBlockers(sessionId)) ?? [];
   if (reason) blockers.unshift(reason);
   if (blockers.length) {
     await ctx.db.setTask(task.id, "blocked");
     if (reason) await ctx.db.setBlockedReason(task.id, reason);
     await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.task_blocked", detail: { task: task.id, blockers: blockers.slice(0, 5) } });
+    // The second attempt at a change that ends this way closes it; Ada still puts it to the owner.
+    if (unsubmitted && task.follows_up?.startsWith("T-")) {
+      await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "blocked twice" });
+      await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.change_closed", detail: { change: change.id, reason: "blocked twice" } });
+    }
     await wakeAda(ctx, { kind: "task", task, blockers });
     return;
   }
@@ -126,7 +137,9 @@ async function handleEvent(
         // unable to take new messages. Unexpected failures go to the audit log.
         if (err instanceof ToolDenied) {
           await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_denied", tool: e.name, permission: "deny", detail: err.message });
-        } else if (!(err instanceof ToolError)) {
+        } else if (err instanceof ToolError) {
+          await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_refused", tool: e.name, detail: err.message.slice(0, 300) });
+        } else {
           await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: "gateway.tool_error", tool: e.name, detail: String(err) });
         }
         result =

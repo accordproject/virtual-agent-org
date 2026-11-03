@@ -5,6 +5,9 @@ import type { Tokens } from "./managed";
 export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "failed";
 export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 
+/** Decision kinds that say nothing about an agent's judgement, left out of approval measures. */
+export const NOT_JUDGEMENT = ["tool.confirm", "github.review", "github.approve_ci"];
+
 export interface Decision {
   id: string;
   seq: number;
@@ -38,7 +41,7 @@ export interface Task {
   status: string;
   session_id: string | null;
   /** review_check only when the gateway started it for one PR at one commit (decision 2A). */
-  kind: "task" | "review_check";
+  kind: "task" | "review_check" | "change";
   review_target: string | null;
   review_sha: string | null;
   /** The task or decision (T-12, D-41) this task was assigned to follow up, if any. */
@@ -46,6 +49,34 @@ export interface Task {
   /** Why the gateway left it blocked, when its session stopped without finishing (decision 53). */
   blocked_reason: string | null;
   created_at: string;
+}
+
+export interface Change {
+  id: string;
+  seq: number;
+  /** The agent changed, or 'network'. */
+  agent: string;
+  decision_id: string;
+  change_type: string;
+  measure: string;
+  tool: string | null;
+  /** Decision kinds named in the evidence (JSON array). */
+  kinds: string;
+  state: "building" | "pr_open" | "live" | "measured" | "closed";
+  task_id: string | null;
+  pr_url: string | null;
+  pr_opened_at: string | null;
+  live_at: string | null;
+  measured_at: string | null;
+  before: number | null;
+  after: number | null;
+  before_cases: number | null;
+  after_cases: number | null;
+  verdict: "better" | "same" | "worse" | "too_little_data" | null;
+  overlaps: string | null;
+  closed_reason: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Review {
@@ -103,7 +134,7 @@ export class Db {
 
   // ---- counters -----------------------------------------------------------
 
-  async next(counter: "decision" | "task" | "review" | "finding"): Promise<number> {
+  async next(counter: "decision" | "task" | "review" | "finding" | "change"): Promise<number> {
     const row = await this.db
       .prepare("UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value")
       .bind(counter)
@@ -261,11 +292,46 @@ export class Db {
   denials(since: string, until: string, limit = 200) {
     return this.db
       .prepare(
-        "SELECT ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
+        "SELECT id, ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
           "WHERE ts >= ? AND ts < ? AND (permission = 'deny' OR event_type = 'gateway.tool_denied') ORDER BY id LIMIT ?",
       )
       .bind(since, until, limit)
-      .all<{ ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .all<{ id: number; ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .then((r) => r.results);
+  }
+
+  /** Custom tool calls the gateway refused for bad input. */
+  refusals(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare(
+        "SELECT id, ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
+          "WHERE ts >= ? AND ts < ? AND event_type = 'gateway.tool_refused' ORDER BY id LIMIT ?",
+      )
+      .bind(since, until, limit)
+      .all<{ id: number; ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .then((r) => r.results);
+  }
+
+  /** Status reports in [since, until) that listed blockers, cited as status:<id>. */
+  blockedReports(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare("SELECT id, agent, blocked, created_at FROM statuses WHERE created_at >= ? AND created_at < ? AND blocked != '[]' ORDER BY id LIMIT ?")
+      .bind(since, until, limit)
+      .all<{ id: number; agent: string; blocked: string; created_at: string }>()
+      .then((r) =>
+        r.results.map((s) => ({ id: `status:${s.id}`, agent: s.agent, blockers: JSON.parse(s.blocked) as string[], created_at: s.created_at })).filter((s) => s.blockers.length),
+      );
+  }
+
+  /** Review findings dismissed in [since, until). */
+  dismissedFindings(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare(
+        "SELECT id, target, area, summary, outcome_note FROM review_findings " +
+          "WHERE outcome = 'dismissed' AND outcome_at >= ? AND outcome_at < ? ORDER BY seq LIMIT ?",
+      )
+      .bind(since, until, limit)
+      .all<Pick<Finding, "id" | "target" | "area" | "summary" | "outcome_note">>()
       .then((r) => r.results);
   }
 
@@ -348,6 +414,30 @@ export class Db {
     return (await this.db.prepare(sql).bind(...args).all<Decision>()).results;
   }
 
+  /** Decided decisions (approved, executed, failed or rejected) for one agent, or all when null, leaving out some kinds. */
+  async countDecided(agent: string | null, excludeKinds: string[] = []): Promise<number> {
+    const where = ["status IN ('approved', 'executed', 'failed', 'rejected')"];
+    const args: unknown[] = [];
+    if (agent) {
+      where.push("agent = ?");
+      args.push(agent);
+    }
+    if (excludeKinds.length) {
+      where.push(`kind NOT IN (${excludeKinds.map(() => "?").join(",")})`);
+      args.push(...excludeKinds);
+    }
+    const row = await this.db.prepare(`SELECT COUNT(*) AS n FROM decisions WHERE ${where.join(" AND ")}`).bind(...args).first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  /** The newest decision of `kind` for `target` requested since `since`, whatever its status. */
+  latestDecisionFor(kind: string, target: string, since: string) {
+    return this.db
+      .prepare("SELECT * FROM decisions WHERE kind = ? AND target = ? AND created_at >= ? ORDER BY seq DESC LIMIT 1")
+      .bind(kind, target, since)
+      .first<Decision>();
+  }
+
   /** Moves an open decision to approved/rejected. Returns false if it was not open. */
   async decide(id: string, status: "approved" | "rejected", note?: string): Promise<boolean> {
     const r = await this.db
@@ -397,14 +487,143 @@ export class Db {
     due?: string;
     review?: { target: string; sha: string };
     follows_up?: string;
+    kind?: "change";
   }): Promise<Task> {
     const seq = await this.next("task");
     const id = `T-${seq}`;
     await this.db
       .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha, follows_up) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : "task", t.review?.target ?? null, t.review?.sha ?? null, t.follows_up ?? null)
+      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : (t.kind ?? "task"), t.review?.target ?? null, t.review?.sha ?? null, t.follows_up ?? null)
       .run();
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
+  }
+
+  // ---- changes ------------------------------------------------------------
+
+  async createChange(c: { agent: string; decision_id: string; change_type: string; measure: string; tool?: string; kinds: string[] }): Promise<Change> {
+    const seq = await this.next("change");
+    const id = `C-${seq}`;
+    await this.db
+      .prepare("INSERT INTO changes (id, seq, agent, decision_id, change_type, measure, tool, kinds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, seq, c.agent, c.decision_id, c.change_type, c.measure, c.tool ?? null, JSON.stringify(c.kinds))
+      .run();
+    return (await this.getChange(id))!;
+  }
+
+  async getChange(id: string): Promise<Change | null> {
+    return this.db.prepare("SELECT * FROM changes WHERE id = ?").bind(id).first<Change>();
+  }
+
+  async changeForTask(taskId: string): Promise<Change | null> {
+    return this.db.prepare("SELECT * FROM changes WHERE task_id = ?").bind(taskId).first<Change>();
+  }
+
+  async updateChange(id: string, fields: Partial<Omit<Change, "id" | "seq">>): Promise<void> {
+    const entries = Object.entries(fields).filter(([k, v]) => v !== undefined && k !== "updated_at");
+    const sets = [...entries.map(([k]) => `${k} = ?`), "updated_at = datetime('now')"];
+    await this.db
+      .prepare(`UPDATE changes SET ${sets.join(", ")} WHERE id = ?`)
+      .bind(...entries.map(([, v]) => v), id)
+      .run();
+  }
+
+  async changesIn(states: Change["state"][]): Promise<Change[]> {
+    if (!states.length) return [];
+    const res = await this.db
+      .prepare(`SELECT * FROM changes WHERE state IN (${states.map(() => "?").join(",")}) ORDER BY seq`)
+      .bind(...states)
+      .all<Change>();
+    return res.results;
+  }
+
+  /**
+   * Ids of other changes that went live in [from, to] and share `agent`'s figures: its own
+   * and the network's, or every agent's when `agent` is the network.
+   */
+  async changesLiveBetween(agent: string, exceptId: string, from: string, to: string): Promise<string[]> {
+    const res = await this.db
+      .prepare("SELECT id FROM changes WHERE (? = 'network' OR agent IN (?, 'network')) AND id != ? AND live_at >= ? AND live_at <= ? ORDER BY seq")
+      .bind(agent, agent, exceptId, from, to)
+      .all<{ id: string }>();
+    return res.results.map((r) => r.id);
+  }
+
+  /** Changes still open, plus those measured or closed since `since`; one agent's, or all. */
+  async recentChanges(since: string, agent?: string): Promise<Change[]> {
+    const res = await this.db
+      .prepare(
+        "SELECT * FROM changes WHERE (state NOT IN ('measured', 'closed') OR COALESCE(measured_at, updated_at) >= ?)" +
+          (agent ? " AND agent = ?" : "") + " ORDER BY seq",
+      )
+      .bind(...(agent ? [since, agent] : [since]))
+      .all<Change>();
+    return res.results;
+  }
+
+  /** Changes measured in [since, until). */
+  async changesMeasured(since: string, until: string): Promise<Change[]> {
+    const res = await this.db
+      .prepare("SELECT * FROM changes WHERE measured_at >= ? AND measured_at < ? ORDER BY seq")
+      .bind(since, until)
+      .all<Change>();
+    return res.results;
+  }
+
+  /**
+   * One side of a change's measure over [since, until): the figure, and how many cases it
+   * rests on. `agent: "network"` counts every agent. Decisions count by when they were decided.
+   */
+  async measureWindow(
+    m: { agent: string; measure: string; tool?: string; kinds: string[] },
+    since: string,
+    until: string,
+  ): Promise<{ value: number | null; cases: number }> {
+    const agent = m.agent === "network" ? null : m.agent;
+    const ratio = (n: number, cases: number) => ({ value: cases ? n / cases : null, cases });
+
+    if (m.measure === "tool_refusals") {
+      const row = await this.db
+        .prepare(
+          "SELECT SUM(event_type = 'agent.custom_tool_use') AS calls, SUM(event_type IN ('gateway.tool_refused', 'gateway.tool_denied')) AS refused " +
+            "FROM audit WHERE tool = ? AND ts >= ? AND ts < ?" + (agent ? " AND agent = ?" : ""),
+        )
+        .bind(m.tool ?? "", since, until, ...(agent ? [agent] : []))
+        .first<{ calls: number | null; refused: number | null }>();
+      return ratio(row?.refused ?? 0, row?.calls ?? 0);
+    }
+
+    const where = ["status IN ('approved', 'executed', 'failed', 'rejected')", "decided_at >= ?", "decided_at < ?"];
+    const args: unknown[] = [since, until];
+    if (agent) {
+      where.push("agent = ?");
+      args.push(agent);
+    }
+    if (m.measure === "repeat_rejections") {
+      if (!m.kinds.length) return { value: null, cases: 0 };
+      where.push(`kind IN (${m.kinds.map(() => "?").join(",")})`);
+      args.push(...m.kinds);
+    } else {
+      where.push(`kind NOT IN (${NOT_JUDGEMENT.map(() => "?").join(",")})`);
+      args.push(...NOT_JUDGEMENT);
+    }
+    const d = await this.db
+      .prepare(
+        "SELECT COUNT(*) AS decided, SUM(status IN ('approved', 'executed', 'failed')) AS approved, SUM(status = 'rejected') AS rejected " +
+          `FROM decisions WHERE ${where.join(" AND ")}`,
+      )
+      .bind(...args)
+      .first<{ decided: number; approved: number | null; rejected: number | null }>();
+    const decided = d?.decided ?? 0;
+    const approved = d?.approved ?? 0;
+    if (m.measure === "approval_rate") return ratio(approved, decided);
+    if (m.measure === "repeat_rejections") return ratio(d?.rejected ?? 0, decided);
+
+    // cost_per_approval: list cost of the sessions started in the window per approved decision.
+    const cost = await this.db
+      .prepare("SELECT SUM(cost_cents) AS cents FROM sessions WHERE created_at >= ? AND created_at < ?" + (agent ? " AND agent = ?" : ""))
+      .bind(since, until, ...(agent ? [agent] : []))
+      .first<{ cents: number | null }>();
+    return ratio(cost?.cents ?? 0, approved);
   }
 
   /** The task a session was started for, if any. */

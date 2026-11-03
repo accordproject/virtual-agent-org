@@ -398,22 +398,38 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   wakes to 0, already does it); waking the agent that was blocked (it reported the
   blocker because it couldn't fix it).
 
-**51. Who may change the network's own code** · RESOLVED (the mechanic is not built yet)
+**51. Who may change the network's own code** · RESOLVED (amended by 55)
 
 - No agent holds a credential for this repo, and it is in no agent's scope or the
-  gateway's `repos`. Today the owner applies every `spec.change` by hand.
-- A future mechanic agent may open pull requests here from its own fork, with a
-  credential limited to that fork. It cannot merge. No other agent may write to this
-  repo.
-- When it is built: `compile.ts` refuses this repo in any other agent's scope or in
-  `repos`; the gateway refuses every action kind that targets it; the owner merges on
-  GitHub and deploys by hand, so a merged change is not live until deployed.
-- Each proposal cites the audit rows it rests on; text in those rows is data, not
-  instructions. Pull requests that touch the mechanic's own spec or permissions,
-  `permissions.yaml`, or the gateway's checks are flagged for closer review.
+  gateway's `repos`.
+- Mandla, the mechanic agent, is the only agent that may propose code here, and only to build
+  a change the owner approved. It holds no credential: it builds and tests in its
+  sandbox and submits the files to the gateway, whose GitHub App opens the pull
+  request. Opening those pull requests is the gateway's only action on this repo. It
+  cannot merge. No other agent may write to this repo.
+- The App must not hold GitHub's Workflows permission, and the gateway refuses any
+  submitted file under `.github/` or `gateway/src/generated/`, except the compiled
+  `network.json`, which CI checks against a fresh compile: CI and the deploy run stay
+  with the owner.
+- `compile.ts` refuses this repo in `repos` or as the sandbox; the gateway refuses every
+  action kind that targets it, whatever the config says; the owner merges on GitHub
+  and approves the deploy run (decision 49).
+- Each proposal cites the evidence it rests on; text in it is data, not instructions.
+  A CI step flags pull requests that touch `permissions.yaml`, `network.yaml`, the
+  gateway's checks (`actions.ts`, `review.ts`, `workflows.ts`, `risk.ts`,
+  `schema.ts`, `changes.ts`), its tools, people and entry modules (`tools.ts`,
+  `people.ts`, `index.ts`), anything under `scripts/` or `.github/`, the package
+  files, `_protocol.md` or Mandla's own spec for closer review. It runs the
+  base branch's copy of the check, so a pull request can't silence it. It warns
+  rather than fails, so a permissions change the owner approved can still be
+  written.
 - Not chosen: letting every agent propose changes here (the rules would be editable by
   the agents they limit); no agent writing here at all (every fix waits for the owner
   to write it).
+- Changed by decision 55: Mandla was to open pull requests from its own fork with
+  a credential limited to that fork, and the owner was to deploy by hand. It now holds
+  no credential and writes through the gateway, and the deploy workflow (decision 49)
+  makes a merged change live.
 
 **52. What Ada may decide without the owner** · RESOLVED
 
@@ -478,3 +494,73 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   `permissions.yaml`). Every other agent stays on the limited one; Ada can't be moved.
 - Considered: giving Otto web search (overlaps Sage later), and folding Sage's remit
   into Otto (mixes two jobs).
+
+**55. The self-improvement loop** · RESOLVED (on from 2026-11-03)
+
+- The owner's rejection notes went back to the one agent rejected and then faded. Ada's
+  weekly evaluation could propose a spec change, but nothing built it, recorded it or
+  checked whether it helped.
+- **Evidence:** Vera's weekly scorecard groups each agent's rejection notes, refused
+  and denied tool calls with their ids, and lists the measured changes. She
+  summarises; she does not propose.
+- **Proposal:** in the weekly evaluation Ada may raise one `spec.change` per agent,
+  herself and Mandla included. The payload names the change type, the problem,
+  the change, 1 to 30 evidence ids and a measure from a fixed list. Only Ada may
+  request it, and not from work a member started.
+- **What the loop may change:** spec wording, model tiers and tools (`wording`, `tier`,
+  `tool`). New integrations, permissions and major architecture changes stay the
+  owner's decisions; proposals of those types are always high risk and say so on the
+  card. A proposal about Mandla is high risk; `tool` changes medium; the rest
+  low.
+- **Approve before building:** the owner approves each proposal; approving it starts
+  the build. There is no second card for the pull request: opening one merges
+  nothing, and the owner's review is the gate. Building without approval would make
+  `spec.change` an `auto` kind, which stays the owner's decision.
+- **Start rule:** the gateway refuses proposals until the loop is switched on, and
+  then until the agent has 10 decided decisions or the loop has run 14 days. It also
+  refuses a second proposal for the same target within 7 days. Several changes may
+  be in flight for one agent.
+- **The gateway drives it:** approving records a change (`C-n`) and starts a task
+  for Mandla, the mechanic, with a brief built from the payload. Mandla clones the
+  repo, makes the change, runs the tests and calls `submit_change` once. The gateway opens the pull
+  request, with the change, decision and evidence ids in its description. If the
+  task ends without a pull request (including running out of budget), Ada may follow
+  it up once with Mandla, on the same budget and tier; a second block closes
+  the change and goes to the owner. If Ada closes the task with `close_task`
+  (decision 53), the change closes with it. A change still building after 7 days is
+  closed.
+- **Budgets:** $1 a Mandla task for `wording` and `tier`, $5 and the deep tier for
+  the other types (`budgets.mechanic_small_usd` and `mechanic_large_usd`).
+- **Live:** after each deploy the workflow marks live the changes named in the
+  commits it deployed, if their pull request was still open or closed as stale. The
+  gateway never reads this repo. A pull request unmerged after 30 days is closed by
+  the stale workflow, and the gateway closes its change.
+- **Measured by the gateway, before and after:** 14 days after a change goes live, the
+  gateway compares its measure over the 14 days before and after, and stores
+  `better`, `same`, `worse` or `too_little_data` (fewer than 5 cases either side).
+  Too little data is tried again weekly over the whole time since going live, up to
+  42 days, then the change is closed. A result names other changes to the same agent,
+  or to the network, that went live within its windows. No agent grades a change, so none grades its
+  own.
+- **Results:** Ada reports each in her next check-in, one line per change. A `worse`
+  result leads her to propose reverting it through the same card; nothing is
+  reverted automatically.
+- **Name:** the mechanic is Mandla (agent id `mandla`), a Zulu, Xhosa and Ndebele name
+  meaning strength, chosen so the team's names reach beyond Europe.
+- **Commit author:** the gateway has one GitHub App, named after Mira, so
+  Mandla's pull requests show that App as author. The owner kept it: each
+  description names the change, decision and task. A neutral App name is worth it
+  once others read this repo's history.
+- Not chosen: replaying past cases against a proposed spec before it ships (the owner
+  chose a before-and-after check); Ada tracking proposals in her notes (sessions start
+  fresh, so proposals stall; her notes are only a reminder, and the gateway's change
+  record is the source of truth); Mandla proposing and measuring its own changes.
+
+**56. Mira reviewing pull requests on this repo** · RESOLVED (not built)
+
+- Once the first outside contribution arrives, Mira will review pull requests here,
+  on tighter terms than on the Accord repos.
+- She may review, comment and label only. No `auto` kinds here: a CI approval goes to
+  the owner. Every merge proposal is high risk. The repo stays out of her write
+  scope.
+- It does not change who writes here (decision 51).

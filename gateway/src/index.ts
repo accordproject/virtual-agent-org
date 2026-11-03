@@ -1,3 +1,4 @@
+import { tickChanges } from "./changes";
 import { handleUpdate } from "./commands";
 import { verifyDiscord } from "./discordBot";
 import { handleInteraction, type Interaction } from "./discordInteractions";
@@ -87,6 +88,7 @@ export default {
     exec.waitUntil(
       (async () => {
         await housekeeping(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.housekeeping_error", detail: String(e) }));
+        await tickChanges(ctx);
         await sweep(ctx);
       })(),
     );

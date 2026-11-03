@@ -5,6 +5,7 @@ import type { DeployedConfig, NetworkConfig } from "../src/config";
 import type { Ctx } from "../src/context";
 import { Db } from "../src/db";
 import type { Env } from "../src/env";
+import type { GitHub, RepoRef } from "../src/github";
 import type { DiscordBot } from "../src/discordBot";
 import type { ManagedClient } from "../src/managed";
 import type { Telegram } from "../src/telegram";
@@ -31,6 +32,7 @@ export const NETWORK: NetworkConfig = {
   timezone: "Europe/London",
   monthly_credit_usd: 200,
   sandbox_repo: "accordproject/virtual-agent-org-sandbox",
+  network_repo: "accordproject/virtual-agent-org",
   repos: ["accordproject/concerto"],
   action_kinds: {
     "github.merge": { risk: "medium", executor: "github" },
@@ -41,10 +43,18 @@ export const NETWORK: NetworkConfig = {
     "linkedin.post": { risk: "medium", executor: "manual" },
     "github.approve_ci": { risk: "low", executor: "github", auto: true },
     "github.review": { risk: "low", executor: "github", auto: true },
+    "spec.change": { risk: "low", executor: "task" },
   },
   discord_approval_max_risk: "medium",
   schedules_enabled: true,
   follow_up: { daily_wakes: 5, budget_cents: 50 },
+  self_improvement: {
+    since: null,
+    stale_days: 30,
+    commit_author: { name: "virtual-agent-org-gateway[bot]", email: "1+virtual-agent-org-gateway[bot]@users.noreply.github.com" },
+    task_cents: { small: 100, large: 500 },
+  },
+  model_tiers: { deep: "claude-opus-5-5", standard: "claude-sonnet-5-5", fast: "claude-haiku-5-5" },
   people: [
     { name: "Matt Roberts", roles: ["owner"], github: "mttrbrts", telegram: "555" },
     { name: "Jane Doe", roles: ["tsc_member"], github: "janedoe", telegram: "88", discord: "123456789012345678" },
@@ -55,6 +65,7 @@ export const NETWORK: NetworkConfig = {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
     mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "discord.ops", "linkedin.post"], model: "claude-sonnet-5-5" },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
+    mandla: { name: "mandla", title: "Mechanic", phase: 1, requestable: [] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
 };
@@ -120,10 +131,14 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
   };
   const posted: { commit_id: string; body: string; comments: { path: string; line: number; body: string }[] }[] = [];
   const merged: { method: string; sha?: string }[] = [];
+  const proposed: [RepoRef, Parameters<GitHub["proposeChange"]>[1]][] = [];
   const gh = {
     pr: p,
     posted,
     merged,
+    proposed,
+    /** Set to an error message to make proposeChange fail. */
+    failPropose: null as string | null,
     rejectInline: false,
     rejectLabels: false,
     prDetail: async () => ({
@@ -170,6 +185,12 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     merge: async (_r: unknown, method: string, sha?: string) => {
       merged.push({ method, sha });
       return { merged: true, sha: "feedface00" };
+    },
+    proposeChange: async (r: RepoRef, change: Parameters<GitHub["proposeChange"]>[1]) => {
+      if (gh.failPropose) throw new Error(gh.failPropose);
+      proposed.push([r, change]);
+      const number = proposed.length;
+      return { html_url: `https://github.com/${r.owner}/${r.repo}/pull/${number}`, number };
     },
   };
   return gh;
