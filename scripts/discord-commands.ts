@@ -19,11 +19,11 @@ if (!DISCORD_APP_ID || !DISCORD_BOT_TOKEN) {
 const network = compile();
 const agents = Object.values(network.agents)
   .filter((a) => a.phase <= network.current_phase)
-  .map((a) => a.name);
+  .map((a) => ({ name: a.name, title: a.title }));
 const defs = commandDefinitions(agents);
 const bot = new DiscordBot(DISCORD_BOT_TOKEN, DISCORD_APP_ID);
 const out = await bot.putGlobalCommands(defs);
-console.log(`Registered ${out.length} commands for ${agents.join(", ")}: ${defs.map((d) => `/${d.name}`).join(" ")}`);
+console.log(`Registered ${out.length} commands for ${agents.map((a) => a.name).join(", ")}: ${defs.map((d) => `/${d.name}`).join(" ")}`);
 if (DISCORD_GUILD_ID) {
   await bot.putGuildCommands(DISCORD_GUILD_ID, []);
   console.log(`Removed the server-only commands from ${DISCORD_GUILD_ID}.`);
