@@ -286,6 +286,16 @@ describe("read_audit (decision 47)", () => {
     expect(r.refusals[0].tool).toBe("record_evaluation");
   });
 
+  it("gives refusals and denials their audit row id, for audit:n evidence", async () => {
+    const { ctx } = makeTestCtx();
+    await ctx.db.audit({ agent: "mira", event_type: "agent.message" });
+    await ctx.db.audit({ agent: "vera", event_type: "gateway.tool_refused", tool: "record_evaluation", detail: "agent is required" });
+    await ctx.db.audit({ agent: "otto", event_type: "gateway.tool_denied", tool: "read_audit", permission: "deny", detail: "no" });
+    const r = JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: today() }));
+    expect(r.refusals[0].id).toBe(2);
+    expect(r.denials[0].id).toBe(3);
+  });
+
   it("leaves out sessions outside the period", async () => {
     const { ctx } = makeTestCtx();
     await ctx.db.upsertSession({ id: "old", agent: "mira", origin: "task" });

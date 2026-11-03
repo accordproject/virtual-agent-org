@@ -290,11 +290,11 @@ export class Db {
   denials(since: string, until: string, limit = 200) {
     return this.db
       .prepare(
-        "SELECT ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
+        "SELECT id, ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
           "WHERE ts >= ? AND ts < ? AND (permission = 'deny' OR event_type = 'gateway.tool_denied') ORDER BY id LIMIT ?",
       )
       .bind(since, until, limit)
-      .all<{ ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .all<{ id: number; ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
       .then((r) => r.results);
   }
 
@@ -302,11 +302,11 @@ export class Db {
   refusals(since: string, until: string, limit = 200) {
     return this.db
       .prepare(
-        "SELECT ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
+        "SELECT id, ts, agent, session_id, event_type, tool, permission, substr(detail, 1, 300) AS detail FROM audit " +
           "WHERE ts >= ? AND ts < ? AND event_type = 'gateway.tool_refused' ORDER BY id LIMIT ?",
       )
       .bind(since, until, limit)
-      .all<{ ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .all<{ id: number; ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
       .then((r) => r.results);
   }
 

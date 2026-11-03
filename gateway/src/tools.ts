@@ -302,7 +302,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started.",
       "Sessions from before token and model recording began show 0 tokens and model 'unknown'.",
       "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected. Tool confirmations are excluded.",
-      "refusals: custom tool calls the gateway refused for bad input.",
+      "refusals: custom tool calls the gateway refused for bad input. Cite a refusal or denial as audit:<id>.",
       "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
       "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent that went live within those windows.",
     ],
