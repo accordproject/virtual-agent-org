@@ -1,6 +1,7 @@
 name: deploy
 # Runs after every push to main (a merged PR), and by hand. Deploys only what the push
-# changed, in this order: people's ids, D1 migrations, the gateway, then the agents.
+# changed, in this order: people's ids, D1 migrations, the gateway, the agents, then
+# the Discord slash commands.
 # If the agents' deploy creates resources, the gateway is deployed again with the new
 # ids, and a PR records them in deployed.json.
 #
@@ -36,6 +37,7 @@ jobs:
       migrations: ${{ steps.changes.outputs.migrations }}
       gateway: ${{ steps.changes.outputs.gateway }}
       agents: ${{ steps.changes.outputs.agents }}
+      discord: ${{ steps.changes.outputs.discord }}
       any: ${{ steps.changes.outputs.any }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -72,11 +74,12 @@ jobs:
           out people "$people"
           out migrations "$migrations"
           out gateway "$gateway"
+          # The slash commands list each agent by name and role, so they change with an
+          # agent's phase (network.yaml) or title (its spec), not only with their code.
+          discord=$(flag '^(config/network\.yaml|agents/[^_/][^/]*\.md|gateway/src/(discordInteractions|discordBot)\.ts|scripts/discord-commands\.ts)$')
           out agents "$agents"
-          if [ "$people$migrations$gateway$agents" = falsefalsefalsefalse ]; then out any false; else out any true; fi
-          if has '^scripts/discord-commands\.ts$'; then
-            echo "::warning::Discord slash commands changed. Run npm run discord:commands by hand."
-          fi
+          out discord "$discord"
+          if [ "$people$migrations$gateway$agents$discord" = falsefalsefalsefalsefalse ]; then out any false; else out any true; fi
 
   deploy:
     needs: plan
@@ -177,6 +180,22 @@ jobs:
       - name: Deploy gateway with the new ids
         if: ${{ steps.agents.outcome == 'success' && steps.ids.outputs.changed == 'true' }}
         run: npm run gateway:deploy
+
+      # After the agents, so the commands never offer an agent that isn't deployed yet.
+      # Optional: a fork without Discord leaves the secrets unset and skips this.
+      - name: Register Discord slash commands
+        if: ${{ needs.plan.outputs.discord == 'true' }}
+        env:
+          DISCORD_APP_ID: ${{ secrets.DISCORD_APP_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            npm run discord:commands -- --dry-run
+          elif [ -z "$DISCORD_APP_ID" ] || [ -z "$DISCORD_BOT_TOKEN" ]; then
+            echo "::notice::Discord secrets aren't set; skipping the slash commands."
+          else
+            npm run discord:commands
+          fi
 
       # Marks the changes in the commits just deployed as live (self-improvement loop).
       - name: Record deployed changes
