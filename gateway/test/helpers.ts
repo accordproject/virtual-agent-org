@@ -202,7 +202,7 @@ export interface Fakes {
   ops: { text: string; ids: string[] }[];
   dms: { user: string; content: string; buttons?: unknown[]; embeds?: { title?: string; description: string }[] }[];
   dcEdits: { channelId: string; messageId: string; content: string; buttons?: unknown[] }[];
-  originals: { token: string; content: string }[];
+  originals: { token: string; content: string; embeds?: { title?: string; description: string }[] }[];
   calls: { method: string; args: unknown[] }[];
   events: Record<string, any[]>;
   sessions: Record<string, any>;
@@ -219,8 +219,8 @@ export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fa
     edit: async (channelId: string, messageId: string, p: { content: string; buttons?: unknown[] }) => {
       fakes.dcEdits.push({ channelId, messageId, ...p });
     },
-    editOriginal: async (token: string, content: string) => {
-      fakes.originals.push({ token, content });
+    editOriginal: async (token: string, p: string | { content: string; embeds?: any[] }) => {
+      fakes.originals.push({ token, ...(typeof p === "string" ? { content: p } : p) });
     },
   } as unknown as DiscordBot;
   let msgId = 100;

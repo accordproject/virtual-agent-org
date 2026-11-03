@@ -102,8 +102,8 @@ export class DiscordBot {
   }
 
   /** Replaces the deferred reply to a slash command (interaction tokens last 15 minutes). */
-  async editOriginal(interactionToken: string, content: string) {
-    await this.call("PATCH", `/webhooks/${this.appId}/${interactionToken}/messages/@original`, toMessage({ content }), false);
+  async editOriginal(interactionToken: string, p: string | DiscordPayload) {
+    await this.call("PATCH", `/webhooks/${this.appId}/${interactionToken}/messages/@original`, toMessage(typeof p === "string" ? { content: p } : p), false);
   }
 
   /** Registers global slash commands, which can also work in DMs with the bot. */
