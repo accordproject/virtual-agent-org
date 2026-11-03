@@ -386,6 +386,22 @@ export class Db {
     return (await this.db.prepare(sql).bind(...args).all<Decision>()).results;
   }
 
+  /** Decided decisions (approved, executed, failed or rejected) for one agent, or all when null, leaving out some kinds. */
+  async countDecided(agent: string | null, excludeKinds: string[] = []): Promise<number> {
+    const where = ["status IN ('approved', 'executed', 'failed', 'rejected')"];
+    const args: unknown[] = [];
+    if (agent) {
+      where.push("agent = ?");
+      args.push(agent);
+    }
+    if (excludeKinds.length) {
+      where.push(`kind NOT IN (${excludeKinds.map(() => "?").join(",")})`);
+      args.push(...excludeKinds);
+    }
+    const row = await this.db.prepare(`SELECT COUNT(*) AS n FROM decisions WHERE ${where.join(" AND ")}`).bind(...args).first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
   /** Moves an open decision to approved/rejected. Returns false if it was not open. */
   async decide(id: string, status: "approved" | "rejected", note?: string): Promise<boolean> {
     const r = await this.db

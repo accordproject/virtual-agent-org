@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { approve, markDone, reject, stop } from "../src/controls";
 import { handleTool, ToolError } from "../src/tools";
-import { makeTestCtx } from "./helpers";
+import { decisionCard } from "../src/format";
+import { NETWORK, makeTestCtx } from "./helpers";
 
 describe("request_action", () => {
   it("refuses kinds the agent may not request", async () => {
@@ -237,5 +238,24 @@ describe("no duplicate replies in a conversation", () => {
     await ctx.db.upsertSession({ id: "sesn_dep", agent: "ada", origin: "deployment" });
     expect(await handleTool(ctx, "ada", "sesn_dep", "send_to_matt", { text: "Check-in" })).toBe("Sent.");
     expect(fakes.sent).toHaveLength(1);
+  });
+});
+
+describe("spec.change cards", () => {
+  it("the spec.change card shows type, problem, change, evidence and measure", async () => {
+    const { ctx } = makeTestCtx({ network: { ...NETWORK, self_improvement: { ...NETWORK.self_improvement!, since: "2026-01-01" } } });
+    await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: "accordproject/concerto#1", summary: "s", rationale: "r", risk: "low" });
+    await handleTool(ctx, "ada", "sesn_ada", "request_action", {
+      kind: "spec.change", target: "mira", summary: "Gentler review comments", rationale: "Three rejections for tone", risk: "low",
+      payload: { change_type: "permission", problem: "Comments read as curt.", change: "Thank the contributor first.", evidence: ["D-1", "audit:12"], measure: "tool_refusals", tool: "label_pr" },
+    });
+    const card = decisionCard((await ctx.db.getDecision("D-2"))!);
+    expect(card).toContain("D-2 · Ada · spec.change");
+    expect(card).toContain("Spec change: mira, permission (owner-only type)");
+    expect(card).toMatch(/Problem:\nComments read as curt\./);
+    expect(card).toMatch(/Change:\nThank the contributor first\./);
+    expect(card).toContain("Evidence: D-1, audit:12");
+    expect(card).toContain("Measure: tool_refusals (label_pr)");
+    expect(card).not.toContain("Other payload fields");
   });
 });

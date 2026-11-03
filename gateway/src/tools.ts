@@ -1,8 +1,9 @@
 // Handlers for the custom tools agents call. The gateway is the enforcement point:
 // it checks who may call what before doing anything.
 
-import { ActionInvalid, validateAction, type Normalised } from "./actions";
+import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, startSession } from "./agents";
+import { missingEvidence, proposalGuard } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
@@ -303,7 +304,6 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     throw new ToolDenied(`You may not request ${kind}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
   const declared: Risk = toRisk(input.risk);
-  const floor = toRisk(ctx.network.action_kinds[kind]?.risk);
   if (kind === "github.merge" && agent === "mira" && ctx.network.review_check_required && !(await isReviewCheck(ctx, sessionId))) {
     throw new ToolError("Merge proposals come from the review check. Call request_review_check with your draft review instead.");
   }
@@ -318,7 +318,7 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   }
   let rationale = s(input.rationale, "rationale");
   if (member) rationale = `⚠ Prompted by ${member.name} (member) via ${member.platform}.\n\n${rationale}`;
-  let risk = maxRisk(declared, floor);
+  let risk = maxRisk(declared, actionRisk(ctx, kind, n));
   let reviewId: string | undefined;
   if (kind === "github.merge") {
     // Decision 35: the gateway checks the PR itself, and refuses rather than queue a merge that can't go ahead.
@@ -334,6 +334,14 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     risk = maxRisk(risk, f.risk === "high" ? "high" : "medium");
     rationale = `${rationale}\n\nGateway checks at ${f.sha.slice(0, 7)} (${f.risk} risk: ${f.risk_reasons.join("; ")}):\n${checklist(checks)}`;
     reviewId = review?.id;
+  }
+  if (kind === "spec.change") {
+    // Rule 5: a member may ask about the network, never set changing it going.
+    if (member) throw new ToolDenied(`${member.name} is a member: they can't ask for a change to the network. Answer them, and leave proposals to your weekly evaluation.`);
+    const refusal = await proposalGuard(ctx, n.target);
+    if (refusal) throw new ToolError(`Not queued. ${refusal}`);
+    const gone = await missingEvidence(ctx, n.payload.evidence as string[]);
+    if (gone.length) throw new ToolError(`Not queued. Fix the request and call again:\n- ${gone.join("\n- ")}`);
   }
   const d = await ctx.db.createDecision({
     agent,

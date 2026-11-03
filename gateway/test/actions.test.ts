@@ -35,7 +35,7 @@ describe("action specs", () => {
   it("cover every kind in permissions.yaml, with the same executor", () => {
     for (const [kind, cfg] of Object.entries(COMPILED.action_kinds)) {
       expect(ACTIONS[kind], kind).toBeDefined();
-      expect(ACTIONS[kind].executor, kind).toBe(cfg.executor === "task" ? "manual" : cfg.executor);
+      expect(ACTIONS[kind].executor, kind).toBe(cfg.executor);
     }
   });
 
