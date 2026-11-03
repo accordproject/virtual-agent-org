@@ -211,6 +211,8 @@ jobs:
           add-paths: gateway/src/generated/deployed.json
           commit-message: "chore(deploy): record deployed resource ids"
           title: "chore(deploy): record deployed resource ids"
+          # The stale workflow leaves keep-open PRs alone; agent deploys wait on this one.
+          labels: keep-open
           body: |
             The deploy run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} created Managed Agents resources. This records their ids so the next deploy updates them instead of creating new ones.
 

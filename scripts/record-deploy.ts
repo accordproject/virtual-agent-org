@@ -15,7 +15,7 @@ export function recordSql(commit: string, ids: string[]): string {
   if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error(`Not a commit sha: ${commit}`);
   for (const id of ids) if (!/^C-\d+$/.test(id)) throw new Error(`Not a change id: ${id}`);
   const update = ids.length
-    ? `UPDATE changes SET state = 'live', live_at = datetime('now'), updated_at = datetime('now') WHERE id IN (${ids.map((i) => `'${i}'`).join(", ")}) AND (state = 'pr_open' OR (state = 'closed' AND closed_reason = 'stale')); `
+    ? `UPDATE changes SET state = 'live', live_at = datetime('now'), closed_reason = NULL, updated_at = datetime('now') WHERE id IN (${ids.map((i) => `'${i}'`).join(", ")}) AND (state = 'pr_open' OR (state = 'closed' AND closed_reason = 'stale')); `
     : "";
   return `${update}INSERT OR IGNORE INTO deploys (commit_sha) VALUES ('${commit}');`;
 }

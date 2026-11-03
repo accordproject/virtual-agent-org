@@ -18,7 +18,7 @@ test("recordSql marks only open or stale-closed changes live and records the dep
   const sql = recordSql(sha, ["C-1", "C-22"]);
   assert.ok(sql.includes("WHERE id IN ('C-1', 'C-22')"));
   assert.ok(sql.includes("state = 'pr_open' OR (state = 'closed' AND closed_reason = 'stale')"));
-  assert.ok(sql.includes("SET state = 'live', live_at = datetime('now'), updated_at = datetime('now')"));
+  assert.ok(sql.includes("SET state = 'live', live_at = datetime('now'), closed_reason = NULL, updated_at = datetime('now')"));
   assert.ok(sql.includes(`INSERT OR IGNORE INTO deploys (commit_sha) VALUES ('${sha}')`));
 });
 

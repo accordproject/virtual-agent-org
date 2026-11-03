@@ -5,14 +5,23 @@ import { appendFileSync, readFileSync } from "node:fs";
 
 export const SAFETY_PATHS = [
   "config/permissions.yaml",
+  "config/network.yaml",
   "gateway/src/actions.ts",
   "gateway/src/review.ts",
   "gateway/src/workflows.ts",
   "gateway/src/risk.ts",
   "gateway/src/schema.ts",
   "gateway/src/changes.ts",
-  "scripts/compile.ts",
+  "gateway/src/tools.ts",
+  "gateway/src/people.ts",
+  "gateway/src/index.ts",
   "agents/mechanic.md",
+  "agents/_protocol.md",
+  "package.json",
+  "package-lock.json",
+  "gateway/package.json",
+  "gateway/package-lock.json",
+  "scripts/",
   ".github/",
 ];
 

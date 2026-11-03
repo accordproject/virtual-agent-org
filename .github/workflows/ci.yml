@@ -24,8 +24,15 @@ jobs:
         run: |
           npm run compile
           git diff --exit-code gateway/src/generated/network.json
+      # Runs the base branch's copy of the check, so a PR can't silence it by editing it.
+      # Only the PR that first adds the script runs its own copy.
       - name: Flag safety files
         if: ${{ github.event_name == 'pull_request' }}
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: git diff --name-only "origin/$BASE_REF...HEAD" | npx tsx scripts/flag-safety.ts
+        run: |
+          script="$RUNNER_TEMP/flag-safety.ts"
+          if ! git show "origin/$BASE_REF:scripts/flag-safety.ts" > "$script" 2>/dev/null; then
+            script=scripts/flag-safety.ts
+          fi
+          git diff --name-only "origin/$BASE_REF...HEAD" | npx tsx "$script"
