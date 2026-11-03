@@ -11,8 +11,7 @@ import { assertAvailable, discordApprovable, failureText, messageAgent, postDisc
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, stop } from "./controls";
 import { OVER_ALLOWANCE, memberPrefix, roleFor, startedByFor, withinMemberAllowance } from "./people";
-import { toMessage } from "./discordBot";
-import { gatherStatus, queueMarkdown, statusCards } from "./status";
+import { gatherStatus, queueMarkdown, refreshLive, statusCards } from "./status";
 
 const EPHEMERAL = 64;
 const reply = (content: string) => ({ type: 4, data: { content: content.slice(0, 1990), flags: EPHEMERAL, allowed_mentions: { parse: [] } } });
@@ -88,7 +87,12 @@ async function command(ctx: Ctx, i: Interaction, userId: string, owner: boolean,
     }
 
     case "status":
-      return { type: 4, data: { ...toMessage(statusCards(await gatherStatus(ctx))), flags: EPHEMERAL } };
+      // Refreshing the live sessions can take longer than Discord waits, so answer later.
+      run(async () => {
+        await refreshLive(ctx);
+        await ctx.dc?.editOriginal(i.token, statusCards(await gatherStatus(ctx)));
+      });
+      return DEFER_REPLY;
 
     case "queue": {
       const open = await ctx.db.listDecisions({ status: "open" });

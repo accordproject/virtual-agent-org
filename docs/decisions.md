@@ -578,3 +578,15 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Changes to one agent close together share their before-and-after figures; each
   result names the others (decision 55). Once settled, the gap goes back to 7 days and
   the start rule to 14.
+
+**58. A fresher `/status`** · RESOLVED
+
+- `/status` read only the gateway's database, which is as fresh as the last webhook.
+  The last report is what an agent said at the end of its last session, however old,
+  so finished work could still show as in progress.
+- Now `/status` first re-reads up to 10 live sessions from Managed Agents, as a
+  webhook would; shows each agent's sessions at work and when the oldest started; and
+  gives each report's age. On Discord it answers after Discord's 3-second deadline.
+- Each `/status` costs up to 10 extra API calls. Ada's `get_status` still reads only
+  the database: refreshing inside her own tool call could process her session
+  mid-call.
