@@ -231,6 +231,37 @@ export class GitHub {
     });
   }
 
+  /**
+   * Several files in one commit on a new branch from the default branch, then a PR. A null
+   * content deletes the file. A branch left by an earlier failed attempt is moved to the new commit.
+   */
+  async proposeChange(
+    r: RepoRef,
+    p: { branch: string; files: { path: string; content: string | null }[]; message: string; author: { name: string; email: string }; title: string; body: string },
+  ): Promise<{ html_url: string; number: number }> {
+    const base = `/repos/${r.owner}/${r.repo}`;
+    const repo = await this.call<{ default_branch: string }>("GET", base);
+    const head = (await this.call<{ object: { sha: string } }>("GET", `${base}/git/ref/heads/${repo.default_branch}`)).object.sha;
+    const commit = await this.call<{ tree: { sha: string } }>("GET", `${base}/git/commits/${head}`);
+    const tree = await this.call<{ sha: string }>("POST", `${base}/git/trees`, {
+      base_tree: commit.tree.sha,
+      tree: p.files.map((f) => ({ path: f.path, mode: "100644", type: "blob", ...(f.content === null ? { sha: null } : { content: f.content }) })),
+    });
+    const made = await this.call<{ sha: string }>("POST", `${base}/git/commits`, { message: p.message, tree: tree.sha, parents: [head], author: p.author });
+    try {
+      await this.call("POST", `${base}/git/refs`, { ref: `refs/heads/${p.branch}`, sha: made.sha });
+    } catch (e) {
+      if (!String(e).includes("Reference already exists")) throw e;
+      await this.call("PATCH", `${base}/git/refs/heads/${p.branch}`, { sha: made.sha, force: true });
+    }
+    return this.call<{ html_url: string; number: number }>("POST", `${base}/pulls`, {
+      title: p.title,
+      head: p.branch,
+      base: repo.default_branch,
+      body: p.body,
+    });
+  }
+
   release(r: RepoRef, p: { tag: string; name?: string; body?: string; target?: string; draft?: boolean }) {
     return this.call<{ html_url: string }>("POST", `/repos/${r.owner}/${r.repo}/releases`, {
       tag_name: p.tag,

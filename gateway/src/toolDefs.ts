@@ -329,6 +329,37 @@ export const TOOLS = {
       required: ["target", "outcome"],
     },
   },
+
+  // ---- mechanic ----
+  submit_change: {
+    owner: "mechanic",
+    description:
+      "Submit the finished change once. Give every changed file's whole new content, or delete: true to remove it. The gateway " +
+      "checks the paths (nothing under .github/ or gateway/src/generated/, no '..', no absolute paths; at most 50 files and " +
+      "500,000 characters), commits them to a branch change/c-n and opens one PR on the network's repo for the owner to review.",
+    input_schema: {
+      type: "object",
+      properties: {
+        change: str("The change id from your brief, e.g. C-3"),
+        title: str("PR title and commit subject in Conventional Commits form, at most 100 characters, e.g. docs(mira): thank the contributor first"),
+        body: str("What changed and why, citing the decision and evidence ids; at most 20,000 characters"),
+        files: {
+          type: "array",
+          description: "Every file the change touches, as a path from the repo root",
+          items: {
+            type: "object",
+            properties: {
+              path: str("Path from the repo root, e.g. agents/mira.md"),
+              content: str("The file's whole new content"),
+              delete: { type: "boolean", description: "true to delete the file; then omit content" },
+            },
+            required: ["path"],
+          },
+        },
+      },
+      required: ["change", "title", "body", "files"],
+    },
+  },
 } satisfies Record<string, ToolSpec>;
 
 export type ToolName = keyof typeof TOOLS;

@@ -3,7 +3,7 @@
 
 import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, startSession } from "./agents";
-import { missingEvidence, proposalGuard } from "./changes";
+import { missingEvidence, proposalGuard, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
@@ -61,6 +61,8 @@ const HANDLERS: Record<ToolName, Handler> = {
   request_review_check: (ctx, { sessionId, input }) => requestReviewCheck(ctx, sessionId, input),
 
   submit_review: (ctx, { sessionId, input }) => submitReview(ctx, sessionId, input),
+
+  submit_change: (ctx, { agent, sessionId, input }) => submitChange(ctx, agent, sessionId, input),
 
   pr_facts: async (ctx, { input }) => {
     const ref = prRef(ctx, input.target);

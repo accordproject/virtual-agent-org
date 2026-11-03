@@ -3,8 +3,9 @@ import { ActionInvalid, validateAction } from "../src/actions";
 import { changeBrief } from "../src/changes";
 import type { Ctx } from "../src/context";
 import { approve } from "../src/controls";
-import { handleTool, ToolError } from "../src/tools";
-import { DEPLOYED, NETWORK, makeTestCtx } from "./helpers";
+import { GitHub } from "../src/github";
+import { handleTool, ToolDenied, ToolError } from "../src/tools";
+import { DEPLOYED, NETWORK, fakeGitHub, makeTestCtx } from "./helpers";
 
 describe("changes", () => {
   it("changes are created as C-n and found by task", async () => {
@@ -28,8 +29,9 @@ const DAY = 86_400_000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 /** A test network with the loop switched on at `since`, and the mechanic deployed. */
-function loopCtx(since: string | null = isoDay(Date.now() - 30 * DAY)) {
+function loopCtx(since: string | null = isoDay(Date.now() - 30 * DAY), overrides: Partial<Ctx> = {}) {
   return makeTestCtx({
+    ...overrides,
     network: { ...NETWORK, self_improvement: { ...NETWORK.self_improvement!, since } },
     deployed: {
       ...DEPLOYED,
@@ -201,5 +203,146 @@ describe("spec.change proposals", () => {
     );
     for (const s of ["C-3", "D-12", "mira", "wording", PAYLOAD.problem, PAYLOAD.change, "D-1, audit:7", "tool_refusals", "label_pr"]) expect(brief).toContain(s);
     expect(brief).toContain("Change only what the decision approved. Don't change files under .github/ or gateway/src/generated/ by hand; run npm run compile if config changed. Never weaken a test. Submit once with submit_change, then report_status.");
+  });
+});
+
+describe("submit_change", () => {
+  /** An approved wording change to Mira, C-1, with the mechanic's task running. */
+  async function building(dryRun = false) {
+    const gh = fakeGitHub();
+    const { ctx, fakes } = loopCtx(undefined, { dryRun, github: async () => gh as any });
+    await decided(ctx, "mira", 10);
+    const out = await propose(ctx, "mira", { ...PAYLOAD, evidence: ["D-1", "D-2"] });
+    const decision = out.match(/D-\d+/)![0];
+    await approve(ctx, decision);
+    const task = (await ctx.db.openTasks("mechanic"))[0];
+    return { ctx, fakes, gh, decision, session: task.session_id! };
+  }
+
+  const INPUT = {
+    change: "C-1",
+    title: "docs(mira): thank the contributor first",
+    body: "Adds a line to step 3 of Mira's spec.",
+    files: [{ path: "agents/mira.md", content: "# Mira\n" }],
+  };
+  const submit = (ctx: Ctx, session: string, input: object = {}, agent = "mechanic") =>
+    handleTool(ctx, agent, session, "submit_change", { ...INPUT, ...input });
+
+  it("only the mechanic's change task may submit", async () => {
+    const { ctx, session } = await building();
+    await expect(submit(ctx, session, {}, "mira")).rejects.toBeInstanceOf(ToolDenied);
+    await ctx.db.upsertSession({ id: "sesn_other", agent: "mechanic", origin: "task", started_by: "owner" });
+    await expect(submit(ctx, "sesn_other")).rejects.toThrow("Only a mechanic task started for an approved change can submit");
+    await expect(submit(ctx, session, { change: "C-2" })).rejects.toThrow("This task is for C-1, not C-2");
+  });
+
+  it("submit_change refuses unsafe paths before calling GitHub", async () => {
+    const { ctx, session, gh } = await building();
+    const bad = [".github/workflows/ci.yml", "../x", "/etc/x", "gateway/src/generated/network.json", "", "agents\\mira.md"];
+    const files = [...bad.map((path) => ({ path, content: "x" })), { path: "a.md", content: "x" }, { path: "a.md", delete: true }, { path: "b.md" }, { path: "c.md", content: "x", delete: true }];
+    const err = await submit(ctx, session, { files }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    for (const p of [...bad.slice(0, 4), "files[4] has an empty path", "agents\\mira.md: use /", "a.md more than once", "b.md: give exactly one", "c.md: give exactly one"]) expect(err.message).toContain(p);
+    expect(gh.proposed).toHaveLength(0);
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+  });
+
+  it("submit_change checks the title and body", async () => {
+    const { ctx, session } = await building();
+    await expect(submit(ctx, session, { title: "Thank contributors" })).rejects.toThrow(/Conventional Commits/);
+    await expect(submit(ctx, session, { title: `docs: ${"x".repeat(100)}` })).rejects.toThrow(/100/);
+    await expect(submit(ctx, session, { body: "x".repeat(20_001) })).rejects.toThrow(/20,000/);
+  });
+
+  it("submit_change refuses more than 50 files or 500,000 characters", async () => {
+    const { ctx, session, gh } = await building();
+    const many = Array.from({ length: 51 }, (_, i) => ({ path: `docs/${i}.md`, content: "x" }));
+    await expect(submit(ctx, session, { files: many })).rejects.toThrow(/51 files.*50/);
+    const big = [{ path: "a.md", content: "x".repeat(300_000) }, { path: "b.md", content: "x".repeat(200_001) }];
+    await expect(submit(ctx, session, { files: big })).rejects.toThrow(/500,000/);
+    await expect(submit(ctx, session, { files: [] })).rejects.toThrow(/at least one file/);
+    expect(gh.proposed).toHaveLength(0);
+  });
+
+  it("submit_change opens one PR on the network repo", async () => {
+    const { ctx, session, gh, decision } = await building();
+    const out = await submit(ctx, session, { files: [...INPUT.files, { path: "old.md", delete: true }] });
+    expect(out).toContain("https://github.com/accordproject/virtual-agent-org/pull/1");
+    expect(gh.proposed).toHaveLength(1);
+    const [ref, p] = gh.proposed[0];
+    expect(ref).toEqual({ owner: "accordproject", repo: "virtual-agent-org" });
+    expect(p.branch).toBe("change/c-1");
+    expect(p.files).toEqual([{ path: "agents/mira.md", content: "# Mira\n" }, { path: "old.md", content: null }]);
+    const author = NETWORK.self_improvement!.commit_author;
+    expect(p.author).toEqual(author);
+    expect(p.message).toBe(`${INPUT.title}\n\nChange: C-1\nDecision: ${decision}\n\nSigned-off-by: ${author.name} <${author.email}>`);
+    expect(p.title).toBe(INPUT.title);
+    for (const s of [decision, "D-1, D-2", "approval_rate", "Built by the mechanic; needs the owner's review like any other PR.", "## Change", INPUT.body]) expect(p.body).toContain(s);
+    expect(p.body.split("\n")).toContain("Change: C-1");
+
+    const change = (await ctx.db.getChange("C-1"))!;
+    expect(change).toMatchObject({ state: "pr_open", pr_url: "https://github.com/accordproject/virtual-agent-org/pull/1" });
+    expect(change.pr_opened_at).toBeTruthy();
+    const audit = await (ctx.db as any).db.prepare("SELECT agent, detail FROM audit WHERE event_type = 'gateway.change_pr_opened'").all();
+    expect(audit.results).toHaveLength(1);
+    expect(JSON.parse(audit.results[0].detail)).toEqual({ change: "C-1", decision, pr: change.pr_url });
+  });
+
+  it("a change is submitted once", async () => {
+    const { ctx, session, gh } = await building();
+    await submit(ctx, session);
+    await expect(submit(ctx, session)).rejects.toThrow("C-1 already has a PR: https://github.com/accordproject/virtual-agent-org/pull/1");
+    expect(gh.proposed).toHaveLength(1);
+  });
+
+  it("a GitHub failure leaves the change building", async () => {
+    const { ctx, session, gh } = await building();
+    gh.failPropose = "GitHub POST /repos/accordproject/virtual-agent-org/git/trees: 422 bad tree";
+    const err = await submit(ctx, session).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toContain("422 bad tree");
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+    gh.failPropose = null;
+    expect(await submit(ctx, session)).toContain("/pull/1");
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
+  });
+
+  it("dry run doesn't open a PR", async () => {
+    const { ctx, session, gh } = await building(true);
+    expect(await submit(ctx, session)).toMatch(/^DRY RUN: would open a PR for C-1/);
+    expect(gh.proposed).toHaveLength(0);
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+  });
+
+  it("proposeChange makes one commit through the Git data API", async () => {
+    const calls: [string, string, any][] = [];
+    const R = "/repos/accordproject/virtual-agent-org";
+    const fetchImpl = (async (url: string, init: any) => {
+      const path = new URL(url).pathname;
+      calls.push([init.method, path, init.body ? JSON.parse(init.body) : undefined]);
+      const body =
+        path === R ? { default_branch: "main" }
+        : path === `${R}/git/ref/heads/main` ? { object: { sha: "head1" } }
+        : path === `${R}/git/commits/head1` ? { tree: { sha: "tree1" } }
+        : path === `${R}/git/trees` ? { sha: "tree2" }
+        : path === `${R}/git/commits` ? { sha: "commit2" }
+        : path === `${R}/pulls` ? { html_url: "https://github.com/accordproject/virtual-agent-org/pull/7", number: 7 }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const author = { name: "bot", email: "bot@example.com" };
+    const pr = await new GitHub("t", fetchImpl).proposeChange(
+      { owner: "accordproject", repo: "virtual-agent-org" },
+      { branch: "change/c-1", files: [{ path: "a.md", content: "A" }, { path: "b.md", content: null }], message: "docs: x", author, title: "docs: x", body: "B" },
+    );
+    expect(pr).toEqual({ html_url: "https://github.com/accordproject/virtual-agent-org/pull/7", number: 7 });
+    const post = (p: string) => calls.find((c) => c[0] === "POST" && c[1] === `${R}${p}`)?.[2];
+    expect(post("/git/trees")).toEqual({
+      base_tree: "tree1",
+      tree: [{ path: "a.md", mode: "100644", type: "blob", content: "A" }, { path: "b.md", mode: "100644", type: "blob", sha: null }],
+    });
+    expect(post("/git/commits")).toEqual({ message: "docs: x", tree: "tree2", parents: ["head1"], author });
+    expect(post("/git/refs")).toEqual({ ref: "refs/heads/change/c-1", sha: "commit2" });
+    expect(post("/pulls")).toEqual({ title: "docs: x", head: "change/c-1", base: "main", body: "B" });
   });
 });

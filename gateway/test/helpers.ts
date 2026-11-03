@@ -5,6 +5,7 @@ import type { DeployedConfig, NetworkConfig } from "../src/config";
 import type { Ctx } from "../src/context";
 import { Db } from "../src/db";
 import type { Env } from "../src/env";
+import type { GitHub, RepoRef } from "../src/github";
 import type { DiscordBot } from "../src/discordBot";
 import type { ManagedClient } from "../src/managed";
 import type { Telegram } from "../src/telegram";
@@ -130,10 +131,14 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
   };
   const posted: { commit_id: string; body: string; comments: { path: string; line: number; body: string }[] }[] = [];
   const merged: { method: string; sha?: string }[] = [];
+  const proposed: [RepoRef, Parameters<GitHub["proposeChange"]>[1]][] = [];
   const gh = {
     pr: p,
     posted,
     merged,
+    proposed,
+    /** Set to an error message to make proposeChange fail. */
+    failPropose: null as string | null,
     rejectInline: false,
     rejectLabels: false,
     prDetail: async () => ({
@@ -180,6 +185,12 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     merge: async (_r: unknown, method: string, sha?: string) => {
       merged.push({ method, sha });
       return { merged: true, sha: "feedface00" };
+    },
+    proposeChange: async (r: RepoRef, change: Parameters<GitHub["proposeChange"]>[1]) => {
+      if (gh.failPropose) throw new Error(gh.failPropose);
+      proposed.push([r, change]);
+      const number = proposed.length;
+      return { html_url: `https://github.com/${r.owner}/${r.repo}/pull/${number}`, number };
     },
   };
   return gh;
