@@ -75,14 +75,13 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string) {
   const change = task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
   if (change?.state === "building") {
     blockers.unshift(`${change.id}: no change submitted`);
-    // The second attempt to end this way closes the change; nobody follows it up again.
+    // The second attempt to end this way closes the change; Ada still puts it to the owner.
     const again = !!task.follows_up?.startsWith("T-");
     await ctx.db.setTask(task.id, "blocked");
     await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.task_blocked", detail: { task: task.id, blockers: blockers.slice(0, 5) } });
     if (again) {
       await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "blocked twice" });
       await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.change_closed", detail: { change: change.id, reason: "blocked twice" } });
-      return;
     }
     await wakeAda(ctx, { kind: "task", task, blockers });
     return;

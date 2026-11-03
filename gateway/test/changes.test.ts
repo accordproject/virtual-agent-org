@@ -422,7 +422,9 @@ describe("mechanic tasks that end without a PR", () => {
     await end(ctx, fakes, next.session_id!);
     expect((await ctx.db.getTask(next.id))?.status).toBe("blocked");
     expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "closed", closed_reason: "blocked twice" });
-    expect(wakes(fakes).length).toBe(before);
+    // Decision 50: a follow-up blocked again goes to the owner through Ada.
+    expect(wakes(fakes).length).toBe(before + 1);
+    expect(JSON.stringify(wakes(fakes).at(-1).args[0])).toContain(next.id);
     await expect(follow(ctx, "mechanic", next.id)).rejects.toThrow(/closed/);
   });
 });
