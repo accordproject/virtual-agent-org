@@ -26,4 +26,6 @@ jobs:
           git diff --exit-code gateway/src/generated/network.json
       - name: Flag safety files
         if: ${{ github.event_name == 'pull_request' }}
-        run: git diff --name-only origin/${{ github.base_ref }}...HEAD | npx tsx scripts/flag-safety.ts
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git diff --name-only "origin/$BASE_REF...HEAD" | npx tsx scripts/flag-safety.ts
