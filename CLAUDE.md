@@ -8,7 +8,7 @@ is public: write as if anyone can read it.
 
 A network of Claude Managed Agents that helps run the Accord Project. Matt Roberts
 (TSC chair, the owner) instructs **Ada**, the Chief of Staff, from Telegram or Discord.
-Ada delegates to specialists (Mira, Vera, Otto, Sage and the mechanic in Phase 1; Rosa,
+Ada delegates to specialists (Mira, Vera, Otto, Sage and Mandla in Phase 1; Rosa,
 Juno, Kit, Felix, Nell later). A Cloudflare Worker, the **gateway**, connects
 everything: it runs the agents' custom tools, holds the decision queue, executes
 approved actions with its own credentials, and keeps the audit log.
@@ -76,7 +76,7 @@ Matt writes British English. Keep messages plain and short.
 | `context/accord.md` | Shared read-only context, written to the shared memory store |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
 | `scripts/deploy.ts` | Creates or updates agents, vaults, memory stores and deployments; writes `deployed.json` |
-| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `changes.ts` the self-improvement loop's changes (proposal checks, mechanic tasks, `submit_change`, measuring) |
+| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `changes.ts` the self-improvement loop's changes (proposal checks, Mandla's tasks, `submit_change`, measuring) |
 | `gateway/test/` | vitest suite with an in-memory D1 and fakes for every external API |
 
 ## Commands

@@ -1,11 +1,11 @@
 ---
-name: mechanic
+name: mandla
 title: Mechanic
 phase: 1
 reports_to: ada
 ---
 
-# Mechanic
+# Mandla — Mechanic
 
 ## Mission
 

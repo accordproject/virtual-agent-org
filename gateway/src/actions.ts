@@ -656,7 +656,7 @@ const messagePerson: ActionSpec = {
 
 // ---- the self-improvement loop ------------------------------------------------
 
-/** A proposal to change an agent (or the network): checked here, built by the mechanic once approved. */
+/** A proposal to change an agent (or the network): checked here, built by Mandla once approved. */
 const specChange: ActionSpec = {
   executor: "task",
   validate(ctx, target, payload) {
@@ -683,7 +683,7 @@ const specChange: ActionSpec = {
       `Spec change: ${target}, ${type}${OWNER_TYPES.includes(type) ? " (owner-only type)" : ""}`,
       `Evidence: ${nameList(p.evidence)}`,
       `Measure: ${str(p.measure)}${p.tool ? ` (${str(p.tool)})` : ""}`,
-      "Approving starts a mechanic task that opens a PR on the network repo; nothing merges without your review.",
+      "Approving starts a task for Mandla that opens a PR on the network repo; nothing merges without your review.",
     ];
     const blocks = [
       { title: "Problem", text: str(p.problem) },

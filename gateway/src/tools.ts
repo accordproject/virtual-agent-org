@@ -603,19 +603,19 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   const priority = typeof input.priority === "string" ? input.priority : "normal";
   const due = typeof input.due === "string" ? input.due : undefined;
   const followsUp = await followUpOf(ctx, s(input.follows_up, "follows_up", false));
-  // The mechanic only works on approved changes: a follow-up of a blocked change task takes the change over.
+  // Mandla only works on approved changes: a follow-up of a blocked change task takes the change over.
   const earlier = followsUp?.startsWith("T-") ? await ctx.db.getTask(followsUp) : null;
   const change = earlier?.kind === "change" ? await ctx.db.changeForTask(earlier.id) : null;
-  if (agent === "mechanic" && !change) throw new ToolError("The mechanic only works on approved changes: propose one with spec.change.");
-  if (change && agent !== "mechanic") throw new ToolError(`${earlier!.id} is a change task: only the mechanic can follow it up.`);
+  if (agent === "mandla" && !change) throw new ToolError("Mandla only works on approved changes: propose one with spec.change.");
+  if (change && agent !== "mandla") throw new ToolError(`${earlier!.id} is a change task: only Mandla can follow it up.`);
   if (change && (earlier!.status !== "blocked" || change.state !== "building")) {
     throw new ToolError(`${change.id} is ${change.state} and ${earlier!.id} is ${earlier!.status}: there is nothing to follow up.`);
   }
   const startedBy = await sessionStartedBy(ctx, parentSessionId);
   const member = memberOf(startedBy);
   // Rule 5: a member may ask about the network, never set changing it going.
-  if (member && agent === "mechanic") {
-    throw new ToolDenied(`${member.name} is a member: they can't set the mechanic going. Answer them, and follow up the change from your own check-in.`);
+  if (member && agent === "mandla") {
+    throw new ToolDenied(`${member.name} is a member: they can't set Mandla going. Answer them, and follow up the change from your own check-in.`);
   }
   // A change task keeps the change's own budget and tier, whatever effort Ada names.
   const { calls } = EFFORT[effort];
@@ -632,7 +632,7 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   ].join("\n");
 
   // Always an ordinary task: only request_review_check makes a review check.
-  // The mechanic starts from the approved change's own brief, then Ada's follow-up.
+  // Mandla starts from the approved change's own brief, then Ada's follow-up.
   const taskBrief = change ? `${earlier!.brief}\n\nFollow-up from Ada:\n${brief}` : brief;
   const task = await ctx.db.createTask({
     agent,

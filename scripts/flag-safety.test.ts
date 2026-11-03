@@ -20,5 +20,5 @@ test("flagged ignores other files and near misses", () => {
 });
 
 test("flagged keeps only the safety files from a mixed list", () => {
-  assert.deepEqual(flagged(["README.md", "gateway/src/risk.ts", "agents/mechanic.md"]), ["gateway/src/risk.ts", "agents/mechanic.md"]);
+  assert.deepEqual(flagged(["README.md", "gateway/src/risk.ts", "agents/mandla.md"]), ["gateway/src/risk.ts", "agents/mandla.md"]);
 });

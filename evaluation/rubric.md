@@ -13,7 +13,7 @@ Each dimension is scored 1–4. Evidence is required for every score.
 ## Proposal (at most one per agent per week)
 
 Pick the single change most likely to improve the lowest score, resting on recurring
-evidence from the scorecard's evidence section. Ada and the mechanic are evaluated
+evidence from the scorecard's evidence section. Ada and Mandla are evaluated
 and proposed for like everyone else. Typical proposals, with their change type and
 measure:
 
@@ -36,7 +36,7 @@ rejected decisions the change is about: the gateway measures only those decision
 kinds. `permission`, `integration` and `architecture` are Matt's own decisions
 and always high risk. The gateway refuses proposals until the loop is on and the
 agent has 10 decided decisions or the loop has run 14 days. Matt decides; if he
-approves, the mechanic opens a PR and he merges it. Several changes may be in flight
+approves, Mandla opens a PR and he merges it. Several changes may be in flight
 for one agent; their results then share figures and name each other.
 
 14 days after going live the gateway reports `better`, `same`, `worse` or

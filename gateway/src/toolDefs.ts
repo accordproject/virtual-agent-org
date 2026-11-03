@@ -362,9 +362,9 @@ export const TOOLS = {
     },
   },
 
-  // ---- mechanic ----
+  // ---- mandla ----
   submit_change: {
-    owner: "mechanic",
+    owner: "mandla",
     description:
       "Submit the finished change once. Give every changed file's whole new content, or delete: true to remove it. The gateway " +
       "checks the paths (nothing under .github/ or gateway/src/generated/, no '..', no absolute paths; at most 50 files and " +

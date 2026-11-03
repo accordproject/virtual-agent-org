@@ -23,7 +23,7 @@ agents:
       analysis: standard      # weekly scorecard narrative and anomaly reasoning
   otto:
     default: standard
-  mechanic:
+  mandla:
     default: standard
   rosa:
     default: standard

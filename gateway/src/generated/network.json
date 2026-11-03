@@ -312,8 +312,8 @@
       ],
       "model": "claude-sonnet-5-5"
     },
-    "mechanic": {
-      "name": "mechanic",
+    "mandla": {
+      "name": "mandla",
       "title": "Mechanic",
       "phase": 1,
       "requestable": [],

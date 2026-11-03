@@ -35,7 +35,7 @@ Design principles:
 | **Mira** | Maintainer Desk | Every PR and issue gets a fast, correct response | GitHub triage: label, assign, request reviewers. Merge, close, comment as the project, release: queued. | 1 |
 | **Vera** | Metrics & Audit | Independent numbers on KPIs and agent cost | Read-only GitHub; reads the gateway's spend and audit records; computes metrics in her sandbox | 1 |
 | **Otto** | Meetings | Every Tech WG has a briefing before and a recording, summary and actions after | Read-only GitHub and Vimeo. Publishing, announcements and DMs: queued. | 1 |
-| **Mechanic** | Network changes | Each change the owner approves to the network's specs, tiers and tools becomes a reviewable PR | Its sandbox only. Submits files to the gateway, which opens the PR on this repo. No credentials. | 1 |
+| **Mandla** | Mechanic: network changes | Each change the owner approves to the network's specs, tiers and tools becomes a reviewable PR | Its sandbox only. Submits files to the gateway, which opens the PR on this repo. No credentials. | 1 |
 | **Rosa** | Community | Newcomers find a path to a first contribution | GitHub triage. Announcements and DMs: queued. | 2 |
 | **Juno** | Marketing & Docs | Accord's work is visible and its docs current | Drafts only. Any publish: queued. | 2 |
 | **Sage** | Research | The Tech WG chair has a few well-sourced outside items worth discussing (wider brief from Phase 2) | Web search; writes briefs to its own store, which Otto reads | 1 |
@@ -62,7 +62,7 @@ agent's instructions. An agent is deployed only when its phase (in
                   │                                               ▼
   ┌──────── Claude Managed Agents ─────────┐            GitHub · Discord · Vimeo
   │  Ada ──assign_task──▶ Mira, Vera, Otto │
-  │  approved spec.change ──▶ Mechanic     │
+  │  approved spec.change ──▶ Mandla       │
   │  one agent per role, own vault and     │
   │  memory store; scheduled deployments   │
   └────────────────────────────────────────┘
@@ -130,10 +130,10 @@ These are enforced in code; changing them is the owner's decision.
 
 **The network's own repo** (decision 51). No agent holds a credential for it, and it
 can never be in `repos` or the sandbox. Every action kind refuses it as a target. The
-gateway's one action here is opening the mechanic's pull requests for changes the
+gateway's one action here is opening Mandla's pull requests for changes the
 owner approved; the owner reviews, merges and approves the deploy. CI flags pull
 requests that touch the safety files (permissions and `network.yaml`, the gateway's
-checks and tools, `scripts/`, the package files, the protocol, the mechanic's spec,
+checks and tools, `scripts/`, the package files, the protocol, Mandla's spec,
 `.github/`), using the base branch's copy of the check.
 
 What is not enforced in code: agents with a write-capable GitHub token (Mira now, Rosa
@@ -145,11 +145,11 @@ Those tokens list only the repos in scope (decision 23).
 
 | Who | Holds | Can do |
 | --- | --- | --- |
-| Gateway | GitHub App `virtual-agent-org-gateway`, Discord bot token, Vimeo token, Telegram bot token, Managed Agents API key (Worker secrets) | Everything approved: merge, close, comment, release, post, DM, publish. On this repo, only opening the mechanic's PRs; the App has no Workflows permission. |
+| Gateway | GitHub App `virtual-agent-org-gateway`, Discord bot token, Vimeo token, Telegram bot token, Managed Agents API key (Worker secrets) | Everything approved: merge, close, comment, release, post, DM, publish. On this repo, only opening Mandla's PRs; the App has no Workflows permission. |
 | Mira (later Rosa) | Fine-grained token from the `mttrbrts-agent` account, repos in scope only; the account has the Triage role there | Read; label, assign, request reviewers; comment |
 | Vera, Otto | Fine-grained read-only token, all Accord repos | Read |
 | Ada | Nothing | Assign tasks, message the owner, queue decisions |
-| Mechanic | Nothing | Clone this public repo, build and test in its sandbox, submit a change once |
+| Mandla | Nothing | Clone this public repo, build and test in its sandbox, submit a change once |
 
 Agent tokens live in each agent's Managed Agents vault, never in the repo. People's
 Discord and Telegram ids live in the git-ignored `config/people.ids.yaml` and reach the
@@ -179,7 +179,7 @@ public action without a decision id.
   one change per agent (`evaluation/rubric.md`).
 - **Self-improvement** (decision 55): evidence in Vera's scorecard (rejection notes,
   refused and denied tool calls) → Ada's `spec.change` proposal → the owner approves →
-  the gateway records a change (`C-n`) and starts the mechanic → the mechanic builds
+  the gateway records a change (`C-n`) and starts Mandla → Mandla builds
   and tests it and calls `submit_change` → the gateway's App opens the PR → the owner
   merges and approves the deploy → the deploy workflow marks the change live → 14
   days later the gateway compares the change's measure before and after and stores
@@ -227,7 +227,7 @@ Bots are excluded from people metrics, and medians are reported alongside means.
 | Phase | Agents | Gate to the next phase |
 | --- | --- | --- |
 | 0 Foundations | Test agent on the sandbox repo | A queued merge is approved and executed; `/stop` halts the agent within seconds |
-| 1 Core loop | Ada, Mira, Vera, Otto, Sage, Mechanic | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
+| 1 Core loop | Ada, Mira, Vera, Otto, Sage, Mandla | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
 | 2 Community and voice | Rosa, Juno | Newcomer first-response median under 2 business days |
 | 3 Depth | Kit, Felix, Nell | Each new agent moves its KPIs within four weeks, or is retired |
 

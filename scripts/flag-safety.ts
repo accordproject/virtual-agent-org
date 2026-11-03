@@ -15,7 +15,7 @@ export const SAFETY_PATHS = [
   "gateway/src/tools.ts",
   "gateway/src/people.ts",
   "gateway/src/index.ts",
-  "agents/mechanic.md",
+  "agents/mandla.md",
   "agents/_protocol.md",
   "package.json",
   "package-lock.json",

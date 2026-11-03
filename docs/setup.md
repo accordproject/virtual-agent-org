@@ -184,7 +184,7 @@ repos with `npm run repo:add owner/name` (it checks the GitHub side), and run
 ## 9. Switch on the self-improvement loop
 
 The loop (decision 55) lets Ada propose changes to the network's own specs, tiers and
-tools; once you approve one, the mechanic builds it and the gateway's App opens a pull
+tools; once you approve one, Mandla builds it and the gateway's App opens a pull
 request on your copy of this repo. It is off until you set a start date. Do this once
 Phase 1 is running.
 
@@ -215,9 +215,9 @@ Phase 1 is running.
 
 To turn the loop off, set `self_improvement.since` back to `null` and deploy the
 gateway. That stops new proposals, but proposal cards already in the queue stay
-valid: approving one still starts the mechanic. Reject them.
+valid: approving one still starts Mandla. Reject them.
 
-The mechanic's budgets are `budgets.mechanic_small_usd` and `mechanic_large_usd`. The
+Mandla's budgets are `budgets.mechanic_small_usd` and `mechanic_large_usd`. The
 `deploy` workflow records which changes each deploy made live; it already holds the
 D1 credential it needs.
 

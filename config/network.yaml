@@ -14,7 +14,7 @@ github:
   org: accordproject
   # Phase 0 runs only against the sandbox repo. Add real repos in Phase 1.
   sandbox_repo: accordproject/virtual-agent-org-sandbox
-  # The network's own code (decision 51). Never in repos: only the mechanic's tasks touch it.
+  # The network's own code (decision 51). Never in repos: only Mandla's tasks touch it.
   network_repo: accordproject/virtual-agent-org
   # Add a repo with `npm run repo:add owner/name`; it also checks the GitHub side.
   repos:
@@ -48,7 +48,7 @@ budgets:
   follow_up_daily_wakes: 5
   # Session budget for each wake (USD).
   follow_up_budget_usd: 0.50
-  # Session budget for each mechanic task (USD): small is wording and tier changes,
+  # Session budget for each of Mandla's tasks (USD): small is wording and tier changes,
   # large is tool changes and the owner-only types.
   mechanic_small_usd: 1
   mechanic_large_usd: 5
@@ -67,7 +67,7 @@ agents:
   mira: 1
   vera: 1
   otto: 1
-  mechanic: 1
+  mandla: 1
   rosa: 2
   juno: 2
   sage: 1

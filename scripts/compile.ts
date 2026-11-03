@@ -189,15 +189,15 @@ export function validate(cfg = loadAll()): string[] {
   }
   if (ada && (ada.networking ?? "limited") !== "limited") errs.push("ada must stay on limited networking");
 
-  // Only Ada asks for spec changes; the gateway turns them into mechanic tasks (decision 51).
+  // Only Ada asks for spec changes; the gateway turns them into Mandla's tasks (decision 51).
   for (const [n, p] of Object.entries(permissions.agents)) {
     if (n !== "ada" && p.requestable.includes("spec.change")) errs.push(`${n}: only ada may request spec.change`);
   }
-  // The mechanic works in a sandbox on the network's code and holds no credentials (decision 51).
-  const mech = permissions.agents.mechanic;
+  // Mandla works in a sandbox on the network's code and holds no credentials (decision 51).
+  const mech = permissions.agents.mandla;
   const mechTools = ["read", "write", "edit", "glob", "bash"];
   if (mech && ((Array.isArray(mech.mcp_servers) ? mech.mcp_servers.length : Object.keys(mech.mcp_servers).length) || mech.requestable.length || mech.builtin_tools.some((t) => !mechTools.includes(t)))) {
-    errs.push("mechanic must have no MCP servers, no requestable kinds, and only read, write, edit, glob and bash");
+    errs.push("mandla must have no MCP servers, no requestable kinds, and only read, write, edit, glob and bash");
   }
 
   const seen = new Set<string>();

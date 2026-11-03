@@ -1,5 +1,5 @@
 // The self-improvement loop's changes: what a spec.change proposal may say, when Ada may
-// propose one, and what approving it does (record a change, start a mechanic task).
+// propose one, and what approving it does (record a change, start a task for Mandla).
 
 import { safeJson, type ExecResult, type Normalised, type Payload } from "./actions";
 import { AgentUnavailable, startSession } from "./agents";
@@ -29,7 +29,7 @@ const DAY = 86_400_000;
 /** Changes to these types touch more than wording, so get a larger budget and the deep tier. */
 const isLarge = (type: string) => !["wording", "tier"].includes(type);
 
-/** A mechanic task's budget and model for a change of this type, first attempt or follow-up. */
+/** The budget and model of Mandla's task for a change of this type, first attempt or follow-up. */
 export function changeBudget(ctx: Ctx, type: string): { cents: number; model?: string } {
   const cents = ctx.network.self_improvement?.task_cents ?? { small: 100, large: 500 };
   const model = isLarge(type) ? ctx.network.model_tiers?.deep : undefined;
@@ -37,7 +37,7 @@ export function changeBudget(ctx: Ctx, type: string): { cents: number; model?: s
 }
 
 export function changeRisk(target: string, type: string): Risk {
-  if (OWNER_TYPES.includes(type) || target.toLowerCase() === "mechanic") return "high";
+  if (OWNER_TYPES.includes(type) || target.toLowerCase() === "mandla") return "high";
   return type === "tool" ? "medium" : "low";
 }
 
@@ -91,7 +91,7 @@ export async function repeatEvidence(ctx: Ctx, target: string, p: Payload): Prom
   return `repeat_rejections needs the D- id of at least one decision by ${who} that was rejected (not a ${NOT_MEASURED.join(", ")}): the gateway measures the kinds of those decisions. Add one, or pick another measure.`;
 }
 
-/** The mechanic's brief: the approved payload, the ids, and fixed boundaries. */
+/** Mandla's brief: the approved payload, the ids, and fixed boundaries. */
 export function changeBrief(change: Pick<Change, "id" | "agent">, decision: Pick<Decision, "id">, p: Payload): string {
   const evidence = Array.isArray(p.evidence) ? p.evidence.join(", ") : "";
   return [
@@ -110,7 +110,7 @@ export function changeBrief(change: Pick<Change, "id" | "agent">, decision: Pick
   ].join("\n");
 }
 
-/** The task executor: records the change and starts the mechanic on it. */
+/** The task executor: records the change and starts Mandla on it. */
 export async function startChange(ctx: Ctx, d: Decision, n: Normalised): Promise<ExecResult> {
   const p = n.payload;
   const evidence = (p.evidence as string[]) ?? [];
@@ -134,16 +134,16 @@ export async function startChange(ctx: Ctx, d: Decision, n: Normalised): Promise
   const { cents: budget, model } = changeBudget(ctx, type);
   const brief = changeBrief(change, d, p);
 
-  const task = await ctx.db.createTask({ agent: "mechanic", title: `${change.id}: ${type} change to ${n.target}`, brief, kind: "change" });
+  const task = await ctx.db.createTask({ agent: "mandla", title: `${change.id}: ${type} change to ${n.target}`, brief, kind: "change" });
   await ctx.db.updateChange(change.id, { task_id: task.id });
   try {
-    const sid = await startSession(ctx, "mechanic", `Task ${task.id} from the gateway\n\n${brief}`, "task", "owner", {
+    const sid = await startSession(ctx, "mandla", `Task ${task.id} from the gateway\n\n${brief}`, "task", "owner", {
       taskId: task.id,
       budgetCents: budget,
       ...(model ? { model } : {}),
     });
     await ctx.db.setTask(task.id, "running", sid);
-    return { ok: true, result: `Recorded ${change.id}; the mechanic is building it in ${task.id} ($${(budget / 100).toFixed(2)} cap).` };
+    return { ok: true, result: `Recorded ${change.id}; Mandla is building it in ${task.id} ($${(budget / 100).toFixed(2)} cap).` };
   } catch (e) {
     await ctx.db.setTask(task.id, "failed");
     const why = e instanceof Error ? e.message : String(e);
@@ -158,7 +158,7 @@ const MAX_CHARS = 500_000;
 const MAX_TITLE = 100;
 const MAX_BODY = 20_000;
 const CONVENTIONAL = /^(feat|fix|docs|chore|test|refactor|perf|build|ci|style|revert)(\([\w.\/-]+\))?!?: \S/;
-/** Paths the mechanic may never write: CI and the deploy run, and files compile.ts generates. */
+/** Paths Mandla may never write: CI and the deploy run, and files compile.ts generates. */
 const FORBIDDEN = [".github/", "gateway/src/generated/"];
 /** Except network.json: a config change must carry it, and CI checks it matches a fresh compile. */
 const GENERATED_CONFIG = "gateway/src/generated/network.json";
@@ -167,7 +167,7 @@ const forbiddenDir = (path: string) => (path === GENERATED_CONFIG ? undefined : 
 
 type ChangeFile = { path: string; content: string | null };
 
-/** Problems with the files the mechanic submitted, one line each; the checked files if none. */
+/** Problems with the files Mandla submitted, one line each; the checked files if none. */
 export function changeFileProblems(input: unknown): { files: ChangeFile[]; problems: string[] } {
   const raw = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
   const problems: string[] = [];
@@ -196,7 +196,7 @@ export function changeFileProblems(input: unknown): { files: ChangeFile[]; probl
   return { files, problems };
 }
 
-/** The PR description: the gateway's header, then the mechanic's own body. */
+/** The PR description: the gateway's header, then Mandla's own body. */
 function prBody(change: Change, decision: Decision | null, body: string): string {
   const p = safeJson(decision?.payload);
   const evidence = Array.isArray(p.evidence) ? p.evidence.join(", ") : "none recorded";
@@ -206,7 +206,7 @@ function prBody(change: Change, decision: Decision | null, body: string): string
     `Evidence: ${evidence}`,
     `Measure: ${change.measure}${change.tool ? ` (tool ${change.tool})` : ""}`,
     "",
-    "Built by the mechanic; needs the owner's review like any other PR.",
+    "Built by Mandla; needs the owner's review like any other PR.",
     "",
     "## Change",
     "",
@@ -215,13 +215,13 @@ function prBody(change: Change, decision: Decision | null, body: string): string
 }
 
 /**
- * The mechanic's submit_change: the only write to the network's own repo. Accepted only from
+ * Mandla's submit_change: the only write to the network's own repo. Accepted only from
  * the session of the task the gateway started for a change still building, and only once.
  */
 export async function submitChange(ctx: Ctx, agent: string, sessionId: string, input: Record<string, unknown>): Promise<string> {
   const task = await ctx.db.sessionTask(sessionId);
   const change = task && task.agent === agent && task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
-  if (!change) throw new ToolError("Only a mechanic task started for an approved change can submit");
+  if (!change) throw new ToolError("Only Mandla's task for an approved change can submit");
   const asked = String(input.change ?? "").trim();
   if (asked.toUpperCase() !== change.id) throw new ToolError(`This task is for ${change.id}, not ${asked}.`);
   if (change.pr_url) throw new ToolError(`${change.id} already has a PR: ${change.pr_url}`);
@@ -348,7 +348,7 @@ export async function tickChanges(ctx: Ctx, now = new Date()): Promise<void> {
   const fail = (e: unknown, change?: string) =>
     ctx.db.audit({ event_type: "gateway.changes_error", detail: { ...(change ? { change } : {}), error: e instanceof Error ? e.message : String(e) } }).catch(() => {});
   try {
-    // A backstop for a mechanic task that ended without the gateway hearing of it.
+    // A backstop for a task for Mandla that ended without the gateway hearing of it.
     for (const c of await ctx.db.changesIn(["building"])) {
       if (t - msOf(c.created_at) < STUCK_DAYS * DAY) continue;
       try {

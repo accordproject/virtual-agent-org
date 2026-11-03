@@ -33,14 +33,14 @@ const run = (ctx: Ctx, q: string, ...args: unknown[]) => (ctx.db as any).db.prep
 const backdate = (ctx: Ctx, id: string, days = 8) => run(ctx, "UPDATE decisions SET created_at = datetime('now', ?) WHERE id = ?", `-${days} days`, id);
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** A test network with the loop switched on at `since`, and the mechanic deployed. */
+/** A test network with the loop switched on at `since`, and Mandla deployed. */
 function loopCtx(since: string | null = isoDay(Date.now() - 30 * DAY), overrides: Partial<Ctx> = {}) {
   return makeTestCtx({
     ...overrides,
     network: { ...NETWORK, self_improvement: { ...NETWORK.self_improvement!, since } },
     deployed: {
       ...DEPLOYED,
-      agents: { ...DEPLOYED.agents, mechanic: { agent_id: "agent_mechanic", environment_id: "env_1", vault_ids: [], memory_store_ids: ["mem_mechanic"], session_budget_cents: 100 } },
+      agents: { ...DEPLOYED.agents, mandla: { agent_id: "agent_mandla", environment_id: "env_1", vault_ids: [], memory_store_ids: ["mem_mandla"], session_budget_cents: 100 } },
     },
   });
 }
@@ -114,7 +114,7 @@ describe("spec.change proposals", () => {
       ["mira", "wording", "low"],
       ["mira", "tool", "medium"],
       ["mira", "permission", "high"],
-      ["mechanic", "wording", "high"],
+      ["mandla", "wording", "high"],
     ];
     for (const [target, change_type, risk] of cases) {
       const out = await propose(ctx, target, { ...PAYLOAD, change_type });
@@ -197,7 +197,7 @@ describe("spec.change proposals", () => {
     await expect(propose(ctx, "mira", PAYLOAD, "sesn_m")).rejects.toThrow("Jane Doe is a member");
   });
 
-  it("approving spec.change starts a mechanic task", async () => {
+  it("approving spec.change starts a task for Mandla", async () => {
     const { ctx, fakes } = loopCtx();
     await decided(ctx, "mira", 10);
     await ctx.db.createDecision({ agent: "mira", kind: "github.review", target: "accordproject/concerto#1", summary: "s", rationale: "r", risk: "low" });
@@ -209,11 +209,11 @@ describe("spec.change proposals", () => {
     expect(change).toMatchObject({ agent: "mira", decision_id: id, change_type: "wording", measure: "approval_rate", state: "building" });
     // Kinds that say nothing about judgement are left out of the measure.
     expect(JSON.parse(change.kinds)).toEqual(["github.comment"]);
-    const task = (await ctx.db.openTasks("mechanic"))[0];
+    const task = (await ctx.db.openTasks("mandla"))[0];
     expect(task).toMatchObject({ id: change.task_id, kind: "change", status: "running" });
     const sessions = fakes.calls.filter((c) => c.method === "createSession").map((c) => c.args[0] as any);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]).toMatchObject({ agentId: "agent_mechanic", budgetCents: 100 });
+    expect(sessions[0]).toMatchObject({ agentId: "agent_mandla", budgetCents: 100 });
     expect(sessions[0].model).toBeUndefined();
     expect(sessions[0].text).toContain("C-1");
     const d = (await ctx.db.getDecision(id))!;
@@ -252,7 +252,7 @@ describe("spec.change proposals", () => {
 });
 
 describe("submit_change", () => {
-  /** An approved wording change to Mira, C-1, with the mechanic's task running. */
+  /** An approved wording change to Mira, C-1, with Mandla's task running. */
   async function building(dryRun = false) {
     const gh = fakeGitHub();
     const { ctx, fakes } = loopCtx(undefined, { dryRun, github: async () => gh as any });
@@ -260,7 +260,7 @@ describe("submit_change", () => {
     const out = await propose(ctx, "mira", { ...PAYLOAD, evidence: ["D-1", "D-2"] });
     const decision = out.match(/D-\d+/)![0];
     await approve(ctx, decision);
-    const task = (await ctx.db.openTasks("mechanic"))[0];
+    const task = (await ctx.db.openTasks("mandla"))[0];
     return { ctx, fakes, gh, decision, session: task.session_id! };
   }
 
@@ -270,14 +270,14 @@ describe("submit_change", () => {
     body: "Adds a line to step 3 of Mira's spec.",
     files: [{ path: "agents/mira.md", content: "# Mira\n" }],
   };
-  const submit = (ctx: Ctx, session: string, input: object = {}, agent = "mechanic") =>
+  const submit = (ctx: Ctx, session: string, input: object = {}, agent = "mandla") =>
     handleTool(ctx, agent, session, "submit_change", { ...INPUT, ...input });
 
-  it("only the mechanic's change task may submit", async () => {
+  it("only Mandla's change task may submit", async () => {
     const { ctx, session } = await building();
     await expect(submit(ctx, session, {}, "mira")).rejects.toBeInstanceOf(ToolDenied);
-    await ctx.db.upsertSession({ id: "sesn_other", agent: "mechanic", origin: "task", started_by: "owner" });
-    await expect(submit(ctx, "sesn_other")).rejects.toThrow("Only a mechanic task started for an approved change can submit");
+    await ctx.db.upsertSession({ id: "sesn_other", agent: "mandla", origin: "task", started_by: "owner" });
+    await expect(submit(ctx, "sesn_other")).rejects.toThrow("Only Mandla's task for an approved change can submit");
     await expect(submit(ctx, session, { change: "C-2" })).rejects.toThrow("This task is for C-1, not C-2");
   });
 
@@ -340,7 +340,7 @@ describe("submit_change", () => {
     expect(p.author).toEqual(author);
     expect(p.message).toBe(`${INPUT.title}\n\nChange: C-1\nDecision: ${decision}\n\nSigned-off-by: ${author.name} <${author.email}>`);
     expect(p.title).toBe(INPUT.title);
-    for (const s of [decision, "D-1, D-2", "approval_rate", "Built by the mechanic; needs the owner's review like any other PR.", "## Change", INPUT.body]) expect(p.body).toContain(s);
+    for (const s of [decision, "D-1, D-2", "approval_rate", "Built by Mandla; needs the owner's review like any other PR.", "## Change", INPUT.body]) expect(p.body).toContain(s);
     expect(p.body.split("\n")).toContain("Change: C-1");
 
     const change = (await ctx.db.getChange("C-1"))!;
@@ -375,7 +375,7 @@ describe("submit_change", () => {
     expect(await submit(ctx, session)).toMatch(/^DRY RUN: would open a PR for C-1/);
     expect(gh.proposed).toHaveLength(0);
     expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "closed", closed_reason: "dry run" });
-    fakes.sessions[session] = { id: session, status: "idle", agent: { id: "agent_mechanic" }, stop_reason: { type: "end_turn" } };
+    fakes.sessions[session] = { id: session, status: "idle", agent: { id: "agent_mandla" }, stop_reason: { type: "end_turn" } };
     fakes.events[session] = [];
     await processSession(ctx, session);
     const task = (await ctx.db.sessionTask(session))!;
@@ -416,9 +416,9 @@ describe("submit_change", () => {
   });
 });
 
-describe("mechanic tasks that end without a PR", () => {
+describe("Mandla's tasks that end without a PR", () => {
   const end = async (ctx: Ctx, fakes: any, sid: string, blocked: string[] = []) => {
-    fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mechanic" }, stop_reason: { type: "end_turn" } };
+    fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mandla" }, stop_reason: { type: "end_turn" } };
     fakes.events[sid] = [{ id: `${sid}_e1`, type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked } }];
     await processSession(ctx, sid);
   };
@@ -426,26 +426,26 @@ describe("mechanic tasks that end without a PR", () => {
     handleTool(ctx, "ada", "sesn_ada", "assign_task", {
       agent, title: "Retry C-1", objective: "Finish the change", output: "A PR", done_when: "submit_change succeeded", effort: "small", follows_up,
     });
-  /** C-1 approved, its mechanic task running. */
+  /** C-1 approved, its task for Mandla running. */
   async function approved(change_type = "wording") {
     const gh = fakeGitHub();
     const { ctx, fakes } = loopCtx(undefined, { dryRun: false, github: async () => gh as any });
     await decided(ctx, "mira", 10);
     const out = await propose(ctx, "mira", { ...PAYLOAD, change_type, evidence: ["D-1", "D-2"] });
     await approve(ctx, out.match(/D-\d+/)![0]);
-    const task = (await ctx.db.openTasks("mechanic"))[0];
+    const task = (await ctx.db.openTasks("mandla"))[0];
     return { ctx, fakes, task, gh };
   }
-  /** C-1 approved, its mechanic session ended without submitting. */
+  /** C-1 approved, its Mandla session ended without submitting. */
   async function blocked(change_type = "wording") {
     const r = await approved(change_type);
     await end(r.ctx, r.fakes, r.task.session_id!);
     return r;
   }
-  const mechanicSessions = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_mechanic").map((c: any) => c.args[0]);
+  const mandlaSessions = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_mandla").map((c: any) => c.args[0]);
   const wakes = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession" && c.args[0].agentId === "agent_ada");
 
-  it("a mechanic task that ends without submitting is blocked", async () => {
+  it("a task for Mandla that ends without submitting is blocked", async () => {
     const { ctx, fakes, task } = await blocked();
     expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "blocked", blocked_reason: "C-1: no change submitted" });
     const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
@@ -454,7 +454,7 @@ describe("mechanic tasks that end without a PR", () => {
     expect(wakes(fakes).length).toBeGreaterThan(0);
   });
 
-  it("a mechanic session that runs out of budget or is ended is blocked like one that ends its turn, with the change in blocked_reason", async () => {
+  it("a Mandla session that runs out of budget or is ended is blocked like one that ends its turn, with the change in blocked_reason", async () => {
     const endings: [object, string][] = [
       [{ status: "idle", stop_reason: { type: "budget_reached" } }, "C-1: no change submitted (budget reached)"],
       [{ status: "terminated" }, "C-1: no change submitted (session ended)"],
@@ -462,7 +462,7 @@ describe("mechanic tasks that end without a PR", () => {
     for (const [session, blocker] of endings) {
       const { ctx, fakes, task } = await approved();
       const sid = task.session_id!;
-      fakes.sessions[sid] = { id: sid, agent: { id: "agent_mechanic" }, ...session };
+      fakes.sessions[sid] = { id: sid, agent: { id: "agent_mandla" }, ...session };
       fakes.events[sid] = [];
       await processSession(ctx, sid);
       expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "blocked", blocked_reason: blocker });
@@ -475,38 +475,38 @@ describe("mechanic tasks that end without a PR", () => {
 
   it("a change follow-up gets the change's budget and tier, not Ada's effort", async () => {
     const small = await blocked();
-    await follow(small.ctx, "mechanic", small.task.id);
-    expect(mechanicSessions(small.fakes).at(-1)).toMatchObject({ budgetCents: 100 });
-    expect(mechanicSessions(small.fakes).at(-1).model).toBeUndefined();
-    expect(mechanicSessions(small.fakes).at(-1).text).toContain("$1.00");
+    await follow(small.ctx, "mandla", small.task.id);
+    expect(mandlaSessions(small.fakes).at(-1)).toMatchObject({ budgetCents: 100 });
+    expect(mandlaSessions(small.fakes).at(-1).model).toBeUndefined();
+    expect(mandlaSessions(small.fakes).at(-1).text).toContain("$1.00");
 
     const large = await blocked("tool");
-    await follow(large.ctx, "mechanic", large.task.id);
-    expect(mechanicSessions(large.fakes).at(-1)).toMatchObject({ budgetCents: 500, model: NETWORK.model_tiers!.deep });
+    await follow(large.ctx, "mandla", large.task.id);
+    expect(mandlaSessions(large.fakes).at(-1)).toMatchObject({ budgetCents: 500, model: NETWORK.model_tiers!.deep });
   });
 
-  it("a member can't set the mechanic going through Ada", async () => {
+  it("a member can't set Mandla going through Ada", async () => {
     const { ctx, task, fakes } = await blocked();
     await ctx.db.upsertSession({ id: "sesn_m", agent: "ada", origin: "telegram", started_by: "member:telegram:Jane Doe" });
-    const before = mechanicSessions(fakes).length;
+    const before = mandlaSessions(fakes).length;
     const out = handleTool(ctx, "ada", "sesn_m", "assign_task", {
-      agent: "mechanic", title: "Retry C-1", objective: "Finish", output: "A PR", done_when: "done", effort: "small", follows_up: task.id,
+      agent: "mandla", title: "Retry C-1", objective: "Finish", output: "A PR", done_when: "done", effort: "small", follows_up: task.id,
     });
     await expect(out).rejects.toBeInstanceOf(ToolDenied);
     await expect(out).rejects.toThrow("Jane Doe is a member");
-    expect(mechanicSessions(fakes)).toHaveLength(before);
+    expect(mandlaSessions(fakes)).toHaveLength(before);
     expect((await ctx.db.getChange("C-1"))?.task_id).toBe(task.id);
   });
 
   it("a follow-up of a blocked change task takes over the change", async () => {
     const { ctx, task, gh } = await blocked();
-    expect(await follow(ctx, "mechanic", task.id)).toMatch(/^Assigned T-\d+ to Mechanic/);
-    const next = (await ctx.db.openTasks("mechanic")).find((t) => t.follows_up === task.id)!;
+    expect(await follow(ctx, "mandla", task.id)).toMatch(/^Assigned T-\d+ to Mandla/);
+    const next = (await ctx.db.openTasks("mandla")).find((t) => t.follows_up === task.id)!;
     expect(next.kind).toBe("change");
     expect(next.brief).toContain("C-1");
     expect((await ctx.db.getChange("C-1"))?.task_id).toBe(next.id);
 
-    const out = await handleTool(ctx, "mechanic", next.session_id!, "submit_change", {
+    const out = await handleTool(ctx, "mandla", next.session_id!, "submit_change", {
       change: "C-1", title: "docs(mira): thank first", body: "b", files: [{ path: "agents/mira.md", content: "x" }],
     });
     expect(out).toContain("/pull/1");
@@ -514,18 +514,18 @@ describe("mechanic tasks that end without a PR", () => {
     expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
   });
 
-  it("a change follow-up can only go to the mechanic", async () => {
+  it("a change follow-up can only go to Mandla", async () => {
     const { ctx, task } = await blocked();
-    await expect(follow(ctx, "mira", task.id)).rejects.toThrow("only the mechanic can follow it up");
+    await expect(follow(ctx, "mira", task.id)).rejects.toThrow("only Mandla can follow it up");
     expect((await ctx.db.getChange("C-1"))?.task_id).toBe(task.id);
   });
 
-  it("the mechanic only gets tasks that follow up a change", async () => {
+  it("Mandla only gets tasks that follow up a change", async () => {
     const { ctx } = loopCtx();
     const plain = await ctx.db.createTask({ agent: "mira", title: "t", brief: "b" });
-    const msg = "The mechanic only works on approved changes: propose one with spec.change.";
-    await expect(handleTool(ctx, "ada", "sesn_ada", "assign_task", { agent: "mechanic", title: "x", objective: "o", output: "o", done_when: "d", effort: "small" })).rejects.toThrow(msg);
-    await expect(follow(ctx, "mechanic", plain.id)).rejects.toThrow(msg);
+    const msg = "Mandla only works on approved changes: propose one with spec.change.";
+    await expect(handleTool(ctx, "ada", "sesn_ada", "assign_task", { agent: "mandla", title: "x", objective: "o", output: "o", done_when: "d", effort: "small" })).rejects.toThrow(msg);
+    await expect(follow(ctx, "mandla", plain.id)).rejects.toThrow(msg);
   });
 
   it("Ada closing a blocked change task closes its change too", async () => {
@@ -547,8 +547,8 @@ describe("mechanic tasks that end without a PR", () => {
 
   it("a follow-up that is blocked again closes the change", async () => {
     const { ctx, fakes, task } = await blocked();
-    await follow(ctx, "mechanic", task.id);
-    const next = (await ctx.db.openTasks("mechanic")).find((t) => t.follows_up === task.id)!;
+    await follow(ctx, "mandla", task.id);
+    const next = (await ctx.db.openTasks("mandla")).find((t) => t.follows_up === task.id)!;
     const before = wakes(fakes).length;
     await end(ctx, fakes, next.session_id!);
     expect((await ctx.db.getTask(next.id))?.status).toBe("blocked");
@@ -556,7 +556,7 @@ describe("mechanic tasks that end without a PR", () => {
     // Decision 50: a follow-up blocked again goes to the owner through Ada.
     expect(wakes(fakes).length).toBe(before + 1);
     expect(JSON.stringify(wakes(fakes).at(-1).args[0])).toContain(next.id);
-    await expect(follow(ctx, "mechanic", next.id)).rejects.toThrow(/closed/);
+    await expect(follow(ctx, "mandla", next.id)).rejects.toThrow(/closed/);
   });
 });
 

@@ -116,15 +116,15 @@ test("validate lets only ada request spec.change", () => {
   assert.ok(validate({ ...cfg, permissions }).includes("mira: only ada may request spec.change"));
 });
 
-test("validate keeps the mechanic without credentials", () => {
+test("validate keeps Mandla without credentials", () => {
   const cfg = loadAll();
-  const err = "mechanic must have no MCP servers, no requestable kinds, and only read, write, edit, glob and bash";
-  const withMechanic = (patch: object) =>
-    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, mechanic: { ...cfg.permissions.agents.mechanic, ...patch } } } } as typeof cfg);
+  const err = "mandla must have no MCP servers, no requestable kinds, and only read, write, edit, glob and bash";
+  const withMandla = (patch: object) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, mandla: { ...cfg.permissions.agents.mandla, ...patch } } } } as typeof cfg);
   assert.ok(!validate(cfg).includes(err));
-  assert.ok(withMechanic({ mcp_servers: { github: { mode: "read" } } }).includes(err));
-  assert.ok(withMechanic({ requestable: ["other"] }).includes(err));
-  assert.ok(withMechanic({ builtin_tools: ["read", "web_fetch"] }).includes(err));
+  assert.ok(withMandla({ mcp_servers: { github: { mode: "read" } } }).includes(err));
+  assert.ok(withMandla({ requestable: ["other"] }).includes(err));
+  assert.ok(withMandla({ builtin_tools: ["read", "web_fetch"] }).includes(err));
 });
 
 test("validate checks self_improvement", () => {
@@ -154,5 +154,5 @@ test("compile emits the loop settings", () => {
   assert.deepEqual(out.self_improvement.task_cents, { small: 100, large: 500 });
   assert.equal(out.self_improvement.since, all.network.self_improvement?.since ?? null);
   assert.equal(out.network_repo, "accordproject/virtual-agent-org");
-  assert.equal(out.agents.mechanic.requestable.length, 0);
+  assert.equal(out.agents.mandla.requestable.length, 0);
 });
