@@ -198,7 +198,9 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
   const title = String(input.title ?? "").trim();
   const body = String(input.body ?? "").trim();
   const { files, problems } = changeFileProblems(input.files);
-  if (!CONVENTIONAL.test(title)) problems.unshift("title must be in Conventional Commits form, e.g. docs(mira): thank the contributor first");
+  // Checked on the raw input: a newline would let the title forge trailers in the commit message.
+  if (/[\u0000-\u001f\u007f]/.test(String(input.title ?? ""))) problems.unshift("title must be one line, without control characters");
+  else if (!CONVENTIONAL.test(title)) problems.unshift("title must be in Conventional Commits form, e.g. docs(mira): thank the contributor first");
   if (title.length > MAX_TITLE) problems.unshift(`title is ${title.length} characters; at most ${MAX_TITLE}`);
   if (!body) problems.push("body is required");
   if (body.length > MAX_BODY) problems.push(`body is ${body.length.toLocaleString("en-GB")} characters; at most ${MAX_BODY.toLocaleString("en-GB")}`);

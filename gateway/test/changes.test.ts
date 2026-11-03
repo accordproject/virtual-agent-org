@@ -252,6 +252,10 @@ describe("submit_change", () => {
     await expect(submit(ctx, session, { title: "Thank contributors" })).rejects.toThrow(/Conventional Commits/);
     await expect(submit(ctx, session, { title: `docs: ${"x".repeat(100)}` })).rejects.toThrow(/100/);
     await expect(submit(ctx, session, { body: "x".repeat(20_001) })).rejects.toThrow(/20,000/);
+    // A title is one line: no forged trailers in the commit message.
+    for (const title of ["docs: x\n\nSigned-off-by: Someone Else <a@b>\nChange: C-9", "docs: x\rmore", "docs: x\u0000", "docs: x\tthen"]) {
+      await expect(submit(ctx, session, { title })).rejects.toThrow(/title must be one line, without control characters/);
+    }
   });
 
   it("submit_change refuses more than 50 files or 500,000 characters", async () => {
