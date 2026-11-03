@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { approve, markDone, reject, stop } from "../src/controls";
 import { handleTool, ToolError } from "../src/tools";
 import { decisionCard } from "../src/format";
-import { NETWORK, makeTestCtx } from "./helpers";
+import { NETWORK, fakeGitHub, makeTestCtx } from "./helpers";
 
 describe("request_action", () => {
   it("refuses kinds the agent may not request", async () => {
@@ -112,6 +112,112 @@ describe("approvals", () => {
     expect(conf.args.slice(0, 3)).toEqual(["sesn_9", "evt_9", false]);
     expect(await reject(ctx, d.id, "Use a fork")).toBe(`Note added to ${d.id}.`);
     expect((await ctx.db.getDecision(d.id))?.note).toBe("Use a fork");
+  });
+});
+
+describe("Ada deciding for Matt (decision 52)", () => {
+  const T = "accordproject/concerto#12";
+  const decide = (ctx: any, id: string, outcome: string, note = "n", session = "sesn_ada") =>
+    handleTool(ctx, "ada", session, "decide_action", { id, outcome, note });
+  const ciRequest = (ctx: any, risk = "low") =>
+    handleTool(ctx, "mira", "sesn_m", "request_action", { kind: "github.approve_ci", target: T, summary: "Approve CI", rationale: "Read the diff: parser fix only", risk, payload: { sha: "abcdef1" } });
+  const ciCtx = (files = ["src/parser.ts"]) => {
+    const approved: number[] = [];
+    const gh = {
+      ...fakeGitHub({ files }),
+      pull: async () => ({ head: { sha: "abcdef1234567" } }),
+      runsAwaitingApproval: async () => [{ id: 7, name: "Build" }],
+      approveRun: async (_r: unknown, id: number) => approved.push(id),
+    };
+    const t = makeTestCtx({ dryRun: false, github: async () => gh as any });
+    return { ...t, approved };
+  };
+
+  it("marks done an approved decision waiting to be carried out, and nothing else", async () => {
+    const { ctx } = makeTestCtx();
+    await handleTool(ctx, "mira", "s", "request_action", { kind: "linkedin.post", target: "linkedin", summary: "s", rationale: "r", risk: "low", payload: { text: "Post" } });
+    await expect(decide(ctx, "D-1", "done")).rejects.toThrow(/D-1 is open: you can mark done only an approved decision/);
+    await approve(ctx, "D-1");
+    expect(await decide(ctx, "D-1", "done", "Matt posted it on 2 Nov")).toBe('D-1 done. Report it under "Decided for you".');
+    expect(await ctx.db.getDecision("D-1")).toMatchObject({ status: "executed", result: "Decided by Ada: Matt posted it on 2 Nov" });
+  });
+
+  it("rejects an open decision only when the same agent has since superseded it for the same target", async () => {
+    const { ctx } = makeTestCtx();
+    const comment = (target: string) =>
+      handleTool(ctx, "mira", "s", "request_action", { kind: "github.comment", target, summary: "s", rationale: "r", risk: "low", payload: { text: "t" } });
+    await comment(T);
+    await comment("accordproject/concerto#13");
+    await expect(decide(ctx, "D-1", "rejected")).rejects.toThrow(/no later decision from Mira for accordproject\/concerto#12/);
+    await comment(T);
+    expect(await decide(ctx, "D-1", "rejected", "D-3 has the corrected text")).toMatch(/^D-1 rejected/);
+    expect(await ctx.db.getDecision("D-1")).toMatchObject({ status: "rejected", note: "Superseded by D-3. Decided by Ada: D-3 has the corrected text" });
+    await expect(decide(ctx, "D-3", "rejected")).rejects.toThrow(/isn't superseded/);
+  });
+
+  it("approves a low-risk CI approval after the gateway's own checks, and runs it", async () => {
+    const { ctx, approved } = ciCtx();
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", started_by: "member:discord:Ali Khan" });
+    await ciRequest(ctx);
+    expect((await ctx.db.getDecision("D-1"))?.risk).toBe("low");
+    expect(await decide(ctx, "D-1", "approved", "Mira read the diff: parser fix only")).toMatch(/^D-1 approved: /);
+    expect(approved).toEqual([7]);
+    expect((await ctx.db.getDecision("D-1"))?.status).toBe("executed");
+  });
+
+  it("leaves to Matt CI approvals that are high risk or now touch CI files, and every other kind", async () => {
+    const { ctx, approved } = ciCtx(["src/parser.ts", "package.json"]);
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", started_by: "member:discord:Ali Khan" });
+    await ciRequest(ctx);
+    await expect(decide(ctx, "D-1", "approved")).rejects.toThrow(/put D-1 to Matt:\n- the PR changes package.json/);
+    await ciRequest(ctx, "high");
+    await expect(decide(ctx, "D-2", "approved")).rejects.toThrow(/high-risk github.approve_ci/);
+    await handleTool(ctx, "mira", "s", "request_action", { kind: "github.comment", target: T, summary: "s", rationale: "r", risk: "low", payload: { text: "t" } });
+    await expect(decide(ctx, "D-3", "approved")).rejects.toThrow(/low-risk github.comment: you may approve only/);
+    expect(approved).toEqual([]);
+    expect((await ctx.db.listDecisions({ status: "open" })).map((d) => d.id)).toEqual(["D-1", "D-2", "D-3"]);
+  });
+
+  it("decides nothing in a member's conversation, nor paused tool calls, and is Ada's alone", async () => {
+    const { ctx } = makeTestCtx();
+    const d = await ctx.db.createDecision({ agent: "mira", kind: "tool.confirm", target: "bash", summary: "s", rationale: "r", risk: "medium", session_id: "s1", tool_use_id: "t1" });
+    await expect(decide(ctx, d.id, "rejected")).rejects.toThrow(/paused tool call/);
+    await ctx.db.upsertSession({ id: "sesn_j", agent: "ada", origin: "telegram", started_by: "member:telegram:Jane Doe" });
+    await expect(decide(ctx, d.id, "rejected", "n", "sesn_j")).rejects.toThrow(/Jane Doe is a member/);
+    await expect(handleTool(ctx, "mira", "s", "decide_action", { id: d.id, outcome: "rejected", note: "n" })).rejects.toThrow(/not available to mira/);
+    expect((await ctx.db.getDecision(d.id))?.status).toBe("open");
+  });
+});
+
+describe("Ada closing tasks (decision 53)", () => {
+  const close = (ctx: any, id: string, session = "sesn_ada") => handleTool(ctx, "ada", session, "close_task", { id, note: "duplicates T-34" });
+  const task = async (ctx: any, sessionStatus?: string) => {
+    const t = await ctx.db.createTask({ agent: "mira", title: "t", brief: "b" });
+    if (sessionStatus) {
+      await ctx.db.upsertSession({ id: `sesn_${t.id}`, agent: "mira", origin: "task", task_id: t.id, status: sessionStatus });
+      await ctx.db.setTask(t.id, "running", `sesn_${t.id}`);
+    }
+    return t.id as string;
+  };
+
+  it("closes a task whose session has stopped, and audits why", async () => {
+    const { ctx } = makeTestCtx();
+    const id = await task(ctx, "idle:budget_reached");
+    expect(await close(ctx, id)).toBe(`${id} closed. Report it under "Decided for you".`);
+    expect((await ctx.db.getTask(id))?.status).toBe("cancelled");
+    expect((await ctx.db.openTasks()).map((t) => t.id)).toEqual([]);
+    const row: any = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'ada.closed_task'").first();
+    expect(JSON.parse(row.detail)).toEqual({ task: id, of: "mira", note: "duplicates T-34" });
+    await expect(close(ctx, id)).rejects.toThrow(/already cancelled/);
+  });
+
+  it("leaves running work, work waiting on a decision, and member conversations alone", async () => {
+    const { ctx } = makeTestCtx();
+    await expect(close(ctx, await task(ctx, "running"))).rejects.toThrow(/still running/);
+    await expect(close(ctx, await task(ctx, "idle:requires_action"))).rejects.toThrow(/waiting on a decision/);
+    await ctx.db.upsertSession({ id: "sesn_j", agent: "ada", origin: "telegram", started_by: "member:telegram:Jane Doe" });
+    await expect(close(ctx, await task(ctx), "sesn_j")).rejects.toThrow(/Jane Doe is a member/);
+    expect((await ctx.db.openTasks()).map((t) => t.status)).toEqual(["running", "running", "open"]);
   });
 });
 

@@ -51,7 +51,15 @@ export interface PermissionsYaml {
   action_kinds: Record<string, { risk: "low" | "medium" | "high"; executor: "github" | "discord" | "discord_ops" | "discord_dm" | "vimeo" | "manual" | "task"; auto?: boolean }>;
   agents: Record<
     string,
-    { mcp_servers: Record<string, { mode: string }> | []; builtin_tools: string[]; requestable: string[] }
+    {
+      mcp_servers: Record<string, { mode: string }> | [];
+      builtin_tools: string[];
+      requestable: string[];
+      /** Other agents whose memory stores this agent mounts read-only (decision 54). */
+      reads_memory_of?: string[];
+      /** "open" runs the agent in an environment with unrestricted outbound access (decision 54). Default "limited". */
+      networking?: "limited" | "open";
+    }
   >;
 }
 export interface SchedulesYaml {

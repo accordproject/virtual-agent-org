@@ -16,6 +16,7 @@ import { ManagedClient } from "../gateway/src/managed";
 import { toolsForAgent } from "../gateway/src/toolDefs";
 import { compile, validate } from "./compile";
 import { ROOT, loadAll, readText } from "./lib";
+import { memorySection, memoryStoreIds } from "./memory";
 import { renderContext } from "./repos";
 
 const DRY = process.argv.includes("--dry-run");
@@ -24,6 +25,8 @@ const STATE_PATH = join(ROOT, "gateway/src/generated/deployed.json");
 
 interface State extends DeployedConfig {
   environment_id?: string;
+  /** Unrestricted outbound access, for agents with `networking: open` (decision 54). */
+  open_environment_id?: string;
   shared_memory_store_id?: string;
 }
 
@@ -55,19 +58,15 @@ async function step<T>(label: string, payload: unknown, fn: () => Promise<T>): P
   return fn();
 }
 
-/** Where Managed Agents mounts memory stores in the sandbox, one directory per store name. */
-const MEMORY_MOUNT = "/mnt/memory";
-
 function systemPrompt(agent: string): string {
   const spec = cfg.specs[agent];
   const parts = [readText("agents/_protocol.md"), spec.body];
   if (agent === "ada") parts.push(readText("evaluation/rubric.md"));
-  parts.push(
-    "## Shared context\n\nTwo memory stores are mounted in your sandbox, each under `" + MEMORY_MOUNT + "/<store name>/`. " +
-      "Your own is read-write and holds your notes (see Memory between sessions): `" + MEMORY_MOUNT + "/" + agent + "-memory/`, " +
-      "so your working notes are `" + MEMORY_MOUNT + "/" + agent + "-memory/notes/working.md`. The shared one is read-only and holds " +
-      "Accord Project context: `" + MEMORY_MOUNT + "/virtual-agent-org-shared/context/accord.md`. Read both before your first task in a session.",
-  );
+  if (agent === "vera") {
+    parts.push("## Scorecard schema\n\nEvery scorecard you pass to `write_scorecard` must follow this JSON Schema.\n\n```json\n" +
+      readText("evaluation/scorecard.schema.json").trim() + "\n```");
+  }
+  parts.push(memorySection(agent, cfg.permissions.agents[agent].reads_memory_of ?? []));
   parts.push(rosterSection());
   parts.push(`## Your configuration\n\nAgent: ${agent}. Requestable actions: ${cfg.permissions.agents[agent].requestable.join(", ") || "none"}.`);
   return parts.join("\n\n---\n\n");
@@ -114,23 +113,32 @@ function toolsFor(agent: string) {
   return { tools, mcpServers };
 }
 
-async function ensureEnvironment() {
-  if (state.environment_id) return;
-  const body = {
-    name: "virtual-agent-org",
-    config: {
-      type: "cloud",
-      networking: {
-        type: "limited",
-        // VERIFY: whether web_search/web_fetch are governed by these hosts.
-        allowed_hosts: ["api.github.com", "github.com", "raw.githubusercontent.com", "mttrbrts.github.io"],
-        allow_package_managers: true,
-        allow_mcp_servers: true,
+async function ensureEnvironment(open: boolean) {
+  if (!state.environment_id) {
+    const body = {
+      name: "virtual-agent-org",
+      config: {
+        type: "cloud",
+        networking: {
+          type: "limited",
+          // Also limits web_search and web_fetch, which run on Anthropic's servers: search drops
+          // results from other hosts and fetch returns url_not_allowed (Managed Agents docs, environments).
+          allowed_hosts: ["api.github.com", "github.com", "raw.githubusercontent.com", "mttrbrts.github.io"],
+          allow_package_managers: true,
+          allow_mcp_servers: true,
+        },
       },
-    },
-  };
-  const env = await step("create environment", body, () => client.createEnvironment(body));
-  if (env) state.environment_id = env.id;
+    };
+    const env = await step("create environment", body, () => client.createEnvironment(body));
+    if (env) state.environment_id = env.id;
+  }
+  // Sage searches the open web, so it gets its own environment; every other agent stays limited.
+  if (open && !state.open_environment_id) {
+    // VERIFY: the unrestricted networking body (taken from the docs' mode table; no example given).
+    const body = { name: "virtual-agent-org-open", config: { type: "cloud", networking: { type: "unrestricted" } } };
+    const env = await step("create open environment", body, () => client.createEnvironment(body));
+    if (env) state.open_environment_id = env.id;
+  }
 }
 
 /** context/accord.md with the repos in scope filled in from config/network.yaml. */
@@ -219,14 +227,32 @@ async function ensureAgent(agent: string) {
     ? await step(`update agent ${agent}`, body, () => client.updateAgent(existing.agent_id, body))
     : await step(`create agent ${agent}`, body, () => client.createAgent(body));
 
-  if (saved && state.environment_id) {
+  const environment = cfg.permissions.agents[agent].networking === "open" ? state.open_environment_id : state.environment_id;
+  if (saved && environment) {
     state.agents[agent] = {
       agent_id: saved.id,
-      environment_id: state.environment_id,
+      environment_id: environment,
       vault_ids: vault ? [vault] : [],
       memory_store_ids: [memory, state.shared_memory_store_id].filter(Boolean) as string[],
       session_budget_cents: agent === "ada" ? 150 : 100,
     };
+  }
+}
+
+/**
+ * Adds peer stores (`reads_memory_of`) after each agent's own and the shared one. Runs once
+ * every agent exists, since a peer may be created later in the same deploy.
+ */
+function linkPeerStores(agents: string[]) {
+  for (const a of agents) {
+    const reads = cfg.permissions.agents[a].reads_memory_of ?? [];
+    const dep = state.agents[a];
+    if (!reads.length) continue;
+    const byAgent = Object.fromEntries(reads.map((peer) => [peer, state.agents[peer]?.memory_store_ids?.[0]]));
+    const { ids, missing } = memoryStoreIds(reads, { own: dep?.memory_store_ids?.[0], shared: state.shared_memory_store_id, byAgent });
+    for (const peer of missing) console.warn(`  ${a} reads ${peer}'s store, but ${peer} has none yet; deploy again once it does`);
+    if (DRY) console.log(`\n# link memory stores for ${a}\n${JSON.stringify({ reads, ids })}`);
+    else if (dep) dep.memory_store_ids = ids;
   }
 }
 
@@ -238,7 +264,7 @@ async function ensureDeployment(s: (typeof cfg.schedules.schedules)[number]) {
     agent: s.tier && dep
       ? { type: "agent_with_overrides", id: dep.agent_id, model: cfg.models.tiers[s.tier] } // VERIFY on deployments
       : dep?.agent_id ?? `<${s.agent}>`,
-    environment_id: state.environment_id,
+    environment_id: dep?.environment_id ?? state.environment_id,
     schedule: { type: "cron", expression: s.cron, timezone: tz },
     initial_events: [{ type: "user.message", content: [{ type: "text", text: s.prompt.trim() }] }],
     budget: { type: "limit", max_list_cost: { amount: String(Math.round(s.budget_usd * 100)), currency: "USD" } },
@@ -268,9 +294,10 @@ async function main() {
     console.log("No agents are in scope for this phase. Raise network.current_phase to deploy.");
     return;
   }
-  await ensureEnvironment();
+  await ensureEnvironment(agents.some((a) => cfg.permissions.agents[a].networking === "open"));
   await ensureSharedMemory();
   for (const a of agents) await ensureAgent(a);
+  linkPeerStores(agents);
   if (cfg.network.network.schedules_enabled) {
     for (const s of cfg.schedules.schedules.filter((s) => agents.includes(s.agent))) await ensureDeployment(s);
   } else {

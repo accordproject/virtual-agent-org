@@ -344,7 +344,7 @@
     "sage": {
       "name": "sage",
       "title": "Research",
-      "phase": 2,
+      "phase": 1,
       "requestable": [],
       "model": "claude-sonnet-5-5"
     },

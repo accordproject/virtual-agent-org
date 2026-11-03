@@ -8,8 +8,8 @@ is public: write as if anyone can read it.
 
 A network of Claude Managed Agents that helps run the Accord Project. Matt Roberts
 (TSC chair, the owner) instructs **Ada**, the Chief of Staff, from Telegram or Discord.
-Ada delegates to specialists (Mira, Vera, Otto and the mechanic in Phase 1; Rosa, Juno,
-Sage, Kit, Felix, Nell later). A Cloudflare Worker, the **gateway**, connects
+Ada delegates to specialists (Mira, Vera, Otto, Sage and the mechanic in Phase 1; Rosa,
+Juno, Kit, Felix, Nell later). A Cloudflare Worker, the **gateway**, connects
 everything: it runs the agents' custom tools, holds the decision queue, executes
 approved actions with its own credentials, and keeps the audit log.
 
@@ -19,7 +19,9 @@ These are Matt's, and the code enforces them. Don't weaken them, even to make a
 feature easier.
 
 1. **Ada has no side effects.** She holds no external tools; she acts only through
-   `assign_task`, `send_to_matt` and the decision queue.
+   `assign_task`, `send_to_matt` and the decision queue. With `decide_action` she may
+   mark done, reject superseded, or approve low-risk `github.approve_ci` decisions
+   (decision 52), and with `close_task` close a stopped task (decision 53); nothing else.
 2. **Agents never hold credentials for critical actions.** Merging, closing, releasing,
    publishing, posting, emailing, messaging a named person, deleting, spending, and
    spec or permission changes all go through `request_action`, which queues a decision.
@@ -143,6 +145,8 @@ only for a fork without the workflow, or when a run fails.
   - `model` override on session creation, used for deep-tier review checks
     (`managed.ts`);
   - `agent_with_overrides` on scheduled deployments (`deploy.ts`);
+  - the `unrestricted` networking body for Sage's open environment (`ensureEnvironment`
+    in `deploy.ts`, decision 54);
   - events-list pagination (`managed.ts`);
   - the token field names on a session's `usage` (`sessionTokens` in `managed.ts`),
     behind Vera's `read_audit`;
@@ -154,7 +158,7 @@ only for a fork without the workflow, or when a run fails.
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
 - **Decision 10** (open): long-term funding for the API credits.
-- **Self-improvement loop** (decision 52) is built but off. To switch it on: install
+- **Self-improvement loop** (decision 55) is built but off. To switch it on: install
   the gateway's App on this repo without the Workflows permission, set
   `self_improvement.commit_author` to the App's bot identity and
   `self_improvement.since` to the start date (`docs/setup.md`, step 9). Not yet

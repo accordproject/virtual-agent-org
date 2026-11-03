@@ -67,12 +67,14 @@ agents:
       github: { mode: read }
     builtin_tools: [read, write, edit, glob, bash, web_fetch]       # bash for computing metrics in her sandbox
     requestable: []
+    reads_memory_of: [otto]                    # Otto's record of news the WG raised (decision 54)
   otto:
     mcp_servers:
       vimeo:  { mode: read }
       github: { mode: read }
     builtin_tools: [read, write, edit, glob, web_fetch]
     requestable: [vimeo.publish, discord.announce, github.comment, message.person, discord.ops]
+    reads_memory_of: [sage]                    # Sage's WG news brief (decision 54)
   mechanic:
     # No credentials: the gateway pushes the branch and opens the PR (decision 51).
     mcp_servers: []
@@ -93,6 +95,7 @@ agents:
     mcp_servers: {}
     builtin_tools: [read, write, edit, glob, web_search, web_fetch]
     requestable: []
+    networking: open                           # own environment: the allowlist also limits web search (decision 54)
   kit:
     mcp_servers:
       github: { mode: read }

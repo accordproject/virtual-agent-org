@@ -183,7 +183,7 @@ repos with `npm run repo:add owner/name` (it checks the GitHub side), and run
 
 ## 9. Switch on the self-improvement loop
 
-The loop (decision 52) lets Ada propose changes to the network's own specs, tiers and
+The loop (decision 55) lets Ada propose changes to the network's own specs, tiers and
 tools; once you approve one, the mechanic builds it and the gateway's App opens a pull
 request on your copy of this repo. It is off until you set a start date. Do this once
 Phase 1 is running.

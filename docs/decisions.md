@@ -398,7 +398,7 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   wakes to 0, already does it); waking the agent that was blocked (it reported the
   blocker because it couldn't fix it).
 
-**51. Who may change the network's own code** · RESOLVED (amended by 52)
+**51. Who may change the network's own code** · RESOLVED (amended by 55)
 
 - No agent holds a credential for this repo, and it is in no agent's scope or the
   gateway's `repos`.
@@ -426,12 +426,76 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: letting every agent propose changes here (the rules would be editable by
   the agents they limit); no agent writing here at all (every fix waits for the owner
   to write it).
-- Changed by decision 52: the mechanic was to open pull requests from its own fork with
+- Changed by decision 55: the mechanic was to open pull requests from its own fork with
   a credential limited to that fork, and the owner was to deploy by hand. It now holds
   no credential and writes through the gateway, and the deploy workflow (decision 49)
   makes a merged change live.
 
-**52. The self-improvement loop** · RESOLVED (off until `self_improvement.since` is set)
+**52. What Ada may decide without the owner** · RESOLVED
+
+- The decision queue filled with items needing no judgement: manual actions already
+  done, requests an agent had replaced, and CI approvals the gateway sent to the owner
+  only because a member's message set the work going.
+- Ada decides three kinds herself with `decide_action(id, outcome, note)` and lists
+  them under "Decided for you" in the next check-in:
+  - **done:** an approved decision that has been carried out or superseded;
+  - **rejected:** an open decision when the same agent has since queued one for the
+    same target (the note records which);
+  - **approved:** an open low-risk `github.approve_ci`, where the requesting agent read
+    the diff and found it clean. The gateway re-runs the automatic approval's file and
+    workflow checks first and refuses if any fails.
+- An approved decision is a manual action waiting for the owner, and its card is the
+  only reminder of it, so marking it done clears that reminder. Kept: Ada's note gives
+  the evidence and the check-in lists each one. Not chosen: limiting (a) to superseded
+  decisions, which would leave every "done" to the owner.
+- In practice (c) covers CI approvals a member's message set going: other low-risk ones
+  already run automatically, and ones the checks flag are high risk. Kept on purpose,
+  since the gateway's checks are the same either way.
+- The gateway refuses everything else, including paused tool calls, any other kind, and
+  any call from a conversation a member started (rule 5). Spending, sending to people,
+  deleting, merges and releases stay with the owner. Each decision is audited as
+  `ada.decided` and her note is kept on the decision.
+
+**53. Closing tasks that never finished** · RESOLVED
+
+- A task closed only when its session ended its turn normally. A session that ran out
+  of budget, ended in error or went stale left its task `running` for good, and nobody
+  could close it, so Ada kept following up work that had stopped.
+- The gateway now makes them `blocked`, with the reason in `blocked_reason`, so every
+  unfinished task ends with a choice made by Ada or the owner, never silently:
+  - out of budget, or ended in error or out of retries: blocked when the session
+    stops, and Ada is woken within the usual limits (decision 50);
+  - session stale, or no session after 7 days: blocked at the hourly tidy-up, which also
+    clears the backlog. No wake; Ada's next check-in picks them up.
+- Ada then retries, rewords, reassigns, puts it to the owner, or closes it. A task that
+  ran out of budget is retried at a higher effort or split, never resent unchanged.
+- Ada may close a task herself with `close_task(id, note)`, for one that is finished
+  in practice or a duplicate, only once its session has stopped and never in a
+  conversation a member started. It is audited as `ada.closed_task` and listed under
+  "Decided for you".
+- Not chosen: leaving them open; marking them `failed`, which drops them from Ada's
+  list without anyone deciding; a close command for the owner only.
+
+**54. Sage joins Phase 1 for WG news** · RESOLVED
+
+- The Tech WG chair's weekly briefing offers up to three outside developments the WG
+  could discuss. The chair decides what to raise; Otto never adds them to the agenda.
+- Sage joins Phase 1 early, for this job only: a Monday brief on standards work for
+  legal and contract data, legal context in agent protocols and agentic commerce, and
+  related open source projects. Its wider brief waits for Phase 2.
+- Sage is measured by the share of its items, sent to the chair, that the WG discusses.
+  Otto records this from the transcript; Vera reports it.
+- Otto reads Sage's memory store read-only (`reads_memory_of` in `permissions.yaml`),
+  and Vera reads Otto's the same way. Agents can't write to the shared store.
+- Otto processes recordings on Thursdays, the morning after the meeting, instead of
+  the following Monday.
+- The environment's network allowlist also limits web search and fetch, so Sage runs
+  in its own environment with unrestricted outbound access (`networking: open` in
+  `permissions.yaml`). Every other agent stays on the limited one; Ada can't be moved.
+- Considered: giving Otto web search (overlaps Sage later), and folding Sage's remit
+  into Otto (mixes two jobs).
+
+**55. The self-improvement loop** · RESOLVED (off until `self_improvement.since` is set)
 
 - The owner's rejection notes went back to the one agent rejected and then faded. Ada's
   weekly evaluation could propose a spec change, but nothing built it, recorded it or
@@ -484,7 +548,7 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   fresh, so proposals stall; her notes are only a reminder, and the gateway's change
   record is the source of truth); the mechanic proposing and measuring its own changes.
 
-**53. Mira reviewing pull requests on this repo** · RESOLVED (not built)
+**56. Mira reviewing pull requests on this repo** · RESOLVED (not built)
 
 - Once the first outside contribution arrives, Mira will review pull requests here,
   on tighter terms than on the Accord repos.

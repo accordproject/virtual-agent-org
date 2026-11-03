@@ -2,7 +2,7 @@
 // it checks who may call what before doing anything.
 
 import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
-import { AgentUnavailable, postDecision, startSession } from "./agents";
+import { AgentUnavailable, postDecision, refreshDecisionCard, startSession } from "./agents";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
@@ -167,6 +167,10 @@ const HANDLERS: Record<ToolName, Handler> = {
       })),
     );
   },
+
+  decide_action: (ctx, { sessionId, input }) => decideAction(ctx, sessionId, input),
+
+  close_task: (ctx, { sessionId, input }) => closeTask(ctx, sessionId, input),
 
   record_evaluation: async (ctx, { input }) => {
     const target = s(input.agent, "agent").toLowerCase();
@@ -498,6 +502,77 @@ async function autoApproveCi(ctx: Ctx, agent: string, sessionId: string, input: 
   const d = await ctx.db.createDecision({ ...base, risk: "low" });
   const r = await runAuto(ctx, d, "approved automatically: no workflow, build or dependency files changed, and the repo's workflows are safe for forks");
   return `${d.id} ${r.ok ? "done" : "failed"}: ${r.result}`;
+}
+
+/**
+ * Ada decides a queued decision herself, in three cases only; everything else stays
+ * Matt's (decision 52). done: an approved decision carried out or superseded.
+ * rejected: an open decision the same agent has since superseded for the same target.
+ * approved: an open low-risk github.approve_ci, which must still pass the checks that
+ * automatic approval runs.
+ */
+async function decideAction(ctx: Ctx, sessionId: string, input: Input): Promise<string> {
+  const id = s(input.id, "id").toUpperCase();
+  const outcome = s(input.outcome, "outcome");
+  const note = s(input.note, "note");
+  // Rule 5: a member may ask, not instruct, so a member's conversation decides nothing.
+  const member = await sessionMember(ctx, sessionId);
+  if (member) throw new ToolDenied(`${member.name} is a member: you can't decide anything in a conversation they started.`);
+  const d = await ctx.db.getDecision(id);
+  if (!d) throw new ToolError(`No decision ${id}`);
+  if (d.kind === "tool.confirm") throw new ToolDenied(`${id} is a paused tool call: only Matt decides those.`);
+  const why = `Decided by Ada: ${note}`;
+
+  if (outcome === "done") {
+    if (d.status !== "approved") throw new ToolDenied(`${id} is ${d.status}: you can mark done only an approved decision waiting to be carried out.`);
+    await ctx.db.markExecuted(id, true, why);
+  } else if (outcome === "rejected") {
+    if (d.status !== "open") throw new ToolDenied(`${id} is ${d.status}, not open.`);
+    const later = await ctx.db.laterDecision(d);
+    if (!later) throw new ToolDenied(`${id} has no later decision from ${cap(d.agent)} for ${d.target}, so it isn't superseded. Put it to Matt.`);
+    if (!(await ctx.db.decide(id, "rejected", `Superseded by ${later.id}. ${why}`))) throw new ToolError(`${id} is no longer open.`);
+  } else if (outcome === "approved") {
+    if (d.status !== "open") throw new ToolDenied(`${id} is ${d.status}, not open.`);
+    if (d.kind !== "github.approve_ci" || d.risk !== "low") {
+      throw new ToolDenied(`${id} is ${d.risk}-risk ${d.kind}: you may approve only low-risk github.approve_ci. Put it to Matt.`);
+    }
+    // The same checks automatic approval runs, against the PR as it is now.
+    const ref = prRef(ctx, d.target);
+    const gh = await ctx.github();
+    const reasons = [...ciSensitivePaths(await gh.pullFiles(ref)).map((f) => `the PR changes ${f}`), ...(await ciApprovalRisks(gh, ref))];
+    if (reasons.length) throw new ToolDenied(`Not approved; put ${id} to Matt:\n- ${reasons.join("\n- ")}`);
+    if (!(await ctx.db.decide(id, "approved", why))) throw new ToolError(`${id} is no longer open.`);
+    const r = await executeDecision(ctx, { ...d, status: "approved" })
+      .then((x) => (x.manual ? { ok: false, result: `${d.kind} has no executor` } : x))
+      .catch((e) => ({ ok: false, result: e instanceof Error ? e.message : String(e) }));
+    await ctx.db.markExecuted(id, r.ok, r.result);
+    await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "ada.decided", detail: { id, outcome, note, ok: r.ok, result: r.result } });
+    await refreshDecisionCard(ctx, id);
+    return `${id} approved: ${r.ok ? r.result : `failed: ${r.result}`}. Report it under "Decided for you".`;
+  } else {
+    throw new ToolError("outcome must be done, rejected or approved");
+  }
+  await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "ada.decided", detail: { id, outcome, note } });
+  await refreshDecisionCard(ctx, id);
+  return `${id} ${outcome}. Report it under "Decided for you".`;
+}
+
+/** Ada closes a task that is done in practice or not needed, once its session has stopped (decision 53). */
+async function closeTask(ctx: Ctx, sessionId: string, input: Input): Promise<string> {
+  const id = s(input.id, "id").toUpperCase();
+  const note = s(input.note, "note");
+  const member = await sessionMember(ctx, sessionId);
+  if (member) throw new ToolDenied(`${member.name} is a member: you can't close tasks in a conversation they started.`);
+  const task = await ctx.db.getTask(id);
+  if (!task) throw new ToolError(`No task ${id}`);
+  if (!["open", "running", "blocked"].includes(task.status)) throw new ToolError(`${id} is already ${task.status}.`);
+  const session = task.session_id ? await ctx.db.getSession(task.session_id) : null;
+  if (session && ["running", "rescheduling", "idle:requires_action"].includes(session.status)) {
+    throw new ToolDenied(`${id}'s session is still ${session.status === "idle:requires_action" ? "waiting on a decision" : "running"}. Leave it to finish.`);
+  }
+  await ctx.db.setTask(id, "cancelled");
+  await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "ada.closed_task", detail: { task: id, of: task.agent, note } });
+  return `${id} closed. Report it under "Decided for you".`;
 }
 
 /** Session budget and tool-call guidance for each effort level (decision 1B). */

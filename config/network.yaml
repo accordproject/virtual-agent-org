@@ -53,7 +53,7 @@ budgets:
   mechanic_small_usd: 1
   mechanic_large_usd: 5
 
-# The self-improvement loop (decision 52).
+# The self-improvement loop (decision 55).
 self_improvement:
   since: null            # ISO date the loop starts; null = off
   stale_days: 30         # matches .github/workflows/stale.yml
@@ -70,7 +70,7 @@ agents:
   mechanic: 1
   rosa: 2
   juno: 2
-  sage: 2
+  sage: 1
   kit: 3
   felix: 3
   nell: 3

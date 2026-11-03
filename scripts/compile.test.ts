@@ -56,6 +56,27 @@ test("validate lets ada have file tools for her memory and nothing else", () => 
   assert.ok(withAda([], { github: { mode: "read" } }).includes(err));
 });
 
+test("validate checks reads_memory_of", () => {
+  const cfg = loadAll();
+  const ottoReads = (reads_memory_of: string[]) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, otto: { ...cfg.permissions.agents.otto, reads_memory_of } } } });
+  assert.ok(ottoReads(["nobody"]).includes('otto: reads_memory_of names unknown agent "nobody"'));
+  assert.ok(ottoReads(["otto"]).includes("otto: reads_memory_of cannot name itself"));
+  assert.ok(ottoReads(["kit"]).includes('otto: reads_memory_of "kit" starts in phase 3, after otto'));
+  assert.ok(!ottoReads(["mira"]).some((e) => e.includes("reads_memory_of")));
+});
+
+test("validate checks networking", () => {
+  const cfg = loadAll();
+  const withNet = (agent: string, networking: string) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, [agent]: { ...cfg.permissions.agents[agent], networking } } } } as typeof cfg);
+  assert.ok(withNet("sage", "wide").includes("sage: networking must be limited or open"));
+  assert.ok(withNet("ada", "open").includes("ada must stay on limited networking"));
+  assert.ok(!withNet("sage", "open").some((e) => e.includes("networking")));
+  assert.ok(withNet("vera", "open").includes("vera: open networking is only for agents with no MCP servers and no bash"));
+  assert.ok(withNet("mira", "open").includes("mira: open networking is only for agents with no MCP servers and no bash"));
+});
+
 test("compile carries the member message allowance, and validate checks it", () => {
   const cfg = loadAll();
   assert.equal(compile(cfg).member_daily_messages, 20);

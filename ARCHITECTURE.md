@@ -23,7 +23,8 @@ Design principles:
   that Ada uses to evaluate everyone, herself included.
 - **Job specs are code.** Each role is a markdown spec in this repo. Changes are pull
   requests that the owner merges.
-- **Start small.** Phase 1 runs five agents; others join only when the weekly
+- **Start small.** Phase 1 runs six agents (Sage joined early for one narrow job,
+  decision 54); others join only when the weekly
   evaluation shows a gap they would fill.
 
 ## The team
@@ -37,7 +38,7 @@ Design principles:
 | **Mechanic** | Network changes | Each change the owner approves to the network's specs, tiers and tools becomes a reviewable PR | Its sandbox only. Submits files to the gateway, which opens the PR on this repo. No credentials. | 1 |
 | **Rosa** | Community | Newcomers find a path to a first contribution | GitHub triage. Announcements and DMs: queued. | 2 |
 | **Juno** | Marketing & Docs | Accord's work is visible and its docs current | Drafts only. Any publish: queued. | 2 |
-| **Sage** | Research | The TSC sees what matters in legal tech and agentic commerce | Web search; writes briefs | 2 |
+| **Sage** | Research | The Tech WG chair has a few well-sourced outside items worth discussing (wider brief from Phase 2) | Web search; writes briefs to its own store, which Otto reads | 1 |
 | **Kit** | Training & Security | Quality and security posture improve | Security issues and draft PRs. Advisories: queued. | 3 |
 | **Felix** | Release & CI | Builds stay green and releases ship predictably | CI and changelog drafts. Tags and npm publish: queued. | 3 |
 | **Nell** | Ecosystem & Funding | More adopters, mentors and funding | Drafts only. Every external email: queued. | 3 |
@@ -112,7 +113,9 @@ threads, and a maintainer's approval unless the PR is low risk. The card lists t
 These are enforced in code; changing them is the owner's decision.
 
 1. **Ada has no side effects.** She holds no external tools; she acts only through
-   `assign_task`, `send_to_matt` and the decision queue.
+   `assign_task`, `send_to_matt` and the decision queue. With `decide_action` she may
+   mark done, reject superseded, or approve low-risk `github.approve_ci` decisions
+   (decision 52), and with `close_task` close a stopped task (decision 53); nothing else.
 2. **Agents never hold credentials for critical actions.** Merging, closing, releasing,
    publishing, posting, emailing, messaging a named person, deleting, spending, and
    spec or permission changes go through `request_action`. The gateway holds those
@@ -174,7 +177,7 @@ public action without a decision id.
 - **Weekly evaluation** on Fridays: Vera builds the scorecard; Ada scores each agent on
   impact, quality (decision outcomes), cost per outcome and feedback, and may propose
   one change per agent (`evaluation/rubric.md`).
-- **Self-improvement** (decision 52): evidence in Vera's scorecard (rejection notes,
+- **Self-improvement** (decision 55): evidence in Vera's scorecard (rejection notes,
   refused and denied tool calls) → Ada's `spec.change` proposal → the owner approves →
   the gateway records a change (`C-n`) and starts the mechanic → the mechanic builds
   and tests it and calls `submit_change` → the gateway's App opens the PR → the owner
@@ -188,7 +191,10 @@ public action without a decision id.
   "done when" test and an effort level that sets the session budget (decision 21).
 - **Task lifecycle:** a task is `open`, then `running` once its session starts. When
   the session ends its turn, the task is `done`, or `blocked` if the session's last
-  status report listed blockers; `failed` if the session never started.
+  status report listed blockers; `failed` if the session never started. A session that
+  runs out of budget or ends in error leaves its task `blocked`, and the hourly tidy-up
+  blocks tasks whose session went stale; `blocked_reason` says why (decision 53). Ada
+  then retries, rewords, reassigns, puts it to the owner, or closes it with `close_task`.
 - **Follow-ups** (decision 50): when a task ends blocked or an approved decision fails,
   the gateway wakes Ada, at most once per task or decision and 5 times a day, only
   while she is active and schedules are on. She assigns it to an agent who can fix it
@@ -221,8 +227,8 @@ Bots are excluded from people metrics, and medians are reported alongside means.
 | Phase | Agents | Gate to the next phase |
 | --- | --- | --- |
 | 0 Foundations | Test agent on the sandbox repo | A queued merge is approved and executed; `/stop` halts the agent within seconds |
-| 1 Core loop | Ada, Mira, Vera, Otto, Mechanic | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
-| 2 Community and voice | Rosa, Juno, Sage | Newcomer first-response median under 2 business days |
+| 1 Core loop | Ada, Mira, Vera, Otto, Sage, Mechanic | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
+| 2 Community and voice | Rosa, Juno | Newcomer first-response median under 2 business days |
 | 3 Depth | Kit, Felix, Nell | Each new agent moves its KPIs within four weeks, or is retired |
 
 ## Background
