@@ -16,6 +16,7 @@ import { ManagedClient } from "../gateway/src/managed";
 import { toolsForAgent } from "../gateway/src/toolDefs";
 import { compile, validate } from "./compile";
 import { ROOT, loadAll, readText } from "./lib";
+import { memorySection, memoryStoreIds } from "./memory";
 import { renderContext } from "./repos";
 
 const DRY = process.argv.includes("--dry-run");
@@ -55,9 +56,6 @@ async function step<T>(label: string, payload: unknown, fn: () => Promise<T>): P
   return fn();
 }
 
-/** Where Managed Agents mounts memory stores in the sandbox, one directory per store name. */
-const MEMORY_MOUNT = "/mnt/memory";
-
 function systemPrompt(agent: string): string {
   const spec = cfg.specs[agent];
   const parts = [readText("agents/_protocol.md"), spec.body];
@@ -66,12 +64,7 @@ function systemPrompt(agent: string): string {
     parts.push("## Scorecard schema\n\nEvery scorecard you pass to `write_scorecard` must follow this JSON Schema.\n\n```json\n" +
       readText("evaluation/scorecard.schema.json").trim() + "\n```");
   }
-  parts.push(
-    "## Shared context\n\nTwo memory stores are mounted in your sandbox, each under `" + MEMORY_MOUNT + "/<store name>/`. " +
-      "Your own is read-write and holds your notes (see Memory between sessions): `" + MEMORY_MOUNT + "/" + agent + "-memory/`, " +
-      "so your working notes are `" + MEMORY_MOUNT + "/" + agent + "-memory/notes/working.md`. The shared one is read-only and holds " +
-      "Accord Project context: `" + MEMORY_MOUNT + "/virtual-agent-org-shared/context/accord.md`. Read both before your first task in a session.",
-  );
+  parts.push(memorySection(agent, cfg.permissions.agents[agent].reads_memory_of ?? []));
   parts.push(rosterSection());
   parts.push(`## Your configuration\n\nAgent: ${agent}. Requestable actions: ${cfg.permissions.agents[agent].requestable.join(", ") || "none"}.`);
   return parts.join("\n\n---\n\n");
@@ -234,6 +227,23 @@ async function ensureAgent(agent: string) {
   }
 }
 
+/**
+ * Adds peer stores (`reads_memory_of`) after each agent's own and the shared one. Runs once
+ * every agent exists, since a peer may be created later in the same deploy.
+ */
+function linkPeerStores(agents: string[]) {
+  for (const a of agents) {
+    const reads = cfg.permissions.agents[a].reads_memory_of ?? [];
+    const dep = state.agents[a];
+    if (!reads.length) continue;
+    const byAgent = Object.fromEntries(reads.map((peer) => [peer, state.agents[peer]?.memory_store_ids?.[0]]));
+    const { ids, missing } = memoryStoreIds(reads, { own: dep?.memory_store_ids?.[0], shared: state.shared_memory_store_id, byAgent });
+    for (const peer of missing) console.warn(`  ${a} reads ${peer}'s store, but ${peer} has none yet; deploy again once it does`);
+    if (DRY) console.log(`\n# link memory stores for ${a}\n${JSON.stringify({ reads, ids })}`);
+    else if (dep) dep.memory_store_ids = ids;
+  }
+}
+
 async function ensureDeployment(s: (typeof cfg.schedules.schedules)[number]) {
   const dep = state.agents[s.agent];
   if (!dep && !DRY) return;
@@ -275,6 +285,7 @@ async function main() {
   await ensureEnvironment();
   await ensureSharedMemory();
   for (const a of agents) await ensureAgent(a);
+  linkPeerStores(agents);
   if (cfg.network.network.schedules_enabled) {
     for (const s of cfg.schedules.schedules.filter((s) => agents.includes(s.agent))) await ensureDeployment(s);
   } else {

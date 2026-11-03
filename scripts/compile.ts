@@ -144,6 +144,11 @@ export function validate(cfg = loadAll()): string[] {
       continue;
     }
     for (const k of p.requestable) if (!permissions.action_kinds[k]) errs.push(`${n}: unknown action kind "${k}"`);
+    for (const peer of p.reads_memory_of ?? []) {
+      if (peer === n) errs.push(`${n}: reads_memory_of cannot name itself`);
+      else if (network.agents[peer] === undefined) errs.push(`${n}: reads_memory_of names unknown agent "${peer}"`);
+      else if (network.agents[peer] > network.agents[n]) errs.push(`${n}: reads_memory_of "${peer}" starts in phase ${network.agents[peer]}, after ${n}`);
+    }
     for (const t of p.builtin_tools) if (!BUILTIN_TOOLS.includes(t)) errs.push(`${n}: unknown built-in tool "${t}"`);
     for (const [server, { mode }] of Object.entries(Array.isArray(p.mcp_servers) ? {} : p.mcp_servers)) {
       if (!mcp.servers[server]) errs.push(`${n}: unknown MCP server "${server}"`);

@@ -56,6 +56,16 @@ test("validate lets ada have file tools for her memory and nothing else", () => 
   assert.ok(withAda([], { github: { mode: "read" } }).includes(err));
 });
 
+test("validate checks reads_memory_of", () => {
+  const cfg = loadAll();
+  const ottoReads = (reads_memory_of: string[]) =>
+    validate({ ...cfg, permissions: { ...cfg.permissions, agents: { ...cfg.permissions.agents, otto: { ...cfg.permissions.agents.otto, reads_memory_of } } } });
+  assert.ok(ottoReads(["nobody"]).includes('otto: reads_memory_of names unknown agent "nobody"'));
+  assert.ok(ottoReads(["otto"]).includes("otto: reads_memory_of cannot name itself"));
+  assert.ok(ottoReads(["kit"]).includes('otto: reads_memory_of "kit" starts in phase 3, after otto'));
+  assert.ok(!ottoReads(["mira"]).some((e) => e.includes("reads_memory_of")));
+});
+
 test("compile carries the member message allowance, and validate checks it", () => {
   const cfg = loadAll();
   assert.equal(compile(cfg).member_daily_messages, 20);
