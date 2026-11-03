@@ -145,6 +145,8 @@ only for a fork without the workflow, or when a run fails.
   - `model` override on session creation, used for deep-tier review checks
     (`managed.ts`);
   - `agent_with_overrides` on scheduled deployments (`deploy.ts`);
+  - the `unrestricted` networking body for Sage's open environment (`ensureEnvironment`
+    in `deploy.ts`, decision 49);
   - events-list pagination (`managed.ts`);
   - the token field names on a session's `usage` (`sessionTokens` in `managed.ts`),
     behind Vera's `read_audit`;

@@ -5,11 +5,13 @@
 /** Where Managed Agents mounts memory stores in the sandbox, one directory per store name. */
 export const MEMORY_MOUNT = "/mnt/memory";
 
-/** Store ids in mount order: own, shared, then each peer's own store. Peers not yet deployed are listed in `missing`. */
+/** Store ids in mount order: own, shared, then each peer's own store. Peers not yet deployed are listed in `missing`; none at all without an own store. */
 export function memoryStoreIds(
   reads: string[],
   stores: { own?: string; shared?: string; byAgent: Record<string, string | undefined> },
 ): { ids: string[]; missing: string[] } {
+  // Without its own store the shared one would land first and be mounted read-write.
+  if (!stores.own) return { ids: [], missing: [] };
   const peers = reads.map((peer) => stores.byAgent[peer]);
   const ids = [stores.own, stores.shared, ...peers].filter((id): id is string => !!id);
   return { ids, missing: reads.filter((peer) => !stores.byAgent[peer]) };

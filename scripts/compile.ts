@@ -145,6 +145,9 @@ export function validate(cfg = loadAll()): string[] {
     }
     for (const k of p.requestable) if (!permissions.action_kinds[k]) errs.push(`${n}: unknown action kind "${k}"`);
     if (p.networking !== undefined && !["limited", "open"].includes(p.networking)) errs.push(`${n}: networking must be limited or open`);
+    // Unrestricted outbound access only where there are no credentials or shell to misuse it.
+    const hasMcp = Array.isArray(p.mcp_servers) ? p.mcp_servers.length > 0 : Object.keys(p.mcp_servers).length > 0;
+    if (p.networking === "open" && (hasMcp || p.builtin_tools.includes("bash"))) errs.push(`${n}: open networking is only for agents with no MCP servers and no bash`);
     for (const peer of p.reads_memory_of ?? []) {
       if (peer === n) errs.push(`${n}: reads_memory_of cannot name itself`);
       else if (network.agents[peer] === undefined) errs.push(`${n}: reads_memory_of names unknown agent "${peer}"`);

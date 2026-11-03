@@ -73,6 +73,8 @@ test("validate checks networking", () => {
   assert.ok(withNet("sage", "wide").includes("sage: networking must be limited or open"));
   assert.ok(withNet("ada", "open").includes("ada must stay on limited networking"));
   assert.ok(!withNet("sage", "open").some((e) => e.includes("networking")));
+  assert.ok(withNet("vera", "open").includes("vera: open networking is only for agents with no MCP servers and no bash"));
+  assert.ok(withNet("mira", "open").includes("mira: open networking is only for agents with no MCP servers and no bash"));
 });
 
 test("compile carries the member message allowance, and validate checks it", () => {

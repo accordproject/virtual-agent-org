@@ -134,6 +134,7 @@ async function ensureEnvironment(open: boolean) {
   }
   // Sage searches the open web, so it gets its own environment; every other agent stays limited.
   if (open && !state.open_environment_id) {
+    // VERIFY: the unrestricted networking body (taken from the docs' mode table; no example given).
     const body = { name: "virtual-agent-org-open", config: { type: "cloud", networking: { type: "unrestricted" } } };
     const env = await step("create open environment", body, () => client.createEnvironment(body));
     if (env) state.open_environment_id = env.id;

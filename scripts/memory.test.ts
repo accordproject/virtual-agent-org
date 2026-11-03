@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { loadAll } from "./lib";
 import { memorySection, memoryStoreIds } from "./memory";
 
 test("memoryStoreIds keeps the own store first", () => {
@@ -22,4 +23,16 @@ test("memorySection names each peer mount", () => {
   const mira = memorySection("mira", []);
   assert.ok(mira.includes("Two memory stores"));
   assert.ok(!mira.includes("sage"));
+});
+
+test("memoryStoreIds mounts nothing without the agent's own store", () => {
+  const r = memoryStoreIds(["sage"], { shared: "m_sh", byAgent: { sage: "m_sage" } });
+  assert.deepEqual(r.ids, []);
+});
+
+test("only Otto reads Sage's store and only Vera reads Otto's", () => {
+  const readers = Object.entries(loadAll().permissions.agents)
+    .filter(([, p]) => p.reads_memory_of?.length)
+    .map(([n, p]) => `${n}:${p.reads_memory_of!.join(",")}`);
+  assert.deepEqual(readers.sort(), ["otto:sage", "vera:otto"]);
 });
