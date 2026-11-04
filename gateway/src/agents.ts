@@ -1,5 +1,5 @@
 import { cap, type Ctx } from "./context";
-import type { Decision, SessionRow, StartedBy } from "./db";
+import type { Decision, SentMessage, SessionRow, StartedBy } from "./db";
 import { decisionButtons, decisionCard, discordCard, discordCardFits } from "./format";
 import { ManagedAgentsError } from "./managed";
 import { riskAtMost } from "./risk";
@@ -166,7 +166,70 @@ export async function refreshDecisionCard(ctx: Ctx, id: string) {
 }
 
 /** Sends an agent's reply to wherever the conversation started. */
-export async function replyToOrigin(ctx: Ctx, row: Pick<SessionRow, "chat_id" | "discord_user">, text: string) {
-  if (row.chat_id) await ctx.tg.send(row.chat_id, text);
-  if (row.discord_user && ctx.dc) await ctx.dc.dm(row.discord_user, { content: text });
+export async function replyToOrigin(
+  ctx: Ctx,
+  row: Pick<SessionRow, "chat_id" | "discord_user">,
+  from: { agent: string; sessionId: string | null },
+  text: string,
+) {
+  if (row.chat_id) await sendAgentMessage(ctx, { telegram: row.chat_id }, from, text);
+  if (row.discord_user && ctx.dc) await sendAgentMessage(ctx, { discord: row.discord_user }, from, text);
+}
+
+/**
+ * Sends a message from an agent to one person and remembers which session wrote it,
+ * so a reply reaches that session. In Discord it carries a Reply button: Discord only
+ * tells the gateway about buttons, forms and commands, never about plain replies.
+ */
+export async function sendAgentMessage(ctx: Ctx, to: ReplyTo, from: { agent: string; sessionId: string | null }, text: string) {
+  const platform = "telegram" in to ? "telegram" : "discord";
+  const recipient = "telegram" in to ? String(to.telegram) : to.discord;
+  const ref = await ctx.db.recordSent({ platform, recipient, agent: from.agent, session_id: from.sessionId, text });
+  if ("telegram" in to) {
+    await ctx.db.setSentMessageId(ref, await ctx.tg.send(to.telegram, text));
+  } else if (ctx.dc) {
+    const m = await ctx.dc.dm(to.discord, { content: text, buttons: [{ label: "Reply", custom_id: `rp:${ref}`, style: 2 }] });
+    await ctx.db.setSentMessageId(ref, m.messageId);
+  }
+}
+
+/** The agent a message came from, by the "Name:" the gateway puts in front of replies; Ada otherwise. */
+export function agentFromText(ctx: Ctx, text: string): string {
+  const name = /^\s*([A-Za-z]+):/.exec(text)?.[1]?.toLowerCase();
+  return name && ctx.network.agents[name] ? name : "ada";
+}
+
+const quote = (text: string) => {
+  const t = text.length > 1500 ? `${text.slice(0, 1500)}…` : text;
+  return t.split("\n").map((l) => `> ${l}`).join("\n");
+};
+
+/**
+ * Sends someone's reply to the session that wrote the message they answered, and points
+ * that session's later replies at them. If the session can't take it (finished, spent, or
+ * a message from before replies were tracked), a fresh session gets the original quoted,
+ * so the agent still knows what's being answered.
+ */
+export async function replyToAgentMessage(ctx: Ctx, sent: Pick<SentMessage, "agent" | "session_id" | "text">, to: ReplyTo, text: string, startedBy: StartedBy): Promise<string> {
+  const agent = sent.agent;
+  await assertAvailable(ctx, agent);
+  const row = sent.session_id ? await ctx.db.getSession(sent.session_id) : null;
+  const budget = ctx.deployed.agents[agent]?.session_budget_cents ?? 0;
+  const open = row && !["terminated", "idle:budget_reached", "stale"].includes(row.status) && !(budget && row.cost_cents >= budget * 0.8);
+  if (row && open) {
+    try {
+      await ctx.managed.sendMessage(row.id, `Replying to your message:\n${quote(sent.text)}\n\n${text}`);
+      await ctx.db.setReplyTarget(row.id, to);
+      await ctx.db.updateSession(row.id, "running", row.cost_cents);
+      await ctx.db.markMemberSession(row.id, startedBy);
+      return row.id;
+    } catch (e) {
+      if (!isWaitingSession(e)) throw e;
+      await ctx.db.audit({ agent, session_id: row.id, event_type: "gateway.session_waiting", detail: `reply went to a new session: ${(e as ManagedAgentsError).body.slice(0, 120)}` });
+    }
+  }
+  const body = `${text}\n\n(This replies to a message you sent earlier, in another session:\n${quote(sent.text)})`;
+  return "telegram" in to
+    ? startSession(ctx, agent, body, "telegram", startedBy, { chatId: to.telegram })
+    : startSession(ctx, agent, body, "discord", startedBy, { discordUser: to.discord });
 }

@@ -2,7 +2,7 @@
 // it checks who may call what before doing anything.
 
 import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
-import { AgentUnavailable, postDecision, refreshDecisionCard, startSession } from "./agents";
+import { AgentUnavailable, postDecision, refreshDecisionCard, sendAgentMessage, startSession } from "./agents";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
@@ -185,14 +185,15 @@ const HANDLERS: Record<ToolName, Handler> = {
     return `Evaluation for ${target} recorded.`;
   },
 
-  send_to_matt: async (ctx, { sessionId, input }) => {
+  send_to_matt: async (ctx, { agent, sessionId, input }) => {
     const text = s(input.text, "text");
     const row = await ctx.db.getSession(sessionId);
     if (row?.chat_id || row?.discord_user) {
       // Matt is already in this conversation and gets her reply: sending as well duplicates it.
       throw new ToolError("You're in a conversation: Matt gets your reply. Put this in your reply instead of using send_to_matt.");
     }
-    await ctx.tg.send(ctx.ownerChatId, text);
+    // Recorded, so replying to it in Telegram reaches this session.
+    await sendAgentMessage(ctx, { telegram: ctx.ownerChatId }, { agent, sessionId }, text);
     return "Sent.";
   },
 

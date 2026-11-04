@@ -19,7 +19,7 @@ export interface TgUpdate {
 
 export interface TgMessage {
   message_id: number;
-  from?: { id: number; username?: string };
+  from?: { id: number; username?: string; is_bot?: boolean };
   chat: { id: number; type: string };
   text?: string;
   reply_to_message?: TgMessage;

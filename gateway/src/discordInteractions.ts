@@ -5,9 +5,13 @@
 // medium-risk decisions from DM buttons, and can /pause and /stop agents.
 // Telegram only: high-risk decisions, paused tool calls, /resume, /revoke.
 //
+// Replies: Discord never tells a bot about plain replies, so every agent message
+// carries a Reply button, and any bot message has "Reply to agent" in its Apps menu.
+// Both open a form whose text goes to the session that wrote the message.
+//
 // Discord needs an answer within 3 seconds, so slow work runs in `later`.
 
-import { assertAvailable, discordApprovable, failureText, messageAgent, postDiscordCard } from "./agents";
+import { agentFromText, assertAvailable, discordApprovable, failureText, messageAgent, postDiscordCard, replyToAgentMessage } from "./agents";
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, stop } from "./controls";
 import { OVER_ALLOWANCE, memberPrefix, roleFor, startedByFor, withinMemberAllowance } from "./people";
@@ -23,6 +27,10 @@ export interface Interaction {
   token: string;
   data?: {
     name?: string;
+    /** 3 for a message command such as "Reply to agent". */
+    type?: number;
+    target_id?: string;
+    resolved?: { messages?: Record<string, { content?: string; author?: { bot?: boolean } }> };
     options?: { name: string; value: string }[];
     custom_id?: string;
     components?: { components: { custom_id: string; value: string }[] }[];
@@ -53,8 +61,11 @@ export async function handleInteraction(ctx: Ctx, i: Interaction, later: Later):
       }),
     );
 
+  if (i.type === 2 && i.data?.type === 3) return replyCommand(ctx, i, userId);
   if (i.type === 2) return command(ctx, i, userId, owner, run);
+  if (i.type === 3 && (i.data?.custom_id ?? "").startsWith("rp:")) return replyButton(ctx, i, userId);
   if (i.type === 3) return button(ctx, i, userId, owner, run);
+  if (i.type === 5 && (i.data?.custom_id ?? "").startsWith("rpm:")) return replySubmit(ctx, i, userId, owner, run);
   if (i.type === 5) return modalSubmit(ctx, i, owner, run);
   return reply("Unsupported interaction.");
 }
@@ -169,6 +180,62 @@ async function modalSubmit(ctx: Ctx, i: Interaction, owner: boolean, run: (w: ()
   return DEFER_UPDATE;
 }
 
+// ---- replies to agent messages ------------------------------------------------
+
+/** The form for a reply. Its id carries the sent-message row, checked again on submit. */
+function replyForm(ref: number, agent: string) {
+  return {
+    type: 9,
+    data: {
+      custom_id: `rpm:${ref}`,
+      title: `Reply to ${cap(agent)}`,
+      components: [{ type: 1, components: [{ type: 4, custom_id: "text", label: "Your reply", style: 2, required: true, max_length: 2000 }] }],
+    },
+  };
+}
+
+/** The Reply button on an agent's message. Only the person it was sent to can use it. */
+async function replyButton(ctx: Ctx, i: Interaction, userId: string) {
+  const sent = await ctx.db.getSent(Number((i.data?.custom_id ?? "").split(":")[1]));
+  if (!sent || sent.platform !== "discord" || sent.recipient !== userId) return reply("That message can't be replied to from here.");
+  return replyForm(sent.id, sent.agent);
+}
+
+/**
+ * "Reply to agent" from a message's Apps menu. Works on any bot message: one the gateway
+ * recorded goes back to its session; an older one (or a card) goes to the agent named at
+ * its start, Ada otherwise, with the message quoted.
+ */
+async function replyCommand(ctx: Ctx, i: Interaction, userId: string) {
+  const target = i.data?.target_id ?? "";
+  let sent = target ? await ctx.db.findSent("discord", userId, target) : null;
+  if (!sent) {
+    const m = i.data?.resolved?.messages?.[target];
+    if (!m?.author?.bot || !m.content?.trim()) return reply("Use this on a message from the agent network's bot.");
+    const agent = agentFromText(ctx, m.content);
+    const ref = await ctx.db.recordSent({ platform: "discord", recipient: userId, agent, session_id: null, text: m.content });
+    await ctx.db.setSentMessageId(ref, target);
+    sent = await ctx.db.getSent(ref);
+  }
+  return replyForm(sent!.id, sent!.agent);
+}
+
+async function replySubmit(ctx: Ctx, i: Interaction, userId: string, owner: boolean, run: (w: () => Promise<unknown>) => void) {
+  const sent = await ctx.db.getSent(Number((i.data?.custom_id ?? "").split(":")[1]));
+  if (!sent || sent.platform !== "discord" || sent.recipient !== userId) return reply("That message can't be replied to from here.");
+  const text = i.data?.components?.[0]?.components?.[0]?.value?.trim() ?? "";
+  if (!text) return reply("Add a reply.");
+  try {
+    await assertAvailable(ctx, sent.agent);
+  } catch (e) {
+    return reply(await failureText(ctx, owner, e, "gateway.discord_error", { user: userId, command: "reply" }));
+  }
+  if (!owner && !(await withinMemberAllowance(ctx, "discord", userId))) return reply(OVER_ALLOWANCE);
+  const prefix = owner ? "" : memberPrefix(ctx, "discord", userId);
+  run(() => replyToAgentMessage(ctx, sent, { discord: userId }, prefix + text, startedByFor(ctx, "discord", userId, owner ? "owner" : "member")));
+  return reply(`Sent to ${cap(sent.agent)}. Replies will arrive in your DMs.`);
+}
+
 /** Slash command definitions, registered by scripts/discord-commands.ts. */
 /** Where commands work: the server and DMs with the bot (decision 34). */
 const COMMAND_SCOPE = { contexts: [0, 1], integration_types: [0] };
@@ -194,5 +261,7 @@ export function commandDefinitions(agents: { name: string; title: string }[]) {
       options: [{ type: 3, name: "agent", description: "Which agent", required: true, choices: [...agentChoices, { name: "All agents", value: "all" }] }],
     },
   ];
-  return defs.map((d) => ({ ...d, ...COMMAND_SCOPE }));
+  // A message command: right-click (or long-press) a bot message, then Apps.
+  const replyToAgent = { name: "Reply to agent", type: 3 };
+  return [...defs, replyToAgent].map((d) => ({ ...d, ...COMMAND_SCOPE }));
 }

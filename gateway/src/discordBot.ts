@@ -74,7 +74,8 @@ export class DiscordBot {
   /** Sends a DM; long plain text is split. Returns where the last message landed. */
   async dm(userId: string, p: DiscordPayload): Promise<{ channelId: string; messageId: string }> {
     const channelId = await this.dmChannel(userId);
-    const chunks = p.buttons ? [p.content] : splitText(p.content, LIMIT - 10);
+    // Long text is split; buttons and embeds go on the last part.
+    const chunks = splitText(p.content, LIMIT - 10);
     let messageId = "";
     for (let i = 0; i < chunks.length; i++) {
       const last = i === chunks.length - 1;

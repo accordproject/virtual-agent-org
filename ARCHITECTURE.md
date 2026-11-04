@@ -77,6 +77,14 @@ agent's instructions. An agent is deployed only when its phase (in
 | Shared context | One read-only memory store with Accord context (`context/accord.md`), plus a read-write store per agent for its own notes. | `scripts/deploy.ts` |
 | Model routing | Specs name a tier (deep, standard, fast); `config/models.yaml` maps tiers to models. | `config/models.yaml` |
 
+## Replying to an agent
+
+Every message an agent sends to a person is recorded with the session that wrote it
+(`sent_messages`). Replying to it reaches that session: in Telegram with the app's own
+reply, in Discord with the message's **Reply** button or **Reply to agent** in its Apps
+menu (Discord doesn't pass plain replies to a bot). If that session can no longer take
+messages, a fresh one gets the reply with the original quoted (decision 61).
+
 ## How a critical action flows
 
 Critical actions are never given to agents as tools. Each agent has a custom tool,

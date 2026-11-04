@@ -202,7 +202,7 @@ describe("discord bot (decision 15B)", () => {
     fakes.sessions[sid] = { id: sid, status: "idle", agent: "agent_ada", stop_reason: { type: "end_turn" } };
     fakes.events[sid] = [{ id: "e1", type: "agent.message", content: [{ type: "text", text: "Assigned T-1 to Mira." }] }];
     await processSession(ctx, sid);
-    expect(fakes.dms).toEqual([{ user: OWNER, content: "Ada: Assigned T-1 to Mira." }]);
+    expect(fakes.dms).toEqual([{ user: OWNER, content: "Ada: Assigned T-1 to Mira.", buttons: [{ label: "Reply", custom_id: "rp:1", style: 2 }] }]);
     expect(fakes.sent).toHaveLength(0); // nothing leaks to Telegram
   });
 
@@ -286,7 +286,8 @@ describe("discord bot (decision 15B)", () => {
   it("registers commands that list only active agents", async () => {
     const { commandDefinitions } = await import("../src/discordInteractions");
     const defs = commandDefinitions([{ name: "ada", title: "Chief of Staff" }, { name: "mira", title: "Maintainer Desk" }]);
-    expect(defs.map((d) => d.name)).toEqual(["ada", "ask", "status", "queue", "pause", "stop"]);
+    expect(defs.map((d) => d.name)).toEqual(["ada", "ask", "status", "queue", "pause", "stop", "Reply to agent"]);
+    expect((defs.at(-1) as any).type).toBe(3); // a message command, in the message's Apps menu
     const ask = defs.find((d) => d.name === "ask") as any;
     expect(ask.options[0].choices).toEqual([
       { name: "Ada (Chief of Staff)", value: "ada" },
@@ -497,5 +498,241 @@ describe("message.person as a Discord DM", () => {
     expect(r).toMatchObject({ ok: false });
     expect(r.result).toMatch(/payload.to is required/);
     expect(fakes.dms).toHaveLength(0);
+  });
+});
+
+describe("replying to an agent's message", () => {
+  const OWNER = "111111111111111111";
+  const JANE = "123456789012345678";
+  const run = async (ctx: any, i: any) => {
+    const pending: Promise<unknown>[] = [];
+    const { handleInteraction } = await import("../src/discordInteractions");
+    const res: any = await handleInteraction(ctx, { token: "tok", ...i }, (p) => pending.push(p));
+    await Promise.all(pending);
+    return res;
+  };
+  const click = (user: string, custom_id: string) => ({ type: 3, user: { id: user }, data: { custom_id } });
+  const submit = (user: string, custom_id: string, value: string) => ({
+    type: 5,
+    user: { id: user },
+    data: { custom_id, components: [{ components: [{ custom_id: "text", value }] }] },
+  });
+  const tgReply = (replyTo: { message_id: number; text?: string; bot?: boolean }, text: string) => ({
+    update_id: 1,
+    message: {
+      message_id: 900,
+      from: { id: 42 },
+      chat: { id: 42, type: "private" },
+      text,
+      reply_to_message: { message_id: replyTo.message_id, from: { id: 7, is_bot: replyTo.bot ?? true }, chat: { id: 42, type: "private" }, text: replyTo.text },
+    },
+  });
+  const sends = (fakes: any) => fakes.calls.filter((c: any) => c.method === "sendMessage").map((c: any) => c.args);
+  const creates = (fakes: any) => fakes.calls.filter((c: any) => c.method === "createSession").map((c: any) => c.args[0]);
+
+  it("sends a Telegram reply to a scheduled check-in back to that session, and her answer to the chat", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_checkin", agent: "ada", origin: "deployment" });
+    await handleTool(ctx, "ada", "sesn_checkin", "send_to_matt", { text: "Check-in. 3. Close the stale PRs?" });
+    const msgId = (await ctx.db.getSent(1))!.message_id!;
+
+    await handleUpdate(ctx, tgReply({ message_id: Number(msgId), text: "Check-in. 3. Close the stale PRs?" }, "Yes, close them"));
+    const [[sid, text]] = sends(fakes);
+    expect(sid).toBe("sesn_checkin");
+    expect(text).toContain("> Check-in. 3. Close the stale PRs?");
+    expect(text).toMatch(/Yes, close them$/);
+    expect(creates(fakes)).toHaveLength(0);
+
+    // Her answer now comes back to the chat the reply came from.
+    fakes.sessions.sesn_checkin = { id: "sesn_checkin", status: "idle", agent: "agent_ada", stop_reason: { type: "end_turn" } };
+    fakes.events.sesn_checkin = [{ id: "e1", type: "agent.message", content: [{ type: "text", text: "Queued closures as D-3." }] }];
+    await processSession(ctx, "sesn_checkin");
+    expect(fakes.sent.at(-1)).toMatchObject({ chatId: 42, text: "Ada: Queued closures as D-3." });
+  });
+
+  it("starts a fresh session with the message quoted when the original is spent", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_old", agent: "ada", origin: "deployment", status: "idle:budget_reached" });
+    await handleTool(ctx, "ada", "sesn_old", "send_to_matt", { text: "Shall I ask Otto for the agenda?" });
+    const msgId = Number((await ctx.db.getSent(1))!.message_id);
+    await handleUpdate(ctx, tgReply({ message_id: msgId }, "Yes please"));
+    expect(sends(fakes)).toHaveLength(0);
+    const [create] = creates(fakes);
+    expect(create.agentId).toBe("agent_ada");
+    expect(create.text).toMatch(/^Yes please/);
+    expect(create.text).toContain("> Shall I ask Otto for the agenda?");
+    expect((await ctx.db.getSession("sesn_1"))?.chat_id).toBe(42);
+  });
+
+  it("sends a Telegram reply to an untracked bot message to the agent it names, quoted", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleUpdate(ctx, tgReply({ message_id: 55, text: "Mira: PR #12 needs a second reviewer. Ask Dan?" }, "Yes, ask Dan"));
+    const [create] = creates(fakes);
+    expect(create.agentId).toBe("agent_mira");
+    expect(create.text).toContain("> Mira: PR #12 needs a second reviewer. Ask Dan?");
+  });
+
+  it("treats a reply to someone else's message as an ordinary message to Ada", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await handleUpdate(ctx, tgReply({ message_id: 56, text: "a forwarded note", bot: false }, "What do you make of this?"));
+    const [create] = creates(fakes);
+    expect(create.text).toBe("What do you make of this?");
+  });
+
+  it("puts a Reply button on Discord replies that opens a form for that message", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_dc", agent: "ada", origin: "discord", discord_user: OWNER });
+    fakes.sessions.sesn_dc = { id: "sesn_dc", status: "idle", agent: "agent_ada", stop_reason: { type: "end_turn" } };
+    fakes.events.sesn_dc = [{ id: "e1", type: "agent.message", content: [{ type: "text", text: "Option A or B for the agenda?" }] }];
+    await processSession(ctx, "sesn_dc");
+    const button = (fakes.dms[0].buttons as any[])[0];
+    expect(button).toEqual({ label: "Reply", custom_id: "rp:1", style: 2 });
+
+    const form = await run(ctx, click(OWNER, button.custom_id));
+    expect(form.type).toBe(9);
+    expect(form.data.custom_id).toBe("rpm:1");
+    expect(form.data.title).toBe("Reply to Ada");
+
+    const done = await run(ctx, submit(OWNER, "rpm:1", "B"));
+    expect(done.data.content).toMatch(/Sent to Ada/);
+    const [[sid, text]] = sends(fakes);
+    expect(sid).toBe("sesn_dc");
+    expect(text).toContain("> Ada: Option A or B for the agenda?");
+  });
+
+  it("lets only the person a message was sent to reply to it", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_dc", agent: "ada", origin: "discord", discord_user: OWNER });
+    fakes.sessions.sesn_dc = { id: "sesn_dc", status: "idle", agent: "agent_ada", stop_reason: { type: "end_turn" } };
+    fakes.events.sesn_dc = [{ id: "e1", type: "agent.message", content: [{ type: "text", text: "Private to Matt" }] }];
+    await processSession(ctx, "sesn_dc");
+    expect((await run(ctx, click(JANE, "rp:1"))).data.content).toMatch(/can't be replied to/);
+    expect((await run(ctx, submit(JANE, "rpm:1", "hi"))).data.content).toMatch(/can't be replied to/);
+    expect(sends(fakes)).toHaveLength(0);
+  });
+
+  it("offers Reply to agent on any bot message, quoting ones it didn't record", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const menu = (target: string, message: { content: string; author: { bot: boolean } }) => ({
+      type: 2,
+      user: { id: OWNER },
+      data: { name: "Reply to agent", type: 3, target_id: target, resolved: { messages: { [target]: message } } },
+    });
+    const form = await run(ctx, menu("m-old", { content: "Otto: Publish last week's recording?", author: { bot: true } }));
+    expect(form.data.title).toBe("Reply to Otto");
+    await run(ctx, submit(OWNER, form.data.custom_id, "Yes"));
+    const [create] = creates(fakes);
+    expect(create.agentId).toBe("agent_otto");
+    expect(create.text).toContain("> Otto: Publish last week's recording?");
+
+    const refused = await run(ctx, menu("m-human", { content: "hello", author: { bot: false } }));
+    expect(refused.data.content).toMatch(/message from the agent network's bot/);
+  });
+
+  it("marks a member's reply as theirs", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const { sendAgentMessage } = await import("../src/agents");
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "ada", origin: "discord", discord_user: JANE });
+    await sendAgentMessage(ctx, { discord: JANE }, { agent: "ada", sessionId: "sesn_m" }, "Ada: Triage is on track.");
+    await run(ctx, submit(JANE, "rpm:1", "Thanks, what about #12?"));
+    const [[, text]] = sends(fakes);
+    expect(text).toMatch(/Jane Doe \(TSC member\) asks on Discord/);
+  });
+
+  it("starts a fresh session once the original has used 80% of its budget", async () => {
+    const { replyToAgentMessage } = await import("../src/agents");
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_full", agent: "ada", origin: "deployment" });
+    await ctx.db.updateSession("sesn_full", "idle", 120); // Ada's budget is 150
+    await replyToAgentMessage(ctx, { agent: "ada", session_id: "sesn_full", text: "Shall I?" }, { telegram: 42 }, "Yes", "owner");
+    expect(sends(fakes)).toHaveLength(0);
+    expect(creates(fakes)[0].text).toContain("> Shall I?");
+
+    await ctx.db.upsertSession({ id: "sesn_room", agent: "ada", origin: "deployment" });
+    await ctx.db.updateSession("sesn_room", "idle", 119);
+    await replyToAgentMessage(ctx, { agent: "ada", session_id: "sesn_room", text: "Shall I?" }, { telegram: 42 }, "Yes", "owner");
+    expect(sends(fakes).map(([sid]: any[]) => sid)).toEqual(["sesn_room"]);
+  });
+
+  it("starts a fresh session when the original is waiting, and leaves its reply target alone", async () => {
+    const { replyToAgentMessage } = await import("../src/agents");
+    const { ManagedAgentsError } = await import("../src/managed");
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_wait", agent: "ada", origin: "deployment" });
+    (ctx.managed as any).sendMessage = async () => {
+      throw new ManagedAgentsError(400, '{"error":{"message":"waiting on responses to events [sevt_1]"}}', "/sessions/x/events");
+    };
+    const sid = await replyToAgentMessage(ctx, { agent: "ada", session_id: "sesn_wait", text: "Shall I?" }, { telegram: 42 }, "Yes", "owner");
+    expect(sid).not.toBe("sesn_wait");
+    expect(creates(fakes)[0].text).toContain("> Shall I?");
+    expect((await ctx.db.getSession("sesn_wait"))?.chat_id).toBeNull();
+    expect((await ctx.db.getSession(sid))?.chat_id).toBe(42);
+  });
+
+  it("passes on errors that don't mean the session is waiting", async () => {
+    const { replyToAgentMessage } = await import("../src/agents");
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_err", agent: "ada", origin: "deployment" });
+    (ctx.managed as any).sendMessage = async () => {
+      throw new Error("boom");
+    };
+    await expect(replyToAgentMessage(ctx, { agent: "ada", session_id: "sesn_err", text: "x" }, { telegram: 42 }, "Yes", "owner")).rejects.toThrow("boom");
+    expect(creates(fakes)).toHaveLength(0);
+  });
+
+  it("refuses a reply to a paused agent", async () => {
+    const { replyToAgentMessage } = await import("../src/agents");
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_p", agent: "mira", origin: "deployment" });
+    await ctx.db.setAgentStatus("mira", "paused");
+    await expect(replyToAgentMessage(ctx, { agent: "mira", session_id: "sesn_p", text: "x" }, { telegram: 42 }, "Yes", "owner")).rejects.toThrow(/paused/);
+    expect(sends(fakes)).toHaveLength(0);
+  });
+
+  it("names the agent from a leading known name, and Ada otherwise", async () => {
+    const { agentFromText } = await import("../src/agents");
+    const { ctx } = makeTestCtx();
+    expect(agentFromText(ctx, "Mira: PR #12 is ready")).toBe("mira");
+    expect(agentFromText(ctx, "Note: nothing to report")).toBe("ada");
+    expect(agentFromText(ctx, "No name here")).toBe("ada");
+  });
+
+  it("quotes at most 1,500 characters of the original", async () => {
+    const { replyToAgentMessage } = await import("../src/agents");
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_q", agent: "ada", origin: "deployment" });
+    await replyToAgentMessage(ctx, { agent: "ada", session_id: "sesn_q", text: "x".repeat(3000) }, { telegram: 42 }, "Yes", "owner");
+    const [[, text]] = sends(fakes);
+    expect(text).toContain(`> ${"x".repeat(1500)}…`);
+    expect(text).not.toContain("x".repeat(1501));
+  });
+
+  it("keeps the first 4,000 characters of a sent message, and prunes it on the audit retention", async () => {
+    const { ctx } = makeTestCtx();
+    const id = await ctx.db.recordSent({ platform: "telegram", recipient: "42", agent: "ada", text: "y".repeat(5000) });
+    expect((await ctx.db.getSent(id))?.text).toHaveLength(4000);
+    expect((await ctx.db.prune(30, 365)).sent_messages).toBe(0);
+    await (ctx.db as any).db.prepare("UPDATE sent_messages SET created_at = datetime('now', '-400 days') WHERE id = ?").bind(id).run();
+    expect((await ctx.db.prune(30, 365)).sent_messages).toBe(1);
+    expect(await ctx.db.getSent(id)).toBeNull();
+  });
+
+  it("splits a long DM and puts the buttons and embeds on the last part", async () => {
+    const { DiscordBot } = await import("../src/discordBot");
+    const bodies: any[] = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      if (url.endsWith("/users/@me/channels")) return new Response('{"id":"ch1"}');
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ id: `m${bodies.length}` }));
+    }) as unknown as typeof fetch;
+    const button = { label: "Reply", custom_id: "rp:1", style: 2 as const };
+    const long = Array.from({ length: 120 }, (_, i) => `line ${i}`.padEnd(40, ".")).join("\n");
+    const res = await new DiscordBot("tok", "app", fake).dm(OWNER, { content: long, buttons: [button], embeds: [{ description: "e" }] });
+    expect(bodies.length).toBeGreaterThan(1);
+    expect(bodies.every((b) => b.content.length <= 2000 && !b.content.includes("cut short"))).toBe(true);
+    expect(bodies.slice(0, -1).every((b) => b.components.length === 0 && b.embeds.length === 0)).toBe(true);
+    expect(bodies.at(-1).components[0].components[0].custom_id).toBe("rp:1");
+    expect(bodies.at(-1).embeds).toHaveLength(1);
+    expect(res).toEqual({ channelId: "ch1", messageId: `m${bodies.length}` });
   });
 });

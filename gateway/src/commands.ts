@@ -1,6 +1,7 @@
 // Telegram update handling: who is speaking, what they may do, and routing.
 
-import { failureText, messageAgent, postDecision } from "./agents";
+import { agentFromText, failureText, messageAgent, postDecision, replyToAgentMessage } from "./agents";
+import type { SentMessage } from "./db";
 import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, resume, revoke, stop } from "./controls";
 import type { Role } from "./env";
@@ -95,6 +96,29 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
     const pending = await ctx.db.takePendingReply(m.reply_to_message.message_id);
     if (pending?.kind === "reject_note") {
       await reply(await reject(ctx, pending.ref, text));
+      return;
+    }
+  }
+
+  // A reply to an agent's message goes to the session that wrote it. An older or
+  // untracked bot message goes to the agent named at its start, with it quoted.
+  const answered = m.reply_to_message;
+  if (answered && m.chat.type === "private" && !text.startsWith("/") && (can("instruct") || can("ask"))) {
+    let sent = await ctx.db.findSent("telegram", m.chat.id, answered.message_id);
+    if (!sent && answered.from?.is_bot && answered.text?.trim()) {
+      sent = { agent: agentFromText(ctx, answered.text), session_id: null, text: answered.text } as SentMessage;
+    }
+    if (sent) {
+      try {
+        if (!owner && !(await withinMemberAllowance(ctx, "telegram", m.from?.id))) {
+          await reply(OVER_ALLOWANCE);
+          return;
+        }
+        const prefix = owner ? "" : memberPrefix(ctx, "telegram", m.from?.id);
+        await replyToAgentMessage(ctx, sent, { telegram: m.chat.id }, prefix + text, startedByFor(ctx, "telegram", m.from?.id, role));
+      } catch (e) {
+        await failed(e);
+      }
       return;
     }
   }

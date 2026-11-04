@@ -106,6 +106,18 @@ export interface Finding {
   created_at: string;
 }
 
+/** A message an agent sent to someone, kept so a reply reaches the session that wrote it. */
+export interface SentMessage {
+  id: number;
+  platform: "telegram" | "discord";
+  recipient: string;
+  message_id: string | null;
+  agent: string;
+  session_id: string | null;
+  text: string;
+  created_at: string;
+}
+
 /**
  * Who a session acts for. A member's conversation, and any task assigned from it,
  * is member:<platform>:<name>; "unknown" marks conversations from before this was kept.
@@ -913,6 +925,38 @@ export class Db {
       .run();
   }
 
+  // ---- messages agents send to people, so replies reach the right session ----
+
+  /** Records a message before it's sent; returns the id a Discord Reply button carries. */
+  async recordSent(m: { platform: "telegram" | "discord"; recipient: string; agent: string; session_id?: string | null; text: string }): Promise<number> {
+    const row = await this.db
+      .prepare("INSERT INTO sent_messages (platform, recipient, agent, session_id, text) VALUES (?, ?, ?, ?, ?) RETURNING id")
+      .bind(m.platform, m.recipient, m.agent, m.session_id ?? null, m.text.slice(0, 4000))
+      .first<{ id: number }>();
+    return row!.id;
+  }
+
+  async setSentMessageId(id: number, messageId: string | number) {
+    await this.db.prepare("UPDATE sent_messages SET message_id = ? WHERE id = ?").bind(String(messageId), id).run();
+  }
+
+  getSent(id: number) {
+    return this.db.prepare("SELECT * FROM sent_messages WHERE id = ?").bind(id).first<SentMessage>();
+  }
+
+  findSent(platform: "telegram" | "discord", recipient: string | number, messageId: string | number) {
+    return this.db
+      .prepare("SELECT * FROM sent_messages WHERE platform = ? AND recipient = ? AND message_id = ? ORDER BY id DESC LIMIT 1")
+      .bind(platform, String(recipient), String(messageId))
+      .first<SentMessage>();
+  }
+
+  /** Sends a session's later replies to whoever answered one of its messages. */
+  async setReplyTarget(sessionId: string, to: { telegram: number } | { discord: string }) {
+    if ("telegram" in to) await this.db.prepare("UPDATE sessions SET chat_id = ? WHERE id = ?").bind(to.telegram, sessionId).run();
+    else await this.db.prepare("UPDATE sessions SET discord_user = ? WHERE id = ?").bind(to.discord, sessionId).run();
+  }
+
   async addPendingReply(messageId: number, chatId: number, kind: string, ref: string) {
     await this.db
       .prepare("INSERT OR REPLACE INTO pending_replies (message_id, chat_id, kind, ref) VALUES (?, ?, ?, ?)")
@@ -1007,13 +1051,14 @@ export class Db {
   }
 
   /** Deletes event claims and tool results older than `eventDays`, and audit rows older than `auditDays`. */
-  async prune(eventDays: number, auditDays: number): Promise<{ events: number; tool_results: number; audit: number }> {
+  async prune(eventDays: number, auditDays: number): Promise<{ events: number; tool_results: number; audit: number; sent_messages: number }> {
     const del = async (sql: string, days: number) =>
       (await this.db.prepare(sql).bind(`-${days} days`).run()).meta?.changes ?? 0;
     return {
       events: await del("DELETE FROM processed_events WHERE ts < datetime('now', ?)", eventDays),
       tool_results: await del("DELETE FROM tool_results WHERE created_at < datetime('now', ?)", eventDays),
       audit: await del("DELETE FROM audit WHERE ts < datetime('now', ?)", auditDays),
+      sent_messages: await del("DELETE FROM sent_messages WHERE created_at < datetime('now', ?)", auditDays),
     };
   }
 }
