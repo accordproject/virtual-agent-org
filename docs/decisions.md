@@ -591,3 +591,15 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   without them skips the step.
 - The bot token already lets the gateway post as the bot, so holding it in the
   environment adds no new power. Runs still wait for the owner's approval (decision 49).
+
+**59. A fresher `/status`** · RESOLVED
+
+- `/status` read only the gateway's database, which is as fresh as the last webhook.
+  The last report is what an agent said at the end of its last session, however old,
+  so finished work could still show as in progress.
+- Now `/status` first re-reads up to 10 live sessions from Managed Agents, as a
+  webhook would; shows each agent's sessions at work and when the oldest started; and
+  gives each report's age. On Discord it answers after Discord's 3-second deadline.
+- Each `/status` costs up to 10 extra API calls. Ada's `get_status` still reads only
+  the database: refreshing inside her own tool call could process her session
+  mid-call.

@@ -398,13 +398,39 @@ describe("status formatting", () => {
     expect(p.embeds!.every((e) => e.description.length <= 4096 && e.description.endsWith("…"))).toBe(true);
   });
 
-  it("answers /status with cards", async () => {
+  it("answers /status with cards, after Discord's deadline", async () => {
     const { handleInteraction } = await import("../src/discordInteractions");
-    const { ctx } = makeTestCtx();
-    const res: any = await handleInteraction(ctx, { type: 2, token: "t", user: { id: ctx.ownerDiscordId! }, data: { name: "status" } }, () => {});
-    expect(res.type).toBe(4);
-    expect(res.data.flags).toBe(64);
-    expect(res.data.embeds.length).toBeGreaterThan(0);
+    const { ctx, fakes } = makeTestCtx();
+    const later: Promise<unknown>[] = [];
+    const res: any = await handleInteraction(ctx, { type: 2, token: "t", user: { id: ctx.ownerDiscordId! }, data: { name: "status" } }, (p) => later.push(p));
+    expect(res).toEqual({ type: 5, data: { flags: 64 } });
+    await Promise.all(later);
+    expect(fakes.originals[0].token).toBe("t");
+    expect(fakes.originals[0].embeds!.length).toBeGreaterThan(0);
+  });
+
+  it("shows each report's age and the sessions at work", async () => {
+    const { statusCards, statusPlain } = await import("../src/status");
+    const s = {
+      ...sample,
+      asOf: "2026-11-03 20:15:03",
+      agents: [{ ...sample.agents[0], live: { count: 2, since: "2026-11-03 17:10:00" } }, { ...sample.agents[1], live: { count: 1, since: "2026-11-03 20:03:00" } }],
+    };
+    const plain = statusPlain(s).split("\n");
+    expect(plain[2]).toBe("  working now: 2 sessions, the oldest started 3h ago");
+    expect(plain[3]).toBe("  last report 2026-10-31 20:15:03 (3d ago): Assigned T-4 to Mira");
+    expect(plain[5]).toBe("  working now: 1 session, started 12m ago");
+    const cards = statusCards(s).embeds!;
+    expect(cards[0].description).toContain("**Working now** · 2 sessions, the oldest started 3h ago\n\n**Last report** 10-31 20:15 · 3d ago");
+  });
+
+  it("says how long ago, in the largest unit that reads well", async () => {
+    const { ago } = await import("../src/status");
+    const now = "2026-11-03 12:00:00";
+    expect(ago("2026-11-03 11:59:30", now)).toBe("just now");
+    expect(ago("2026-11-03 11:15:00", now)).toBe("45m ago");
+    expect(ago("2026-11-02 12:00:00", now)).toBe("24h ago");
+    expect(ago("2026-10-31 12:00:00", now)).toBe("3d ago");
   });
 
   it("keeps the Telegram text as it was", async () => {

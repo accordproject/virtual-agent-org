@@ -976,6 +976,21 @@ export class Db {
     return results;
   }
 
+  /**
+   * Sessions still at work: running, or waiting on a tool result or a confirmation.
+   * Least recently updated first, so a refresh reaches the stalest ones.
+   */
+  async liveSessions(limit = 100): Promise<(SessionRow & { created_at: string })[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT * FROM sessions WHERE status IN ('running', 'rescheduling', 'idle:requires_action') " +
+          "ORDER BY updated_at ASC, rowid ASC LIMIT ?",
+      )
+      .bind(limit)
+      .all<SessionRow & { created_at: string }>();
+    return results;
+  }
+
   /** Marks idle sessions nobody has touched for `days` as stale. Returns how many. */
   async markStaleSessions(days: number): Promise<number> {
     const r = await this.db

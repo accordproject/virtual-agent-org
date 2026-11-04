@@ -237,6 +237,43 @@ describe("following up blocked tasks (decision 50)", () => {
     expect(statusCards(s).embeds![1].description).toContain("1 open task (1 blocked)");
   });
 
+  it("refreshes live sessions before /status, so a missed webhook doesn't leave it stale", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const task = await ctx.db.createTask({ agent: "mira", title: "Chase the parser PRs", brief: "b" });
+    await ctx.db.upsertSession({ id: "sesn_quiet", agent: "mira", origin: "task", task_id: task.id });
+    await ctx.db.setTask(task.id, "running", "sesn_quiet");
+    await ctx.db.upsertSession({ id: "sesn_busy", agent: "otto", origin: "deployment" });
+    // The webhook for sesn_quiet's end was missed: Managed Agents has it idle, the gateway running.
+    fakes.sessions.sesn_quiet = { id: "sesn_quiet", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "end_turn" } };
+    fakes.events.sesn_quiet = [{ id: "q1", type: "agent.custom_tool_use", name: "report_status", input: { done: ["Chased both PRs"], doing: [], blocked: [] } }];
+    fakes.sessions.sesn_busy = { id: "sesn_busy", status: "running", agent: { id: "agent_otto" } };
+
+    const { statusText } = await import("../src/commands");
+    const text = await statusText(ctx);
+    expect((await ctx.db.getTask(task.id))?.status).toBe("done");
+    expect(text).toMatch(/Mira \(.*\) · active · tasks 0 ·.*\n  last report .* \(just now\): Chased both PRs/);
+    expect(text).toMatch(/Otto \(.*\n  working now: 1 session, started just now/);
+    expect(text).not.toMatch(/Mira \(.*\n  working now/);
+  });
+
+  it("refreshes at most REFRESH_LIMIT live sessions, and carries on past one that fails", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const { REFRESH_LIMIT, refreshLive } = await import("../src/status");
+    for (let i = 0; i < REFRESH_LIMIT + 2; i++) {
+      await ctx.db.upsertSession({ id: `sesn_l${i}`, agent: "mira", origin: "deployment" });
+      fakes.sessions[`sesn_l${i}`] = { id: `sesn_l${i}`, status: "running", agent: { id: "agent_mira" } };
+    }
+    let fetched = 0;
+    const retrieve = ctx.managed.retrieveSession;
+    ctx.managed.retrieveSession = async (id: string) => {
+      fetched++;
+      if (id === "sesn_l0") throw new Error("boom");
+      return retrieve(id);
+    };
+    await expect(refreshLive(ctx)).resolves.toBeUndefined();
+    expect(fetched).toBe(REFRESH_LIMIT);
+  });
+
   it("wakes Ada at most once per task", async () => {
     const { ctx, fakes } = makeTestCtx();
     const id = await finish(ctx, fakes, ["x"]);

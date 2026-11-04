@@ -5,7 +5,7 @@ import { cap, type Ctx } from "./context";
 import { approve, askAda, markDone, pause, reject, resume, revoke, stop } from "./controls";
 import type { Role } from "./env";
 import { OVER_ALLOWANCE, describePerson, memberPrefix, roleFor, startedByFor, withinMemberAllowance } from "./people";
-import { gatherStatus, statusPlain } from "./status";
+import { gatherStatus, refreshLive, statusPlain } from "./status";
 import type { TgMessage, TgUpdate } from "./telegram";
 
 const PERMS: Record<Role, Set<string>> = {
@@ -186,6 +186,8 @@ async function handleMessage(ctx: Ctx, m: TgMessage) {
   }
 }
 
+/** Refreshes the live sessions first, so the answer isn't only as fresh as the last webhook. */
 export async function statusText(ctx: Ctx): Promise<string> {
+  await refreshLive(ctx);
   return statusPlain(await gatherStatus(ctx));
 }
