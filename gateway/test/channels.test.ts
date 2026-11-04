@@ -424,6 +424,17 @@ describe("status formatting", () => {
     expect(cards[0].description).toContain("**Working now** · 2 sessions, the oldest started 3h ago\n\n**Last report** 10-31 20:15 · 3d ago");
   });
 
+  it("lists open tasks, at most five, with why a blocked one stopped", async () => {
+    const { statusCards, statusPlain, TASKS_SHOWN } = await import("../src/status");
+    const openTasks = Array.from({ length: 7 }, (_, i) => ({ id: `T-${i + 1}`, status: i ? "running" : "blocked", title: `Review concerto PR ${i + 1}`, at: "2026-11-01 20:15:03", ...(i ? {} : { why: "Ran out of its session budget" }) }));
+    const s = { ...sample, asOf: "2026-11-03 20:15:03", agents: [{ ...sample.agents[1], tasks: 7, blockedTasks: 1, openTasks }] };
+    const d = statusCards(s).embeds![0].description;
+    expect(d).toContain("\n- T-1 · blocked · Review concerto PR 1 (2d ago): Ran out of its session budget\n- T-2 · running · Review concerto PR 2 (2d ago)");
+    expect(d).not.toContain(`T-${TASKS_SHOWN + 1} `);
+    expect(d).toContain("- 2 more");
+    expect(statusPlain(s)).toContain("\n  T-1 · blocked · Review concerto PR 1 (2d ago): Ran out of its session budget");
+  });
+
   it("says how long ago, in the largest unit that reads well", async () => {
     const { ago } = await import("../src/status");
     const now = "2026-11-03 12:00:00";

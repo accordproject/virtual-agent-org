@@ -527,6 +527,12 @@ export class Db {
       .run();
   }
 
+  /** When the network was last deployed (the deploy workflow records each one), or null. */
+  async lastDeployAt(): Promise<string | null> {
+    const r = await this.db.prepare("SELECT ts FROM deploys ORDER BY ts DESC, rowid DESC LIMIT 1").first<{ ts: string }>();
+    return r?.ts ?? null;
+  }
+
   async changesIn(states: Change["state"][]): Promise<Change[]> {
     if (!states.length) return [];
     const res = await this.db
