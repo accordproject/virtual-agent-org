@@ -1,14 +1,44 @@
-// Records which changes a deploy made live. Reads the last deployed commit from D1,
-// collects the `Change: C-n` lines in the commits since, marks those changes live
-// and stores the new commit. Run by the deploy workflow after a real deploy.
+// Records which changes a deploy made live. Reads the changes still waiting on their
+// PR from D1, marks live those whose PR is merged into the deployed history, and
+// stores the new commit. Run by the deploy workflow after a real deploy.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { readYaml } from "./lib";
 
 const D1 = "virtual-agent-org1";
 
 export function changeIds(log: string): string[] {
   const ids = [...log.matchAll(/^Change: (C-\d+)$/gm)].map((m) => m[1]);
   return [...new Set(ids)];
+}
+
+/** The PR numbers merged in a log of NUL-separated commit messages: "title (#22)" or "Merge pull request #22 from". */
+export function mergedPrs(log: string): Set<number> {
+  const out = new Set<number>();
+  for (const msg of log.split("\0")) {
+    const subject = msg.trim().split("\n")[0] ?? "";
+    const m = subject.match(/\(#(\d+)\)$/) ?? subject.match(/^Merge pull request #(\d+) from /);
+    if (m) out.add(Number(m[1]));
+  }
+  return out;
+}
+
+/**
+ * The pending changes the log shows deployed: by their PR number, since a squash merge
+ * can drop the `Change:` line from the commit body, or by that line where it survives.
+ * Every pending change is checked against the whole history, so one missed by an
+ * earlier deploy is caught by the next.
+ */
+export function deployedChanges(log: string, pending: { id: string; pr_url: string | null }[], repo: string): string[] {
+  const prs = mergedPrs(log);
+  const named = new Set(changeIds(log));
+  const prefix = `https://github.com/${repo}/pull/`;
+  return pending
+    .filter((c) => {
+      const n = c.pr_url?.startsWith(prefix) ? Number(c.pr_url.slice(prefix.length)) : NaN;
+      return named.has(c.id) || prs.has(n);
+    })
+    .map((c) => c.id);
 }
 
 export function recordSql(commit: string, ids: string[]): string {
@@ -29,25 +59,16 @@ function wrangler(command: string): string {
   });
 }
 
-function lastDeployed(): string | undefined {
-  const out = JSON.parse(wrangler("SELECT commit_sha FROM deploys ORDER BY ts DESC, rowid DESC LIMIT 1"));
-  const sha = out?.[0]?.results?.[0]?.commit_sha;
-  return typeof sha === "string" ? sha : undefined;
+/** Changes whose PR is open, or was closed as stale and may have been merged since. */
+function pendingChanges(): { id: string; pr_url: string | null }[] {
+  const out = JSON.parse(wrangler("SELECT id, pr_url FROM changes WHERE state = 'pr_open' OR (state = 'closed' AND closed_reason = 'stale')"));
+  return out?.[0]?.results ?? [];
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const head = git("rev-parse", "HEAD");
-  const last = lastDeployed();
-  let ids: string[] = [];
-  if (last) {
-    try {
-      ids = changeIds(git("log", "--format=%B", `${last}..HEAD`));
-    } catch {
-      console.log(`Last deployed commit ${last} isn't in this history; recording no changes.`);
-    }
-  } else {
-    console.log("No earlier deploy on record; recording this one without any changes.");
-  }
+  const repo = readYaml<{ github: { network_repo: string } }>("config/network.yaml").github.network_repo;
+  const ids = deployedChanges(git("log", "--format=%B%x00", "HEAD"), pendingChanges(), repo);
   const sql = recordSql(head, ids);
   if (process.argv.includes("--dry-run")) {
     console.log(sql);

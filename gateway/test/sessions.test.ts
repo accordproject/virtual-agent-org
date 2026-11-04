@@ -235,6 +235,17 @@ describe("following up blocked tasks (decision 50)", () => {
     const s = await gatherStatus(ctx);
     expect(statusPlain(s)).toContain("tasks 1 (1 blocked)");
     expect(statusCards(s).embeds![1].description).toContain("1 open task (1 blocked)");
+    expect(statusCards(s).embeds![1].description).toMatch(new RegExp(`\\n- ${id} · blocked · `));
+    expect(statusPlain(s)).toMatch(new RegExp(`\\n  ${id} · blocked · `));
+  });
+
+  it("marks blockers reported before the last deploy", async () => {
+    const { ctx } = makeTestCtx();
+    await ctx.db.addStatus({ agent: "ada", session_id: "sesn_a", done: [], doing: [], blocked: ["No file tools this session"] });
+    await (ctx.db as any).db.prepare("INSERT INTO deploys (commit_sha, ts) VALUES ('abc', datetime('now', '+1 minute'))").run();
+    const { gatherStatus, statusCards } = await import("../src/status");
+    const ada = statusCards(await gatherStatus(ctx)).embeds![0].description;
+    expect(ada).toMatch(/\*\*Blocked\*\* · reported before the \d\d-\d\d \d\d:\d\d deploy, so it may be fixed\n- No file tools this session/);
   });
 
   it("refreshes live sessions before /status, so a missed webhook doesn't leave it stale", async () => {

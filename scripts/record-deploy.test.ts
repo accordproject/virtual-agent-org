@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { changeIds, recordSql } from "./record-deploy";
+import { changeIds, deployedChanges, mergedPrs, recordSql } from "./record-deploy";
 
 test("changeIds finds none, one, and unique ids", () => {
   assert.deepEqual(changeIds("feat: x\n\nbody"), []);
@@ -33,4 +33,23 @@ test("recordSql refuses a bad id or commit", () => {
   assert.throws(() => recordSql("a".repeat(40), ["X-1"]));
   assert.throws(() => recordSql("not-a-sha", ["C-1"]));
   assert.throws(() => recordSql("a'b", []));
+});
+
+const REPO = "accordproject/virtual-agent-org";
+const pr = (n: number, repo = REPO) => `https://github.com/${repo}/pull/${n}`;
+
+test("mergedPrs reads squash and merge-commit subjects, not PR numbers in a body", () => {
+  const log = ["docs(mira): a fix (#22)\n\nSigned-off-by: x", "Merge pull request #30 from a/b\n\nfeat: y", "feat: z\n\nsee (#40)", ""].join("\0");
+  assert.deepEqual([...mergedPrs(log)].sort(), [22, 30]);
+});
+
+test("deployedChanges finds a change by its PR when the squash dropped its Change: line", () => {
+  // As PR #22 merged: the squash kept the title and sign-off, not "Change: C-1".
+  const log = "docs(mira): check for an already-merged fix before a first response (#22)\n\nSigned-off-by: bot\n\0";
+  assert.deepEqual(deployedChanges(log, [{ id: "C-1", pr_url: pr(22) }, { id: "C-2", pr_url: pr(23) }], REPO), ["C-1"]);
+});
+
+test("deployedChanges still accepts the Change: line, and ignores another repo's PR", () => {
+  const log = "feat: a\n\nChange: C-3\n\0fix: b (#9)\n\0";
+  assert.deepEqual(deployedChanges(log, [{ id: "C-3", pr_url: null }, { id: "C-4", pr_url: pr(9, "someone/else") }], REPO), ["C-3"]);
 });

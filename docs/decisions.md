@@ -531,8 +531,9 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   closed.
 - **Budgets:** $1 a Mandla task for `wording` and `tier`, $5 and the deep tier for
   the other types (`budgets.mechanic_small_usd` and `mechanic_large_usd`).
-- **Live:** after each deploy the workflow marks live the changes named in the
-  commits it deployed, if their pull request was still open or closed as stale. The
+- **Live:** after each deploy the workflow marks live the changes whose pull request
+  is merged into the deployed history (by PR number, or a `Change: C-n` line), if it
+  was still open or closed as stale (decision 60). The
   gateway never reads this repo. A pull request unmerged after 30 days is closed by
   the stale workflow, and the gateway closes its change.
 - **Measured by the gateway, before and after:** 14 days after a change goes live, the
@@ -603,3 +604,27 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Each `/status` costs up to 10 extra API calls. Ada's `get_status` still reads only
   the database: refreshing inside her own tool call could process her session
   mid-call.
+
+**60. A `/status` that stays true** · RESOLVED
+
+- A `/status` on 4 November was wrong in several ways at once:
+  - It showed a merged change as `pr_open`. The squash merge kept only the PR title
+    and sign-off, so the deploy found no `Change: C-n` line and never marked the change
+    live.
+  - It showed Ada blocked on file tools a deploy had since fixed. Ada's next check-in
+    was two days away, so her old report stood until then.
+  - Sage listed gaps in the news as blockers. A blocker leaves a task blocked and
+    wakes Ada to follow it up, so gaps cost a wake and added noise to the
+    self-improvement loop's evidence.
+  - It counted Mira's open tasks without naming them, and her reports named neither
+    the PR she meant nor who had to act.
+- The deploy now finds changes by their PR number as well as the `Change:` line, and
+  checks every pending change against the whole deployed history, so one an earlier
+  deploy missed goes live at the next.
+- `/status` lists each agent's open tasks (at most five, then a count) with why a
+  blocked one stopped. It marks blockers reported before the latest deploy as possibly
+  fixed.
+- The protocol now says what each `report_status` field is for. Each item names its
+  PR, issue, task or decision and gives the outcome, not the steps. `blocked` is only
+  for work that needs someone else to act, with who and what. Gaps and caveats go in
+  `notes`. An agent checks its tools before reporting one missing.
