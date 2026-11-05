@@ -18,8 +18,9 @@ const agents = Object.values(network.agents)
   .filter((a) => a.phase <= network.current_phase)
   .map((a) => ({ name: a.name, title: a.title }));
 const defs = commandDefinitions(agents);
+const names = defs.map((d) => ("type" in d && d.type === 3 ? `"${d.name}" (message menu)` : `/${d.name}`)).join(" ");
 if (process.argv.includes("--dry-run")) {
-  console.log(`Would register ${defs.map((d) => `/${d.name}`).join(" ")} for ${agents.map((a) => `${a.name} (${a.title})`).join(", ")}.`);
+  console.log(`Would register ${names} for ${agents.map((a) => `${a.name} (${a.title})`).join(", ")}.`);
   process.exit(0);
 }
 
@@ -30,7 +31,7 @@ if (!DISCORD_APP_ID || !DISCORD_BOT_TOKEN) {
 }
 const bot = new DiscordBot(DISCORD_BOT_TOKEN, DISCORD_APP_ID);
 const out = await bot.putGlobalCommands(defs);
-console.log(`Registered ${out.length} commands for ${agents.map((a) => a.name).join(", ")}: ${defs.map((d) => `/${d.name}`).join(" ")}`);
+console.log(`Registered ${out.length} commands for ${agents.map((a) => a.name).join(", ")}: ${names}`);
 if (DISCORD_GUILD_ID) {
   await bot.putGuildCommands(DISCORD_GUILD_ID, []);
   console.log(`Removed the server-only commands from ${DISCORD_GUILD_ID}.`);

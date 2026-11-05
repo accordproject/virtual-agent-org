@@ -628,3 +628,22 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   PR, issue, task or decision and gives the outcome, not the steps. `blocked` is only
   for work that needs someone else to act, with who and what. Gaps and caveats go in
   `notes`. An agent checks its tools before reporting one missing.
+
+**61. Replying to an agent's message** · RESOLVED
+
+- A plain reply in a Discord DM never reached the network: Discord tells a bot only
+  about slash commands, buttons and forms, not ordinary messages, unless the bot holds
+  a connection open, which the gateway (a Cloudflare Worker) can't. And `/ada` continues
+  the most recent Discord conversation, which is often not the session that wrote the
+  message being answered (a scheduled check-in, another agent, or a conversation that
+  moved to a fresh session at its budget), so the agent had no record of it.
+- Now the gateway records which session sent each message to a person. In Discord, each
+  agent message carries a **Reply** button, and any bot message has **Reply to agent**
+  in its Apps menu; both open a short form. In Telegram, the app's own reply does the
+  same. The reply goes to the session that wrote the message, and that session's later
+  answers come back to whoever replied.
+- If that session has ended, is near or past its budget, or the message predates this,
+  a fresh session for the agent named at the start of the message (Ada otherwise) gets
+  the reply with the original quoted.
+- Only the person a message was sent to can reply to it. A member's reply is marked as
+  theirs and counts towards their daily allowance, as `/ada` does.

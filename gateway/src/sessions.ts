@@ -183,7 +183,7 @@ async function handleEvent(
     case "agent.message": {
       const text = messageText(e);
       await ctx.db.audit({ agent, session_id: sessionId, event_id: e.id, event_type: e.type, detail: text.slice(0, 500) });
-      if (text) await replyToOrigin(ctx, origin, `${cap(agent)}: ${text}`);
+      if (text) await replyToOrigin(ctx, origin, { agent, sessionId }, `${cap(agent)}: ${text}`);
       return;
     }
 
