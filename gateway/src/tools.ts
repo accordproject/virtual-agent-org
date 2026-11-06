@@ -14,7 +14,7 @@ import {
 } from "./review";
 import { maxRisk, toRisk, type Risk } from "./risk";
 import { schemaProblems } from "./schema";
-import { TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
+import { READS_ALL_DECISIONS, TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
 import { isTechWg } from "./vimeo";
 
 export class ToolError extends Error {}
@@ -131,6 +131,15 @@ const HANDLERS: Record<ToolName, Handler> = {
 
   get_decisions: async (ctx, { agent, input }) => {
     const status = (input.status as "open" | "decided" | "all") ?? "all";
+    if (READS_ALL_DECISIONS.includes(agent)) {
+      const ds = await ctx.db.listDecisions({ status });
+      return JSON.stringify(
+        ds.map((d) => ({
+          id: d.id, agent: d.agent, kind: d.kind, target: d.target, summary: d.summary, status: d.status, note: d.note, result: d.result,
+          created_at: d.created_at, decided_at: d.decided_at,
+        })),
+      );
+    }
     const ds = await ctx.db.listDecisions({ status, agent });
     return JSON.stringify(
       ds.map((d) => ({ id: d.id, kind: d.kind, target: d.target, summary: d.summary, status: d.status, note: d.note, result: d.result })),

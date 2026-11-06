@@ -71,6 +71,48 @@ describe("tool schemas", () => {
   });
 });
 
+describe("get_decisions (C-3)", () => {
+  const seed = async (ctx: any) => {
+    const a = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: T, summary: "Comment", rationale: "r", risk: "low", payload: { text: "Thanks" } });
+    const b = await ctx.db.createDecision({ agent: "otto", kind: "discord.announce", target: "announcements", summary: "Announce", rationale: "r", risk: "medium", payload: { text: "Hi" } });
+    await ctx.db.decide(b.id, "rejected", "Not this week");
+    return { a, b };
+  };
+  const call = async (ctx: any, agent: string, status: string) => JSON.parse(await handleTool(ctx, agent, "s", "get_decisions", { status }));
+
+  it("shows Vera every agent's decisions, with who asked and when", async () => {
+    const { ctx } = makeTestCtx();
+    const { a, b } = await seed(ctx);
+    const all = await call(ctx, "vera", "all");
+    expect(all.map((d: any) => [d.id, d.agent, d.status])).toEqual([
+      [a.id, "mira", "open"],
+      [b.id, "otto", "rejected"],
+    ]);
+    expect(all[0].created_at).toBeTruthy();
+    expect(all[0].decided_at).toBeNull();
+    expect(all[1]).toMatchObject({ note: "Not this week" });
+    expect(all[1].decided_at).toBeTruthy();
+    expect((await call(ctx, "vera", "open")).map((d: any) => d.id)).toEqual([a.id]);
+    expect((await call(ctx, "vera", "decided")).map((d: any) => d.id)).toEqual([b.id]);
+  });
+
+  it("still shows other agents only their own decisions", async () => {
+    const { ctx } = makeTestCtx();
+    const { a } = await seed(ctx);
+    const mine = await call(ctx, "mira", "all");
+    expect(mine.map((d: any) => d.id)).toEqual([a.id]);
+    expect(mine[0].agent).toBeUndefined();
+    expect(await call(ctx, "ada", "all")).toEqual([]);
+  });
+
+  it("tells Vera, and only Vera, that it lists every agent's decisions", () => {
+    const desc = (a: string) => toolsForAgent(a).find((t) => t.name === "get_decisions")!.description;
+    expect(desc("vera")).toMatch(/^Every agent's queued decisions/);
+    expect(desc("mira")).toMatch(/^Your own queued decisions/);
+    expect(desc("ada")).toMatch(/^Your own queued decisions/);
+  });
+});
+
 describe("review checks are a kind of task, not a title (finding 2)", () => {
   const setup = () => {
     const gh = fakeGitHub();

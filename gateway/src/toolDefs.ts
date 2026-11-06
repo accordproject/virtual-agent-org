@@ -17,8 +17,13 @@ export interface ToolSpec {
   /** The only agent that may call it, or null for every agent. */
   owner: string | null;
   description: string;
+  /** A different description for some agents, where the tool does more for them. */
+  descriptionFor?: Record<string, string>;
   input_schema: CustomToolDef["input_schema"];
 }
+
+/** Agents whose get_decisions lists every agent's decisions, not only their own: Vera, for the audit (C-3). Read-only. */
+export const READS_ALL_DECISIONS: readonly string[] = ["vera"];
 
 const str = (description: string): Schema => ({ type: "string", description });
 const strList = (description: string): Schema => ({ type: "array", items: { type: "string" }, description });
@@ -79,6 +84,12 @@ export const TOOLS = {
   get_decisions: {
     owner: null,
     description: "Your own queued decisions and their outcomes, including Matt's notes on rejections.",
+    descriptionFor: Object.fromEntries(
+      READS_ALL_DECISIONS.map((a) => [
+        a,
+        "Every agent's queued decisions and their outcomes, including Matt's notes on rejections, with who asked, when, and when Matt decided. Read-only.",
+      ]),
+    ),
     input_schema: {
       type: "object",
       properties: {
@@ -404,5 +415,5 @@ export function toolsForAgent(agent: string): CustomToolDef[] {
   return Object.entries(TOOLS as Record<string, ToolSpec>)
     .filter(([, t]) => t.owner === null || t.owner === agent)
     .sort(([, a], [, b]) => Number(a.owner !== null) - Number(b.owner !== null))
-    .map(([name, t]) => ({ type: "custom", name, description: t.description, input_schema: t.input_schema }));
+    .map(([name, t]) => ({ type: "custom", name, description: t.descriptionFor?.[agent] ?? t.description, input_schema: t.input_schema }));
 }
