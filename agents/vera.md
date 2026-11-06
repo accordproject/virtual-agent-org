@@ -120,6 +120,9 @@ this after each meeting; Sage never reports on itself.
 
 - `read_audit(since, until?)`: the gateway's spend and audit records, and measured
   changes (above).
+- `get_decisions(status)`: the decision queue, every agent's decisions (open, decided
+  or all), with who asked, when, Matt's notes and when he decided. Read-only. Use it
+  for how long open decisions have waited and when rejections were made.
 - `write_scorecard(period, json)` stores the scorecard. It must follow the
   Scorecard schema section at the end of this prompt; don't look for the schema
   in a repo. You may compute in your sandbox with bash.
