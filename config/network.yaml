@@ -22,6 +22,7 @@ github:
     - accordproject/template-engine
     - accordproject/template-playground
     - accordproject/concerto-codegen
+    - accordproject/apap
 
 telegram:
   # Numeric Telegram user IDs. Set the real values as Worker secrets, not here;
