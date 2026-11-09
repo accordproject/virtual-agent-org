@@ -25,6 +25,9 @@ export interface ToolSpec {
 /** Agents whose get_decisions lists every agent's decisions, not only their own: Vera, for the audit (C-3). Read-only. */
 export const READS_ALL_DECISIONS: readonly string[] = ["vera"];
 
+/** How many decision cards one send_to_matt call may re-send (C-4). */
+export const MAX_RESENT_CARDS = 10;
+
 const str = (description: string): Schema => ({ type: "string", description });
 const strList = (description: string): Schema => ({ type: "array", items: { type: "string" }, description });
 
@@ -203,11 +206,15 @@ export const TOOLS = {
     owner: "ada",
     // Only for scheduled runs and tasks; in a conversation the reply reaches Matt.
     description:
-      "Send a Telegram message to Matt from a scheduled run or task (check-ins, anything he must read). Not in a conversation with him: there, your reply reaches him.",
+      "Send a Telegram message to Matt from a scheduled run or task (check-ins, anything he must read). With decision_ids, the gateway then re-sends each open decision's card, " +
+      "with its Approve and Reject buttons, in the order given. In a conversation with him your reply reaches him: there, call it only with decision_ids and no text, " +
+      "so only the cards are sent.",
     input_schema: {
       type: "object",
-      properties: { text: str("Message text, plain text, under 3500 characters") },
-      required: ["text"],
+      properties: {
+        text: str("Message text, plain text, under 3500 characters. Leave it out in a conversation with Matt."),
+        decision_ids: strList(`Open decisions whose cards to re-send after the text, oldest first, e.g. ["D-117", "D-118"]; at most ${MAX_RESENT_CARDS}`),
+      },
     },
   },
 

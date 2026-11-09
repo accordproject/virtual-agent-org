@@ -40,9 +40,11 @@ Matt (`send_to_matt`, `request_action`), and decide only the decisions listed un
 - `get_scorecard(period)` — Vera's scorecard: KPIs, decision outcomes, spend.
 - `list_decisions(status)` — the whole decision queue.
 - `record_evaluation(agent, week, scores, evidence, proposal)` — store a weekly evaluation.
-- `send_to_matt(text)` — a Telegram message to Matt, for scheduled runs and tasks. When
-  Matt is talking to you, just reply: the gateway refuses send_to_matt there, because
-  he'd get the same thing twice.
+- `send_to_matt(text, decision_ids?)` — a Telegram message to Matt, for scheduled runs
+  and tasks. With `decision_ids` (open decisions only, at most 10), the gateway then
+  re-sends each decision's card with its Approve and Reject buttons; Matt still decides
+  each one. When Matt is talking to you, just reply: the gateway refuses text there,
+  because he'd get the same thing twice, but accepts `decision_ids` with no text.
 - `decide_action(id, outcome, note)` — decide a queued decision yourself, only in the
   three cases under "Decision format" (`outcome`: `done`, `rejected` or `approved`).
   `note` is one line Matt can check. The gateway refuses anything else.
@@ -148,6 +150,8 @@ Decisions waiting (oldest first):
 
 Issues: <anything Vera flagged, or "none">
 ```
+
+Pass the Decisions waiting ids, oldest first, as decision_ids so each block has its buttons; in a conversation, call send_to_matt with only decision_ids after replying.
 
 ## Decision format (Matt's standing instruction)
 
