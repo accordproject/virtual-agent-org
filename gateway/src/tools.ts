@@ -2,7 +2,7 @@
 // it checks who may call what before doing anything.
 
 import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
-import { AgentUnavailable, postDecision, refreshDecisionCard, sendAgentMessage, startSession } from "./agents";
+import { AgentUnavailable, postDecision, refreshDecisionCard, resendDecisionCard, sendAgentMessage, startSession } from "./agents";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
@@ -14,7 +14,7 @@ import {
 } from "./review";
 import { maxRisk, toRisk, type Risk } from "./risk";
 import { schemaProblems } from "./schema";
-import { READS_ALL_DECISIONS, TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
+import { MAX_RESENT_CARDS, READS_ALL_DECISIONS, TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
 import { isTechWg } from "./vimeo";
 
 export class ToolError extends Error {}
@@ -195,15 +195,32 @@ const HANDLERS: Record<ToolName, Handler> = {
   },
 
   send_to_matt: async (ctx, { agent, sessionId, input }) => {
-    const text = s(input.text, "text");
+    const text = s(input.text, "text", false);
+    const ids = [...new Set(list(input.decision_ids).map((id) => id.trim().toUpperCase()))];
+    if (!text && !ids.length) throw new ToolError("text is required, unless you give decision_ids");
+    if (ids.length > MAX_RESENT_CARDS) throw new ToolError(`At most ${MAX_RESENT_CARDS} decision_ids per call; you gave ${ids.length}.`);
     const row = await ctx.db.getSession(sessionId);
-    if (row?.chat_id || row?.discord_user) {
+    if (text && (row?.chat_id || row?.discord_user)) {
       // Matt is already in this conversation and gets her reply: sending as well duplicates it.
-      throw new ToolError("You're in a conversation: Matt gets your reply. Put this in your reply instead of using send_to_matt.");
+      throw new ToolError(
+        "You're in a conversation: Matt gets your reply. Put this in your reply instead of using send_to_matt; to give him the decisions' buttons, call it with only decision_ids.",
+      );
     }
+    // Every id is checked before anything is sent, so a refusal sends nothing (C-4).
+    const cards: Decision[] = [];
+    const problems: string[] = [];
+    for (const id of ids) {
+      const d = await ctx.db.getDecision(id);
+      if (!d) problems.push(`${id} doesn't exist`);
+      else if (d.status !== "open") problems.push(`${id} is ${d.status}, not open`);
+      else cards.push(d);
+    }
+    if (problems.length) throw new ToolError(`Nothing sent. Only open decisions can be re-sent:\n- ${problems.join("\n- ")}`);
     // Recorded, so replying to it in Telegram reaches this session.
-    await sendAgentMessage(ctx, { telegram: ctx.ownerChatId }, { agent, sessionId }, text);
-    return "Sent.";
+    if (text) await sendAgentMessage(ctx, { telegram: ctx.ownerChatId }, { agent, sessionId }, text);
+    // The same card and buttons as the original; answering either decides the same decision.
+    for (const d of cards) await resendDecisionCard(ctx, d);
+    return cards.length ? `Sent${text ? " the message and" : ""} ${cards.length} card${cards.length === 1 ? "" : "s"}: ${cards.map((d) => d.id).join(", ")}.` : "Sent.";
   },
 
   vimeo_recordings: async (ctx, { input }) => {
