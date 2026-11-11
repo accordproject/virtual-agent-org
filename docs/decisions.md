@@ -692,3 +692,16 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: giving Mira a shell. Building runs the repo's and its dependencies' code,
   and her sandbox holds a token that posts as the project.
 - Design: section 4a of the design in decision 62.
+
+**64. No advisor model** · RESOLVED
+
+- Managed Agents lets an agent on a cheaper model consult a stronger one mid-turn
+  (the "advisor"). Each consultation is billed at the stronger model's rates.
+- Off for every agent. On a standard-tier agent it only adds cost. It could save
+  money only by moving the deep-tier roles (Ada, Mira's review check) to a cheaper
+  model, and Opus 5.5 costs only twice what Sonnet 5.5 does, so the saving would be
+  small and fall on the roles where judgement matters most. The cheaper model also
+  decides for itself when to ask, and the advice comes back encrypted, so the audit
+  log can't show what it said.
+- Revisit if spend by agent shows the deep-tier roles taking most of the monthly
+  budget, after trying a lower effort level first.
