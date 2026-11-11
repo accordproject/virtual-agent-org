@@ -23,8 +23,8 @@ Design principles:
   that Ada uses to evaluate everyone, herself included.
 - **Job specs are code.** Each role is a markdown spec in this repo. Changes are pull
   requests that the owner merges.
-- **Start small.** Phase 1 runs six agents (Sage joined early for one narrow job,
-  decision 54); others join only when the weekly
+- **Start small.** Phase 1 runs seven agents (Sage and Felix joined early, each for
+  one narrow job, decisions 54 and 63); others join only when the weekly
   evaluation shows a gap they would fill.
 
 ## The team
@@ -40,7 +40,7 @@ Design principles:
 | **Juno** | Marketing & Docs | Accord's work is visible and its docs current | Drafts only. Any publish: queued. | 2 |
 | **Sage** | Research | The Tech WG chair has a few well-sourced outside items worth discussing (wider brief from Phase 2) | Web search; writes briefs to its own store, which Otto reads | 1 |
 | **Kit** | Training & Security | Quality and security posture improve | Security issues and draft PRs. Advisories: queued. | 3 |
-| **Felix** | Release & CI | Builds stay green and releases ship predictably | CI and changelog drafts. Tags and npm publish: queued. | 3 |
+| **Felix** | CI Fixes | A tracked PR whose CI fails and whose author can't fix it gets a small, tested fix (release work from Phase 3) | Its sandbox and a read-only token. Each fix: queued, and only when the gateway starts it from Mira's request (decision 63). | 1 |
 | **Nell** | Ecosystem & Funding | More adopters, mentors and funding | Drafts only. Every external email: queued. | 3 |
 
 Each agent's job is in `agents/<name>.md`; `agents/_protocol.md` is added to every
@@ -162,6 +162,7 @@ Those tokens list only the repos in scope (decision 23).
 | Vera, Otto | Fine-grained read-only token, all Accord repos | Read |
 | Ada | Nothing | Assign tasks, message the owner, queue decisions |
 | Mandla | Nothing | Clone this public repo, build and test in its sandbox, submit a change once |
+| Felix | Fine-grained read-only token (including Actions, for job logs), repos in scope only | Read; clone, build and test in its sandbox; request a fix |
 
 Agent tokens live in each agent's Managed Agents vault, never in the repo. People's
 Discord and Telegram ids live in the git-ignored `config/people.ids.yaml` and reach the
@@ -228,6 +229,13 @@ public action without a decision id.
   The review pass runs once a day to catch what wakes missed, and a daily check
   re-reads the open PRs and issues the network tracks, since GitHub doesn't retry
   failed deliveries. Events carry no rights, and the gateway keeps no text from them.
+- **Failed CI** (decision 63): when a tracked PR's CI fails, the gateway wakes Mira
+  once every run at the head has finished. She asks for a re-run if it's flaky,
+  comments to a person whose change broke it, or hands a bot's PR, or one failing
+  because the base branch is broken, to Felix with `request_ci_fix`. Felix reproduces
+  and fixes it in his sandbox and requests `github.fix_pr`. After the owner approves,
+  the gateway opens a PR into the PR's branch, or for a fork posts the files as a
+  comment for the author to apply.
 - **Memory:** each agent keeps `/notes/working.md` in its own memory store; sessions
   start fresh and read their notes first.
 
@@ -250,9 +258,9 @@ Bots are excluded from people metrics, and medians are reported alongside means.
 | Phase | Agents | Gate to the next phase |
 | --- | --- | --- |
 | 0 Foundations | Test agent on the sandbox repo | A queued merge is approved and executed; `/stop` halts the agent within seconds |
-| 1 Core loop | Ada, Mira, Vera, Otto, Sage, Mandla | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
+| 1 Core loop | Ada, Mira, Vera, Otto, Sage, Mandla, Felix (CI fixes only) | Two weeks of on-time check-ins; at least 80% of merge proposals approved unedited; no public action without a decision id; spend within budget |
 | 2 Community and voice | Rosa, Juno | Newcomer first-response median under 2 business days |
-| 3 Depth | Kit, Felix, Nell | Each new agent moves its KPIs within four weeks, or is retired |
+| 3 Depth | Kit, Felix (releases), Nell | Each new agent moves its KPIs within four weeks, or is retired |
 
 ## Background
 

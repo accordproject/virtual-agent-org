@@ -44,8 +44,11 @@ export interface Task {
   due: string | null;
   status: string;
   session_id: string | null;
-  /** review_check only when the gateway started it for one PR at one commit (decision 2A). */
-  kind: "task" | "review_check" | "change";
+  /**
+   * review_check and ci_fix only when the gateway started it for one PR at one commit
+   * (decisions 2A and 63), named in review_target and review_sha.
+   */
+  kind: "task" | "review_check" | "change" | "ci_fix";
   review_target: string | null;
   review_sha: string | null;
   /** The task or decision (T-12, D-41) this task was assigned to follow up, if any. */
@@ -122,7 +125,8 @@ export interface GitHubEvent {
   detail: string | null;
 }
 
-export type WakeTrigger = "review" | "merge" | "first_response";
+/** ci_failed and ci_fix are decision 63's: Mira diagnoses a tracked PR's failed CI, Felix fixes it. */
+export type WakeTrigger = "review" | "merge" | "first_response" | "ci_failed" | "ci_fix";
 
 /** Work the gateway will start for an agent when an event calls for it (decision 62). */
 export interface Wake {
@@ -135,6 +139,8 @@ export interface Wake {
   status: "pending" | "starting" | "started" | "dropped";
   reason: string | null;
   session_id: string | null;
+  /** A ci_fix wake's diagnosis from Mira, for Felix's brief (data, not instructions). */
+  note: string | null;
   created_at: string;
 }
 
@@ -415,17 +421,48 @@ export class Db {
    * while the PR was a draft) is queued again as new, so its wait for CI starts over;
    * one that started never is. True if queued.
    */
-  async queueWake(w: { trigger: WakeTrigger; target: string; sha?: string; agent: string; delayMinutes?: number }): Promise<boolean> {
+  async queueWake(w: { trigger: WakeTrigger; target: string; sha?: string; agent: string; delayMinutes?: number; note?: string }): Promise<boolean> {
     const r = await this.db
       .prepare(
-        "INSERT INTO github_wakes (trigger, target, sha, agent, due_at) VALUES (?, ?, ?, ?, datetime('now', ?)) " +
-          "ON CONFLICT (trigger, target, sha) DO UPDATE SET due_at = excluded.due_at, status = 'pending', reason = NULL, " +
+        "INSERT INTO github_wakes (trigger, target, sha, agent, due_at, note) VALUES (?, ?, ?, ?, datetime('now', ?), ?) " +
+          "ON CONFLICT (trigger, target, sha) DO UPDATE SET due_at = excluded.due_at, status = 'pending', reason = NULL, note = COALESCE(excluded.note, github_wakes.note), " +
           "created_at = CASE WHEN github_wakes.status = 'dropped' THEN datetime('now') ELSE github_wakes.created_at END " +
           "WHERE github_wakes.status = 'dropped' OR (github_wakes.status = 'pending' AND excluded.due_at < github_wakes.due_at)",
       )
-      .bind(w.trigger, w.target.toLowerCase(), w.sha ?? "", w.agent, `+${w.delayMinutes ?? 0} minutes`)
+      .bind(w.trigger, w.target.toLowerCase(), w.sha ?? "", w.agent, `+${w.delayMinutes ?? 0} minutes`, w.note ?? null)
       .run();
     return (r.meta?.changes ?? 0) > 0;
+  }
+
+  /** A wake of this trigger for this PR and head, whatever its status. */
+  wakeFor(trigger: WakeTrigger, target: string, sha: string) {
+    return this.db.prepare("SELECT * FROM github_wakes WHERE trigger = ? AND target = ? AND sha = ?").bind(trigger, target.toLowerCase(), sha).first<Wake>();
+  }
+
+  /**
+   * Whether the network tracks a PR (decision 63): Mira has reviewed it, or it has an
+   * open decision or a pending or started wake. Only tracked PRs get CI fixes.
+   */
+  async isTracked(target: string): Promise<boolean> {
+    const t = target.toLowerCase();
+    const row = await this.db
+      .prepare(
+        "SELECT 1 AS x WHERE EXISTS (SELECT 1 FROM reviews WHERE target = ?) " +
+          "OR EXISTS (SELECT 1 FROM decisions WHERE lower(target) = ? AND status = 'open') " +
+          "OR EXISTS (SELECT 1 FROM github_wakes WHERE target = ? AND status IN ('pending', 'starting', 'started') AND trigger NOT IN ('ci_failed', 'ci_fix'))",
+      )
+      .bind(t, t, t)
+      .first();
+    return !!row;
+  }
+
+  /** Whether a ci_fix task for this PR is open or running. */
+  async ciFixActive(target: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS x FROM tasks WHERE kind = 'ci_fix' AND lower(review_target) = ? AND status IN ('open', 'running') LIMIT 1")
+      .bind(target.toLowerCase())
+      .first();
+    return !!row;
   }
 
   /** Whether a review check for this PR is open or running. */
@@ -661,6 +698,15 @@ export class Db {
     return results;
   }
 
+  /** Every decision of one kind on a PR or issue, newest first. */
+  async decisionsOn(target: string, kind: string): Promise<Decision[]> {
+    const { results } = await this.db
+      .prepare("SELECT * FROM decisions WHERE lower(target) = ? AND kind = ? ORDER BY seq DESC LIMIT 50")
+      .bind(target.toLowerCase(), kind)
+      .all<Decision>();
+    return results;
+  }
+
   /** Closes a decision GitHub has moved past (decision 62). Returns false if it was no longer open. */
   async lapse(id: string, note: string): Promise<boolean> {
     const r = await this.db
@@ -706,13 +752,16 @@ export class Db {
     due?: string;
     review?: { target: string; sha: string };
     follows_up?: string;
-    kind?: "change";
+    /** A ci_fix task names its PR and head in `subject` (decision 63). */
+    kind?: "change" | "ci_fix";
+    subject?: { target: string; sha: string };
   }): Promise<Task> {
     const seq = await this.next("task");
     const id = `T-${seq}`;
+    const about = t.review ?? t.subject;
     await this.db
       .prepare("INSERT INTO tasks (id, seq, agent, title, brief, priority, due, kind, review_target, review_sha, follows_up) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : (t.kind ?? "task"), t.review?.target ?? null, t.review?.sha ?? null, t.follows_up ?? null)
+      .bind(id, seq, t.agent, t.title, t.brief, t.priority ?? "normal", t.due ?? null, t.review ? "review_check" : (t.kind ?? "task"), about?.target ?? null, about?.sha ?? null, t.follows_up ?? null)
       .run();
     return (await this.db.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first<Task>())!;
   }

@@ -37,6 +37,12 @@ action_kinds:
   # against the PR and refuses text that @mentions anyone but the author or talks about
   # the agent network. Never requestable through request_action.
   github.review:       { risk: low,    executor: github, auto: true }
+  # Re-runs the failed jobs of a tracked PR's CI runs at one head, once (decision 63).
+  # Not auto: making it run without Matt is his decision.
+  github.rerun_ci:     { risk: low,    executor: github }
+  # Felix's fix for a tracked PR's failed CI (decision 63): a PR into the PR's branch
+  # when it is in the same repo, or the files as a comment for a fork's author.
+  github.fix_pr:       { risk: medium, executor: github }
   # Opens a PR updating AGENTS.md, CONTRIBUTING.md, REVIEWING.md or CLAUDE.md. The PR
   # then needs a maintainer's review like any other.
   github.docs_pr:      { risk: medium, executor: github }
@@ -61,7 +67,7 @@ agents:
     mcp_servers:
       github: { mode: read_plus_triage }   # read, label, assign, request review via her own GitHub App
     builtin_tools: [read, write, edit, glob, web_fetch]
-    requestable: [github.merge, github.close, github.comment, github.release, github.approve_ci, github.docs_pr, discord.ops]
+    requestable: [github.merge, github.close, github.comment, github.release, github.approve_ci, github.rerun_ci, github.docs_pr, discord.ops]
   vera:
     mcp_servers:
       github: { mode: read }
@@ -102,10 +108,13 @@ agents:
     builtin_tools: [read, write, edit, glob, bash, web_fetch, web_search]
     requestable: [github.comment, other, discord.ops]
   felix:
+    # Phase 1 for CI fixes only (decision 63): a read-only token (with Actions read, for
+    # job logs) and a shell to reproduce and test fixes. No write credentials; his fix
+    # reaches GitHub only as github.fix_pr, after Matt approves. Releases stay off.
     mcp_servers:
       github: { mode: read }
     builtin_tools: [read, write, edit, glob, bash, web_fetch]
-    requestable: [github.release, github.comment]
+    requestable: [github.fix_pr]
   nell:
     mcp_servers: {}
     builtin_tools: [read, write, edit, glob, web_search, web_fetch]

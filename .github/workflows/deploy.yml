@@ -169,6 +169,7 @@ jobs:
           MIRA_GITHUB_TOKEN: ${{ secrets.MIRA_GITHUB_TOKEN }}
           VERA_GITHUB_TOKEN: ${{ secrets.VERA_GITHUB_TOKEN }}
           OTTO_GITHUB_TOKEN: ${{ secrets.OTTO_GITHUB_TOKEN }}
+          FELIX_GITHUB_TOKEN: ${{ secrets.FELIX_GITHUB_TOKEN }}
         run: npx tsx scripts/deploy.ts ${{ inputs.dry_run && '--dry-run' || '' }}
 
       # deploy.ts saves what it created even when it fails part-way, so check after

@@ -1,7 +1,6 @@
 # GitHub Events Design
 
-**Status:** agreed 2026-11-11 (decisions 62 and 63). Sections 1 to 6 are built;
-section 4a (failed CI, Felix) follows in a separate PR.
+**Status:** agreed 2026-11-11 (decisions 62 and 63), and built.
 
 **Goal:** the network learns when a PR, issue or CI run it cares about changes, within
 seconds rather than at the next scheduled pass. Decision cards, review outcomes and
@@ -175,7 +174,7 @@ day: labelling, nudges, closures and outcomes aren't event-driven.
 procedures above. "Reviewing a PR" step 1 says the daily pass is a catch-up. Triage
 step 6 drops review outcomes for merges and closes.
 
-### 4a. Failed CI (agreed; built in a follow-up PR)
+### 4a. Failed CI
 
 Only PRs the network tracks: a PR Mira has reviewed, or one with an open decision or a
 pending wake. No default-branch watch, no releases, nothing for untracked PRs.
@@ -220,8 +219,12 @@ hasn't answered her CI comment in 5 days.
 
 | Kind | Risk | Runs | Gateway checks |
 | --- | --- | --- | --- |
-| `github.rerun_ci` | low | `auto`, like `approve_ci` (the owner's decision) | The runs are at the target's current head and failed; once per head; never runs waiting for approval (that stays `approve_ci`) |
-| `github.fix_pr` | medium | On the owner's approval of the card | The PR is tracked and still at `sha`; no file under `.github/`; package and lock files only for a dependency PR; whole files on the card. If the PR's branch is in the same repo (bot PRs), the App opens a PR into that branch. For a fork, it posts the change as a comment with the files for the author to apply, since the App can't push to forks |
+| `github.rerun_ci` | low | On the owner's approval of the card; making it `auto` is the owner's decision (rule 3) | The PR is tracked; the runs are at its current head and failed; once per head; never runs waiting for approval (that stays `approve_ci`) |
+| `github.fix_pr` | medium | On the owner's approval of the card | Only from a `ci_fix` session for that PR; the PR is tracked and still at `sha`; no file under `.github/`; dependency manifests and lock files only on a dependency bot's PR; at most 20 files; whole files on the card. If the PR's branch is in the same repo (bot PRs), the App opens a PR into that branch. For a fork, it posts the change as a comment with the files for the author to apply, since the App can't push to forks |
+
+A failed-CI wake is queued 10 minutes after a tracked PR's run fails, and starts only
+once every run at that head has finished. Felix has no schedule, and Ada can't assign
+him tasks.
 
 Caps: `ci_failed: 6` and `ci_fix: 3` a day; budgets $0.50 (Mira) and $2.00 (Felix).
 `/pause felix` and `/stop felix` work as for any agent.
@@ -263,7 +266,7 @@ Built in the first PR:
 7. Daily check.
 8. Setup docs, `ARCHITECTURE.md`, `CLAUDE.md`.
 
-Next PR:
+Built in the second PR:
 
 9. Failed CI (4a): `ci_failed` wakes and Mira's procedure; `github.rerun_ci`;
    `request_ci_fix`; Felix's spec, environment, token and phase; `ci_fix` tasks;

@@ -324,6 +324,22 @@ export const TOOLS = {
       required: ["target", "sha", "findings"],
     },
   },
+  request_ci_fix: {
+    owner: "mira",
+    description:
+      "Hand a tracked PR's failed CI to Felix, who reproduces it, fixes it in his sandbox and proposes the fix for Matt to approve. " +
+      "Only when the PR's author is a bot, the base branch is already broken, or the author hasn't answered your CI comment in 5 days. " +
+      "The gateway checks the PR is tracked, still at that head and failing, then starts Felix within a daily cap. Once per head.",
+    input_schema: {
+      type: "object",
+      properties: {
+        target: prTarget,
+        sha: str("The head commit whose CI failed"),
+        diagnosis: str("What failed and why, as you read the logs: the job, the step, the error and your best guess at the cause; at most 4,000 characters"),
+      },
+      required: ["target", "sha", "diagnosis"],
+    },
+  },
   submit_review: {
     owner: "mira",
     description:

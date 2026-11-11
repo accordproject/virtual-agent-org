@@ -178,6 +178,8 @@ export interface PrFacts {
   ci: CiState;
   /** The newest run of each workflow at the head, e.g. "Build #812: success https://…". */
   ci_runs: string[];
+  /** Every workflow run at the head has finished, however it ended (false when unknown). */
+  ci_finished: boolean;
   mergeable: string;
   merge_state: string;
   review_decision: string | null;
@@ -217,6 +219,7 @@ export function factsFrom(cfg: ReviewConfig, ref: Required<RepoRef>, pr: PrDetai
     risk,
     risk_reasons: reasons,
     ci: ciState(pr.commits.nodes[0]?.commit.statusCheckRollup?.state, runs),
+    ci_finished: runs !== null && latestRuns(runs).every((r) => r.status === "completed"),
     ci_runs: latestRuns(runs ?? []).map((r) => {
       const url = (r as WorkflowRun & { html_url?: string }).html_url; // GitHub sends it; the type leaves it out
       return `${r.name} #${r.id}: ${r.status === "completed" ? r.conclusion ?? "completed" : r.status}${url ? ` ${url}` : ""}`;

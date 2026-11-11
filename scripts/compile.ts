@@ -25,7 +25,7 @@ export function fullRepo(repo: string, org: string): string {
 /** Kinds the gateway runs without the owner, after its own checks (decisions 20 and 36). */
 export const AUTO_KINDS = ["github.approve_ci", "github.review"];
 /** What GitHub events may wake Mira for (decision 62). */
-export const GITHUB_WAKES = ["review", "merge", "first_response"] as const;
+export const GITHUB_WAKES = ["review", "merge", "first_response", "ci_failed", "ci_fix"] as const;
 const TONES = ["welcoming", "neutral", "terse"];
 
 export function validateReview(r: ReviewYaml | undefined): string[] {

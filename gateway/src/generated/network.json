@@ -20,6 +20,14 @@
     "first_response": {
       "daily": 10,
       "budget_cents": 50
+    },
+    "ci_failed": {
+      "daily": 6,
+      "budget_cents": 50
+    },
+    "ci_fix": {
+      "daily": 3,
+      "budget_cents": 200
     }
   },
   "sandbox_repo": "accordproject/virtual-agent-org-sandbox",
@@ -72,6 +80,14 @@
       "risk": "low",
       "executor": "github",
       "auto": true
+    },
+    "github.rerun_ci": {
+      "risk": "low",
+      "executor": "github"
+    },
+    "github.fix_pr": {
+      "risk": "medium",
+      "executor": "github"
     },
     "github.docs_pr": {
       "risk": "medium",
@@ -305,6 +321,7 @@
         "github.comment",
         "github.release",
         "github.approve_ci",
+        "github.rerun_ci",
         "github.docs_pr",
         "discord.ops"
       ],
@@ -379,11 +396,10 @@
     },
     "felix": {
       "name": "felix",
-      "title": "Release & CI",
-      "phase": 3,
+      "title": "CI Fixes",
+      "phase": 1,
       "requestable": [
-        "github.release",
-        "github.comment"
+        "github.fix_pr"
       ],
       "model": "claude-sonnet-5-5"
     },

@@ -8,8 +8,8 @@ is public: write as if anyone can read it.
 
 A network of Claude Managed Agents that helps run the Accord Project. Matt Roberts
 (TSC chair, the owner) instructs **Ada**, the Chief of Staff, from Telegram or Discord.
-Ada delegates to specialists (Mira, Vera, Otto, Sage and Mandla in Phase 1; Rosa,
-Juno, Kit, Felix, Nell later). A Cloudflare Worker, the **gateway**, connects
+Ada delegates to specialists (Mira, Vera, Otto, Sage and Mandla in Phase 1, with
+Felix for CI fixes only; Rosa, Juno, Kit, Nell later). A Cloudflare Worker, the **gateway**, connects
 everything: it runs the agents' custom tools, holds the decision queue, executes
 approved actions with its own credentials, and keeps the audit log.
 
@@ -157,11 +157,14 @@ only for a fork without the workflow, or when a run fails.
     GitHub refuses a review's inline comments (`github.ts`, `actions.ts`);
   - the GraphQL read of `HEAD:.github/workflows` behind automatic CI approval
     (`workflowFiles` in `github.ts`, decision 45);
-  - GitHub webhook payloads (`normalise` in `githubEvents.ts`, decision 62): that a
-    fork PR's `workflow_run` names no PR, so the gateway matches its head against
-    the open PRs, and the `pull_request_review_thread` event's shape.
-- **GitHub webhook** (decision 62) is built but off until the gateway's App has its
-  webhook URL and `GITHUB_WEBHOOK_SECRET` is set (`docs/setup.md`, step 5).
+  - GitHub webhook payloads (`normalise` in `githubEvents.ts`, decision 62): pull
+    request and same-repo workflow events work live; not yet seen are a fork PR's
+    `workflow_run` (which names no PR, so the gateway matches its head against the
+    open PRs) and the `pull_request_review_thread` event's shape;
+  - CI fixes (decision 63): Felix reading failed jobs' logs through the GitHub MCP
+    server with an Actions-read token; the re-run endpoint (`rerunFailedJobs`); and
+    the App's commit and PR calls for a fix into a PR's branch (`proposeFix`), all in
+    `github.ts`.
 - **GitHub App permissions** the gateway now needs: Contents, Pull requests and
   Actions, all read and write.
 - **Decision 10** (open): long-term funding for the API credits.

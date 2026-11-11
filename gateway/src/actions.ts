@@ -355,6 +355,139 @@ const githubApproveCi: ActionSpec = {
   },
 };
 
+// ---- failed CI on tracked PRs (decision 63) ------------------------------------------
+
+/** Dependency manifests and lock files: a fix may change them only on a dependency bot's PR. */
+export const DEPENDENCY_FILE = /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|go\.(mod|sum)|Cargo\.(toml|lock)|pom\.xml|requirements[^/]*\.txt|poetry\.lock|Gemfile(\.lock)?)$/;
+const FIX_LIMITS = { files: 20, chars: 300_000 };
+/** The most a fork's fix can be, posted as one comment for its author to apply. */
+export const COMMENT_MAX = 65_000;
+
+const githubRerunCi: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const sha = f.sha("sha");
+    const raw = f.raw("run_ids");
+    const runIds = Array.isArray(raw) ? raw : [];
+    if (!runIds.length || runIds.length > 20 || runIds.some((x) => !Number.isInteger(x) || (x as number) < 1)) {
+      f.problems.push("payload.run_ids must list 1 to 20 workflow run ids, e.g. [1234567890]");
+    }
+    f.done();
+    return { target: refString(ref!), payload: { sha, run_ids: [...new Set(runIds as number[])] } };
+  },
+  describe(target, p) {
+    return withRest(
+      { lines: [`Re-run CI: the failed jobs of run${nameList(p.run_ids).includes(",") ? "s" : ""} ${nameList(p.run_ids)} on ${target} at ${str(p.sha).slice(0, 7) || "(no sha)"}`], blocks: [] },
+      p,
+      ["sha", "run_ids"],
+    );
+  },
+  async execute(ctx, d, { target, payload }) {
+    const ref = parseTarget(target) as Required<RepoRef>;
+    const gh = await ctx.github();
+    const pr = await gh.pull(ref);
+    const want = payload.sha as string;
+    if (!pr.head.sha.startsWith(want)) return { ok: false, result: `PR has new commits (head is ${pr.head.sha.slice(0, 7)}); its CI runs afresh` };
+    const runs = (await gh.runsAt(ref, pr.head.sha)) ?? [];
+    const ids = payload.run_ids as number[];
+    const notFailed = ids.filter((id) => !runs.some((r) => r.id === id && r.status === "completed" && ["failure", "timed_out", "cancelled"].includes(r.conclusion ?? "")));
+    if (notFailed.length) return { ok: false, result: `Not re-run: ${notFailed.join(", ")} ${notFailed.length > 1 ? "aren't failed runs" : "isn't a failed run"} at ${pr.head.sha.slice(0, 7)}` };
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    for (const id of ids) await gh.rerunFailedJobs(ref, id);
+    return { ok: true, result: `Re-running the failed jobs of ${ids.length} run${ids.length > 1 ? "s" : ""} on ${pr.head.sha.slice(0, 7)}` };
+  },
+};
+
+const githubFixPr: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const sha = f.sha("sha");
+    const title = f.text("title", { required: true, max: 200 });
+    const body = f.text("body", { required: true, max: 20_000 });
+    const raw = f.raw("files");
+    const files: { path: string; content: string }[] = [];
+    if (!Array.isArray(raw) || !raw.length) f.problems.push("payload.files must list the changed files, each {path, content}");
+    else {
+      raw.forEach((x, i) => {
+        const file = (x ?? {}) as Record<string, unknown>;
+        const path = typeof file.path === "string" ? file.path.trim() : "";
+        if (!path || typeof file.content !== "string") return void f.problems.push(`payload.files[${i}] needs a path and the file's whole content`);
+        if (path.startsWith("/") || path.split("/").includes("..")) f.problems.push(`payload.files[${i}]: "${path}" must be a path from the repo root, without ".."`);
+        else if (path.startsWith(".github/")) f.problems.push(`payload.files[${i}]: a fix may not change ${path}; anything under .github/ is the maintainers' to change`);
+        files.push({ path, content: file.content });
+      });
+      if (files.length > FIX_LIMITS.files) f.problems.push(`payload.files has ${files.length} files; a fix may change at most ${FIX_LIMITS.files}`);
+      const chars = files.reduce((n, x) => n + x.content.length, 0);
+      if (chars > FIX_LIMITS.chars) f.problems.push(`payload.files totals ${chars.toLocaleString("en-GB")} characters; at most ${FIX_LIMITS.chars.toLocaleString("en-GB")}`);
+      if (new Set(files.map((x) => x.path)).size !== files.length) f.problems.push("payload.files names a file twice");
+    }
+    f.done();
+    return { target: refString(ref!), payload: { sha, title, body, files } };
+  },
+  describe(target, p) {
+    const files = Array.isArray(p.files) ? (p.files as { path: string; content: string }[]) : [];
+    return withRest(
+      {
+        lines: [
+          `Fix CI: on ${target} at ${str(p.sha).slice(0, 7) || "(no sha)"}, ${files.length} file${files.length === 1 ? "" : "s"}: ${files.map((x) => x.path).join(", ")}`,
+          "If the PR's branch is in the repo, opens a PR into that branch; for a fork, posts the files as a comment for the author to apply",
+          ...(p.title ? [`Title: ${str(p.title)}`] : []),
+        ],
+        blocks: [
+          ...(p.body ? [{ title: "What broke and how it was tested", text: str(p.body) }] : []),
+          ...files.map((x) => ({ title: `${x.path}, whole file`, text: x.content || "(empty)" })),
+        ],
+      },
+      p,
+      ["sha", "title", "body", "files"],
+    );
+  },
+  async execute(ctx, d, { target, payload }) {
+    const ref = parseTarget(target) as Required<RepoRef>;
+    const gh = await ctx.github();
+    const pr = await gh.pull(ref);
+    const want = payload.sha as string;
+    if (pr.state !== "open") return { ok: false, result: `The PR is ${pr.state}` };
+    if (!pr.head.sha.startsWith(want)) return { ok: false, result: `PR has new commits (head is ${pr.head.sha.slice(0, 7)}); the fix was for ${want.slice(0, 7)}` };
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const files = payload.files as { path: string; content: string }[];
+    const note = `\n\n---\nDrafted by an Accord Project agent (${d.id}) and approved before it was posted; review it like any other change.`;
+    if (pr.head.repo?.full_name?.toLowerCase() === pr.base.repo.full_name.toLowerCase()) {
+      const made = await gh.proposeFix(ref, {
+        branch: `agents/felix-${d.id.toLowerCase()}`,
+        headSha: pr.head.sha,
+        headBranch: pr.head.ref,
+        files,
+        message: payload.title as string,
+        title: payload.title as string,
+        body: `Fixes CI on #${ref.number}.\n\n${payload.body as string}${note}`,
+      });
+      return { ok: true, result: `Opened ${made.html_url} into ${pr.head.ref}` };
+    }
+    const comment = fixComment(payload.title as string, payload.body as string, files) + note;
+    if (comment.length > COMMENT_MAX) return { ok: false, result: `Too large to post as a comment (${comment.length.toLocaleString("en-GB")} characters); the PR is from a fork, so the gateway can't push the fix` };
+    const c = await gh.comment(ref, comment);
+    return { ok: true, result: `Posted the fix for the author to apply: ${c.html_url}` };
+  },
+};
+
+/** A fork's fix as one comment: what broke, then each file whole, fenced so it copies cleanly. */
+export function fixComment(title: string, body: string, files: { path: string; content: string }[]): string {
+  const fence = (t: string) => "`".repeat(Math.max(3, ...[...t.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  return [
+    `**${title}**`,
+    "",
+    body,
+    "",
+    `The fix changes ${files.length} file${files.length === 1 ? "" : "s"}. Replace each with the content below:`,
+    ...files.flatMap((x) => ["", `\`${x.path}\``, fence(x.content), x.content, fence(x.content)]),
+  ].join("\n");
+}
+
 type InlineComment = { path: string; line: number; body: string };
 
 const githubReview: ActionSpec = {
@@ -774,6 +907,8 @@ export const ACTIONS: Record<string, ActionSpec> = {
   "github.comment": githubComment,
   "github.release": githubRelease,
   "github.approve_ci": githubApproveCi,
+  "github.rerun_ci": githubRerunCi,
+  "github.fix_pr": githubFixPr,
   "github.review": githubReview,
   "github.docs_pr": githubDocsPr,
   "vimeo.publish": vimeoPublish,

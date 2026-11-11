@@ -42,6 +42,8 @@ export const NETWORK: NetworkConfig = {
     "vimeo.publish": { risk: "medium", executor: "vimeo" },
     "linkedin.post": { risk: "medium", executor: "manual" },
     "github.approve_ci": { risk: "low", executor: "github", auto: true },
+    "github.rerun_ci": { risk: "low", executor: "github" },
+    "github.fix_pr": { risk: "medium", executor: "github" },
     "github.review": { risk: "low", executor: "github", auto: true },
     "spec.change": { risk: "low", executor: "task" },
   },
@@ -63,7 +65,8 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "discord.ops", "linkedin.post"], model: "claude-sonnet-5-5" },
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "github.rerun_ci", "discord.ops", "linkedin.post"], model: "claude-sonnet-5-5" },
+    felix: { name: "felix", title: "CI Fixes", phase: 1, requestable: ["github.fix_pr"] },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
     mandla: { name: "mandla", title: "Mechanic", phase: 1, requestable: [] },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
@@ -75,6 +78,7 @@ export const DEPLOYED: DeployedConfig = {
     ada: { agent_id: "agent_ada", environment_id: "env_1", vault_ids: [], memory_store_ids: ["mem_ada", "mem_shared"], session_budget_cents: 150 },
     mira: { agent_id: "agent_mira", environment_id: "env_1", vault_ids: ["vlt_mira"], memory_store_ids: ["mem_mira"], session_budget_cents: 100 },
     otto: { agent_id: "agent_otto", environment_id: "env_1", vault_ids: [], memory_store_ids: [], session_budget_cents: 100 },
+    felix: { agent_id: "agent_felix", environment_id: "env_1", vault_ids: ["vlt_felix"], memory_store_ids: ["mem_felix"], session_budget_cents: 200 },
   },
   deployments: { "mira-triage": { id: "dep_mira", agent: "mira" } },
 };
@@ -169,7 +173,28 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     openPullsList: [] as { number: number; headRefOid: string }[],
     openPulls: async () => gh.openPullsList,
     issueState: async () => ({ state: p.state === "OPEN" ? "open" : p.state === "MERGED" ? "merged" : "closed", pr: true }),
-    pull: async () => ({ head: { sha: p.head, repo: null }, base: { repo: { full_name: "accordproject/concerto" } }, state: p.state === "OPEN" ? "open" : "closed" }),
+    /** The repo the PR's branch lives in: the base repo for a bot's branch, a fork otherwise. */
+    headRepo: "contrib/concerto",
+    pull: async () => ({
+      head: { sha: p.head, ref: "fix-parser", repo: { full_name: gh.headRepo } },
+      base: { repo: { full_name: "accordproject/concerto" } },
+      state: p.state === "OPEN" ? "open" : "closed",
+    }),
+    fixes: [] as Parameters<GitHub["proposeFix"]>[1][],
+    proposeFix: async (_r: unknown, fix: Parameters<GitHub["proposeFix"]>[1]) => {
+      gh.fixes.push(fix);
+      return { html_url: `https://github.com/accordproject/concerto/pull/${100 + gh.fixes.length}`, number: 100 + gh.fixes.length };
+    },
+    comments: [] as string[],
+    comment: async (_r: unknown, body: string) => {
+      gh.comments.push(body);
+      return { html_url: `https://github.com/accordproject/concerto/pull/12#issuecomment-${gh.comments.length}` };
+    },
+    reruns: [] as number[],
+    rerunFailedJobs: async (_r: unknown, id: number) => {
+      gh.reruns.push(id);
+      return {};
+    },
     createReview: async (_r: unknown, review: (typeof posted)[number]) => {
       if (gh.rejectInline && review.comments.length) throw new Error("GitHub POST /reviews: 422 Line could not be resolved");
       posted.push(review);
