@@ -759,3 +759,17 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   its claims by key range and stops once the day's allowance is used, the session and
   task queries use indexes (migration 0013), and housekeeping runs once an hour.
 - A test fails if a cron query scans a table, so new ones are caught before deploy.
+
+**67. Running scheduled tasks from the gateway** · RESOLVED (amends 65)
+
+- Managed Agents scheduled deployments accept only a plain agent reference: the API
+  refuses `agent_with_overrides`, and its reference lists only `type: "agent"`. So a
+  deployment can't run on a task's model and effort, as decision 65 intended.
+- Schedules that name a task (the weekly evaluation, Mira's triage and review passes,
+  Vera's weekly scorecard) now run from the gateway's five-minute cron, which starts
+  each as a session with the documented per-session model override. Each run is
+  claimed once, and a run missed by up to 15 minutes still starts. Deploy archives
+  their old deployments. Schedules without a task stay as deployments.
+- Not chosen: a copy of each agent per task (more agents to keep in step), or dropping
+  tasks from schedules (most of decision 65's saving lost).
+

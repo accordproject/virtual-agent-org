@@ -5,6 +5,7 @@ import { handleInteraction, type Interaction } from "./discordInteractions";
 import { makeCtx } from "./context";
 import { Db } from "./db";
 import { checkEnv, type Env } from "./env";
+import { runSchedules } from "./schedules";
 import { applyEvent, dailyCheck, dispatchWakes, normalise, triageCheck } from "./githubEvents";
 import { housekeeping, processSession, sweep } from "./sessions";
 import type { TgUpdate } from "./telegram";
@@ -112,6 +113,8 @@ export default {
         await housekeeping(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.housekeeping_error", detail: String(e) }));
         await tickChanges(ctx);
         await sweep(ctx);
+        // Schedules that name a task run here, not as Managed Agents deployments (decision 67).
+        await runSchedules(ctx);
         // Polls GitHub itself, so it runs whether or not the webhook is set up (decision 65).
         await triageCheck(ctx);
         // Decision 62 is opt-in: without the webhook secret the gateway neither polls GitHub nor wakes anyone.

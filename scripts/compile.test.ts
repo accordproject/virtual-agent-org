@@ -238,3 +238,17 @@ test("triage_checks follow the daily triage schedule (decision 65)", () => {
   assert.ok(withChecks(["13:00"], "0 8,13 * * *").includes("budgets.triage_checks needs a mira-triage schedule that runs once a day at a fixed time"));
   assert.deepEqual(withChecks(["13:00", "18:00"]), []);
 });
+
+test("schedules with a task go to the gateway, with a cron it can read (decision 67)", () => {
+  const cfg = loadAll();
+  const out = compile(cfg);
+  assert.deepEqual(out.gateway_schedules.map((s) => [s.name, s.task]).sort(), [
+    ["ada-weekly-evaluation", "evaluation"],
+    ["mira-review", "review"],
+    ["mira-triage", "triage"],
+    ["vera-weekly", "analysis"],
+  ]);
+  assert.equal(out.gateway_schedules.find((s) => s.name === "mira-triage")?.budget_cents, 100);
+  const schedules = { schedules: cfg.schedules.schedules.map((s) => (s.name === "mira-review" ? { ...s, cron: "0 10 * * MON-FRI" } : s)) };
+  assert.ok(validate({ ...cfg, schedules }).includes('schedule mira-review: cron field "MON-FRI" is not supported'));
+});

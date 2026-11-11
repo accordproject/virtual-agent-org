@@ -272,12 +272,10 @@ function modelObject(tier: string, effort?: string): { id: string; effort?: stri
 async function ensureDeployment(s: (typeof cfg.schedules.schedules)[number]) {
   const dep = state.agents[s.agent];
   if (!dep && !DRY) return;
-  // A task's override replaces the agent's model object in full, effort included.
-  const task = s.task ? cfg.models.agents[s.agent].tasks![s.task] : undefined;
-  const id = dep?.agent_id ?? `<${s.agent}>`;
   const body = {
     name: s.name,
-    agent: task ? { type: "agent_with_overrides", id, model: modelObject(task.tier, task.effort) } : id, // VERIFY overrides on deployments
+    // Deployments accept only a plain agent reference, so a schedule with a task runs in the gateway instead (decision 67).
+    agent: dep?.agent_id ?? `<${s.agent}>`,
     environment_id: dep?.environment_id ?? state.environment_id,
     schedule: { type: "cron", expression: s.cron, timezone: tz },
     initial_events: [{ type: "user.message", content: [{ type: "text", text: s.prompt.trim() }] }],
@@ -312,8 +310,16 @@ async function main() {
   await ensureSharedMemory();
   for (const a of agents) await ensureAgent(a);
   linkPeerStores(agents);
+  // A schedule with a task runs in the gateway (decision 67). Archive its old deployment
+  // first, so it never runs twice; archiving is terminal, and the gateway takes over.
+  for (const s of cfg.schedules.schedules.filter((s) => s.task)) {
+    const old = state.deployments[s.name];
+    if (!old) continue;
+    const r = await step(`archive deployment ${s.name} (the gateway runs it now)`, { id: old.id }, () => client.archiveDeployment(old.id));
+    if (r) delete state.deployments[s.name];
+  }
   if (cfg.network.network.schedules_enabled) {
-    for (const s of cfg.schedules.schedules.filter((s) => agents.includes(s.agent))) await ensureDeployment(s);
+    for (const s of cfg.schedules.schedules.filter((s) => agents.includes(s.agent) && !s.task)) await ensureDeployment(s);
   } else {
     console.log("Schedules are off (network.schedules_enabled: false); no scheduled deployments created.");
   }

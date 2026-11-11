@@ -71,14 +71,14 @@ Matt writes British English. Keep messages plain and short.
 | `config/permissions.yaml` | Action kinds (risk, executor, `auto`), what each agent may request, `approvals_app`, `review_check_required` |
 | `config/models.yaml` | Model tiers, and effort per agent and per task (decision 65); specs name a tier, never a model id |
 | `config/review.yaml` | How Mira reviews: areas, limits, tone, risk bands, path rules (decisions 35, 36) |
-| `config/schedules.yaml` | Scheduled deployments (cron, per-run budget, prompt) |
+| `config/schedules.yaml` | Schedules (cron, per-run budget, prompt): Managed Agents deployments, or run by the gateway when they name a task (decision 67) |
 | `config/people.yaml` | People, roles, maintained repos, GitHub logins |
 | `config/people.ids.yaml` | Discord and Telegram ids by name; git-ignored, loaded into the `PEOPLE_IDS` secret |
 | `config/discord.yaml` | Channel ids the bot posts to |
 | `context/accord.md` | Shared read-only context, written to the shared memory store |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
 | `scripts/deploy.ts` | Creates or updates agents, vaults, memory stores and deployments; writes `deployed.json` |
-| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `githubEvents.ts` GitHub events (lapsing decisions, merge card refreshes, Mira's wakes, the daily check), `changes.ts` the self-improvement loop's changes (proposal checks, Mandla's tasks, `submit_change`, measuring) |
+| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `githubEvents.ts` GitHub events (lapsing decisions, merge card refreshes, Mira's wakes, the daily check), `changes.ts` the self-improvement loop's changes (proposal checks, Mandla's tasks, `submit_change`, measuring), `schedules.ts` and `cron.ts` the schedules the gateway runs itself (decision 67) |
 | `gateway/test/` | vitest suite with an in-memory D1 and fakes for every external API |
 
 ## Commands
@@ -148,7 +148,6 @@ only for a fork without the workflow, or when a run fails.
 - **Not yet verified against the live API:**
   - `model` override on session creation, used for review checks and wakes
     (`managed.ts`), and `effort` inside it and on the agent's `model` (decision 65);
-  - `agent_with_overrides` on scheduled deployments (`deploy.ts`);
   - that a session reports its overridden model in `agent.model` (`sessionModel` in
     `managed.ts`), used to record a scheduled task's model;
   - the `unrestricted` networking body for Sage's open environment (`ensureEnvironment`
