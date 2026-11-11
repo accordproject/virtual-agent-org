@@ -686,7 +686,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   stay off. He has no schedule, and Ada can't assign him tasks.
 - When a tracked PR's CI fails, the gateway wakes Mira once every run at the head has
   finished (`ci_failed`, within a daily cap). From the logs she:
-  - requests `github.rerun_ci` when it is flaky, once per head;
+  - requests `github.rerun_ci` when it is flaky, once per head; if the re-run fails
+    too, the gateway wakes her once more to treat it as real;
   - comments to a person whose change broke it;
   - hands a bot's PR, or one failing because the base branch is broken, to Felix with
     `request_ci_fix`, which the gateway checks and turns into a `ci_fix` wake within
@@ -694,7 +695,7 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
     answered her CI comment in 5 days.
 - Felix reproduces, fixes and tests it in a sandbox with a read-only token, and
   requests `github.fix_pr` with the whole changed files. The gateway refuses files
-  under `.github/`, and dependency files except on a dependency bot's PR. After the
+  under `.github/`, and dependency files except on Dependabot's or Renovate's PR. After the
   owner approves the card, it opens a PR into the PR's branch when that branch is in
   the same repo; for a fork, which the App can't push to, it posts the files as a
   comment for the author to apply.

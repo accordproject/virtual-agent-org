@@ -97,7 +97,7 @@ export class GitHub {
   }
 
   pull(r: Required<RepoRef>) {
-    return this.call<{ head: { sha: string; ref: string; repo: { full_name: string } | null }; base: { repo: { full_name: string } }; state: string }>(
+    return this.call<{ head: { sha: string; ref: string; repo: { full_name: string } | null }; base: { repo: { full_name: string } }; state: string; user: { login: string; type: string } | null }>(
       "GET",
       `/repos/${r.owner}/${r.repo}/pulls/${r.number}`,
     );
@@ -280,9 +280,12 @@ export class GitHub {
   ): Promise<{ html_url: string; number: number }> {
     const base = `/repos/${r.owner}/${r.repo}`;
     const commit = await this.call<{ tree: { sha: string } }>("GET", `${base}/git/commits/${p.headSha}`);
+    // Keep a script's executable bit: CI that runs it directly would otherwise fail.
+    const existing = await this.call<{ tree: { path: string; mode: string }[] }>("GET", `${base}/git/trees/${commit.tree.sha}?recursive=1`);
+    const executable = new Set(existing.tree.filter((e) => e.mode === "100755").map((e) => e.path));
     const tree = await this.call<{ sha: string }>("POST", `${base}/git/trees`, {
       base_tree: commit.tree.sha,
-      tree: p.files.map((f) => ({ path: f.path, mode: "100644", type: "blob", content: f.content })),
+      tree: p.files.map((f) => ({ path: f.path, mode: executable.has(f.path) ? "100755" : "100644", type: "blob", content: f.content })),
     });
     const made = await this.call<{ sha: string }>("POST", `${base}/git/commits`, { message: p.message, tree: tree.sha, parents: [p.headSha] });
     await this.call("POST", `${base}/git/refs`, { ref: `refs/heads/${p.branch}`, sha: made.sha });

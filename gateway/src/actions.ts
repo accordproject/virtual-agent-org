@@ -358,7 +358,10 @@ const githubApproveCi: ActionSpec = {
 // ---- failed CI on tracked PRs (decision 63) ------------------------------------------
 
 /** Dependency manifests and lock files: a fix may change them only on a dependency bot's PR. */
-export const DEPENDENCY_FILE = /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|go\.(mod|sum)|Cargo\.(toml|lock)|pom\.xml|requirements[^/]*\.txt|poetry\.lock|Gemfile(\.lock)?)$/;
+export const DEPENDENCY_FILE = /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|go\.(mod|sum)|Cargo\.(toml|lock)|pom\.xml|requirements[^/]*\.txt|poetry\.lock|pyproject\.toml|setup\.(py|cfg)|Pipfile(\.lock)?|build\.gradle(\.kts)?|Gemfile(\.lock)?)$/;
+/** The bots whose PRs change dependencies, by their REST login. Any other App, release-please say, is not one. */
+const DEPENDENCY_BOTS = ["dependabot[bot]", "renovate[bot]"];
+export const isDependencyBot = (user: { login: string; type: string } | null | undefined) => user?.type === "Bot" && DEPENDENCY_BOTS.includes(user.login.toLowerCase());
 const FIX_LIMITS = { files: 20, chars: 300_000 };
 /** The most a fork's fix can be, posted as one comment for its author to apply. */
 export const COMMENT_MAX = 65_000;
@@ -389,6 +392,7 @@ const githubRerunCi: ActionSpec = {
     const gh = await ctx.github();
     const pr = await gh.pull(ref);
     const want = payload.sha as string;
+    if (pr.state !== "open") return { ok: false, result: `The PR is ${pr.state}` };
     if (!pr.head.sha.startsWith(want)) return { ok: false, result: `PR has new commits (head is ${pr.head.sha.slice(0, 7)}); its CI runs afresh` };
     const runs = (await gh.runsAt(ref, pr.head.sha)) ?? [];
     const ids = payload.run_ids as number[];

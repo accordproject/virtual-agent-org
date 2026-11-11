@@ -7,7 +7,7 @@
 import { inScope, safeJson } from "./actions";
 import { AgentUnavailable, refreshDecisionCard, startSession } from "./agents";
 import type { Ctx } from "./context";
-import type { GitHubEvent, Wake } from "./db";
+import { AFTER_RERUN, type GitHubEvent, type Wake } from "./db";
 import { parseTarget, type RepoRef } from "./github";
 import { FIRST_TIME, checklist, failed, mergeChecks, prFacts, type PrFacts } from "./review";
 
@@ -139,9 +139,7 @@ export async function applyEvent(ctx: Ctx, n: Normalised): Promise<void> {
       case "workflow_run.completed":
         if (e.detail === "success") await queueReview(ctx, e.target, e.sha!, 0);
         // Decision 63: a tracked PR's failed run gets Mira's diagnosis once its head's runs finish.
-        if (["failure", "timed_out"].includes(e.detail ?? "") && (await ctx.db.isTracked(e.target))) {
-          await ctx.db.queueWake({ trigger: "ci_failed", target: e.target, sha: e.sha!, agent: "mira", delayMinutes: CI_FAILED_DELAY });
-        }
+        if (["failure", "timed_out"].includes(e.detail ?? "")) await queueCiFailed(ctx, e.target, e.sha!);
         await onPrMoved(ctx, e.target);
         break;
       case "pull_request_review.submitted":
@@ -157,6 +155,17 @@ export async function applyEvent(ctx: Ctx, n: Normalised): Promise<void> {
       .audit({ event_type: "gateway.github_event_error", detail: { target: e.target, event: `${e.event}.${e.action}`, error: err instanceof Error ? err.message : String(err) } })
       .catch(() => undefined);
   }
+}
+
+/**
+ * Mira's diagnosis of a tracked PR's failed CI (decision 63), once per head. If her
+ * re-run at that head fails too, she is woken once more to treat it as real.
+ */
+async function queueCiFailed(ctx: Ctx, target: string, sha: string) {
+  if (!(await ctx.db.isTracked(target))) return;
+  if (await ctx.db.queueWake({ trigger: "ci_failed", target, sha, agent: "mira", delayMinutes: CI_FAILED_DELAY })) return;
+  const reran = (await ctx.db.decisionsOn(target, "github.rerun_ci")).some((d) => d.status === "executed" && sha.startsWith(String(safeJson(d.payload).sha ?? "-")));
+  if (reran) await ctx.db.wakeAgainAfterRerun(target, sha, CI_FAILED_DELAY);
 }
 
 /** A PR or issue was merged or closed: its open decisions lapse, its review gets an outcome, its wakes are dropped. */
@@ -360,7 +369,7 @@ async function start(ctx: Ctx, w: Wake, budgetCents: number, f?: PrFacts) {
 }
 
 /** What a review, failed-CI or first-response wake tells Mira: the trigger, target and head, nothing from GitHub. */
-export function wakePrompt(w: Pick<Wake, "trigger" | "target" | "sha">): string {
+export function wakePrompt(w: Pick<Wake, "trigger" | "target" | "sha"> & { note?: string | null }): string {
   if (w.trigger === "review") {
     return [
       `GitHub wake: review ${w.target} at ${w.sha.slice(0, 7)}. CI has finished and there is no review at this head.`,
@@ -370,6 +379,7 @@ export function wakePrompt(w: Pick<Wake, "trigger" | "target" | "sha">): string 
   if (w.trigger === "ci_failed") {
     return [
       `GitHub wake: CI failed on ${w.target} at ${w.sha.slice(0, 7)}, a PR the network tracks. Every run at this head has finished.`,
+      ...(w.note === AFTER_RERUN ? ["It failed again after your re-run at this head, so treat it as real: don't re-run it."] : []),
       'Follow "When the gateway wakes you", Failed CI, in your instructions, for this PR only. Then end the session.',
     ].join("\n");
   }
@@ -487,6 +497,7 @@ export async function dailyCheck(ctx: Ctx, now = new Date()) {
       await lapseOldHeads(ctx, target, f.sha);
       await onPrMoved(ctx, target, f);
       if (!f.draft && f.ci === "success") await queueReview(ctx, target, f.sha, 0);
+      if (!f.draft && f.ci === "failure" && f.ci_finished) await queueCiFailed(ctx, target, f.sha);
     } catch (err) {
       errors.push(`${target}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`);
     }

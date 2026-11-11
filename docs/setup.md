@@ -65,7 +65,7 @@ Leave `DRY_RUN = "true"` in `wrangler.toml` until the Phase 0 gate passes.
 3. **Agents' tokens.** Signed in as that account, create one fine-grained token per
    agent, resource owner your organisation:
    - agents that triage (Mira): only the repos in scope, Issues and Pull requests read
-     and write;
+     and write, and Actions read (the failed jobs' logs, decision 63);
    - read-only agents (Vera, Otto): all repositories, read-only permissions;
    - Felix (CI fixes, decision 63): only the repos in scope, read-only Contents, Pull
      requests and Actions (Actions for the failed jobs' logs).

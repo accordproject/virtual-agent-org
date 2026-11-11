@@ -126,6 +126,9 @@ export interface GitHubEvent {
 }
 
 /** ci_failed and ci_fix are decision 63's: Mira diagnoses a tracked PR's failed CI, Felix fixes it. */
+/** The note on a ci_failed wake queued again because a re-run at that head failed too. */
+export const AFTER_RERUN = "after re-run";
+
 export type WakeTrigger = "review" | "merge" | "first_response" | "ci_failed" | "ci_fix";
 
 /** Work the gateway will start for an agent when an event calls for it (decision 62). */
@@ -434,6 +437,21 @@ export class Db {
     return (r.meta?.changes ?? 0) > 0;
   }
 
+  /**
+   * Wakes Mira once more about a head whose CI failed again after her re-run: only a
+   * ci_failed wake that started, and only once, since its note marks the second time.
+   */
+  async wakeAgainAfterRerun(target: string, sha: string, delayMinutes: number): Promise<boolean> {
+    const r = await this.db
+      .prepare(
+        "UPDATE github_wakes SET status = 'pending', due_at = datetime('now', ?), created_at = datetime('now'), reason = NULL, session_id = NULL, note = ? " +
+          "WHERE trigger = 'ci_failed' AND target = ? AND sha = ? AND status = 'started' AND note IS NULL",
+      )
+      .bind(`+${delayMinutes} minutes`, AFTER_RERUN, target.toLowerCase(), sha)
+      .run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+
   /** A wake of this trigger for this PR and head, whatever its status. */
   wakeFor(trigger: WakeTrigger, target: string, sha: string) {
     return this.db.prepare("SELECT * FROM github_wakes WHERE trigger = ? AND target = ? AND sha = ?").bind(trigger, target.toLowerCase(), sha).first<Wake>();
@@ -441,7 +459,9 @@ export class Db {
 
   /**
    * Whether the network tracks a PR (decision 63): Mira has reviewed it, or it has an
-   * open decision or a pending or started wake. Only tracked PRs get CI fixes.
+   * open decision or a pending or started wake. Only tracked PRs get CI fixes. A CI wake
+   * counts too: it was queued only for a tracked PR, and the review wake that made it
+   * tracked may since have been dropped (because CI failed, say).
    */
   async isTracked(target: string): Promise<boolean> {
     const t = target.toLowerCase();
@@ -449,7 +469,7 @@ export class Db {
       .prepare(
         "SELECT 1 AS x WHERE EXISTS (SELECT 1 FROM reviews WHERE target = ?) " +
           "OR EXISTS (SELECT 1 FROM decisions WHERE lower(target) = ? AND status = 'open') " +
-          "OR EXISTS (SELECT 1 FROM github_wakes WHERE target = ? AND status IN ('pending', 'starting', 'started') AND trigger NOT IN ('ci_failed', 'ci_fix'))",
+          "OR EXISTS (SELECT 1 FROM github_wakes WHERE target = ? AND status IN ('pending', 'starting', 'started'))",
       )
       .bind(t, t, t)
       .first();

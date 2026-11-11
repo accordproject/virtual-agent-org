@@ -177,7 +177,7 @@ step 6 drops review outcomes for merges and closes.
 ### 4a. Failed CI
 
 Only PRs the network tracks: a PR Mira has reviewed, or one with an open decision or a
-pending wake. No default-branch watch, no releases, nothing for untracked PRs.
+pending or started wake (a CI wake counts, so it survives its review wake being dropped). No default-branch watch, no releases, nothing for untracked PRs.
 
 Mira's sandbox has no shell, and her vault holds a token that posts as the project, so
 she diagnoses but doesn't build. **Felix** joins Phase 1 for this one job, as Sage did
@@ -193,7 +193,7 @@ open, non-draft, tracked PR has finished and at least one failed.
 2. Decide which it is:
    - **Flaky or infrastructure** (timeouts, network, runner errors, a failing test the
      change doesn't touch). Request `github.rerun_ci` with the run ids. Once per
-     head; a second failure counts as real.
+     head; if the re-run fails too, the gateway wakes her once more, and it counts as real.
    - **The change broke it, and the author is a person.** Comment to the author with
      the job, the cause in a line or two and a suggested fix, in the PR's `tone`. One
      comment per head. The author fixes their own PR.
@@ -219,11 +219,12 @@ hasn't answered her CI comment in 5 days.
 
 | Kind | Risk | Runs | Gateway checks |
 | --- | --- | --- | --- |
-| `github.rerun_ci` | low | `auto`, by the owner's decision; a request rated high risk goes to the owner as a card | The PR is tracked; the runs are at its current head and failed; once per head; never runs waiting for approval (that stays `approve_ci`) |
-| `github.fix_pr` | medium | On the owner's approval of the card | Only from a `ci_fix` session for that PR; the PR is tracked and still at `sha`; no file under `.github/`; dependency manifests and lock files only on a dependency bot's PR; at most 20 files; whole files on the card. If the PR's branch is in the same repo (bot PRs), the App opens a PR into that branch. For a fork, it posts the change as a comment with the files for the author to apply, since the App can't push to forks |
+| `github.rerun_ci` | low | `auto`, by the owner's decision; a request rated high risk goes to the owner as a card | The PR is open and tracked; the runs are at its current head and failed; once per head; never runs waiting for approval (that stays `approve_ci`) |
+| `github.fix_pr` | medium | On the owner's approval of the card | Only from a `ci_fix` session for that PR and head; the PR is tracked and still at `sha`; no file under `.github/`; dependency manifests and lock files only on Dependabot's or Renovate's PR; at most 20 files; whole files on the card. If the PR's branch is in the same repo (bot PRs), the App opens a PR into that branch. For a fork, it posts the change as a comment with the files for the author to apply, since the App can't push to forks |
 
 A failed-CI wake is queued 10 minutes after a tracked PR's run fails, and starts only
-once every run at that head has finished. Felix has no schedule, and Ada can't assign
+once every run at that head has finished. The daily check queues one too for a tracked
+PR whose CI failed, in case the delivery was missed. Felix has no schedule, and Ada can't assign
 him tasks.
 
 Caps: `ci_failed: 6` and `ci_fix: 3` a day; budgets $0.50 (Mira) and $2.00 (Felix).

@@ -1,7 +1,7 @@
 // Handlers for the custom tools agents call. The gateway is the enforcement point:
 // it checks who may call what before doing anything.
 
-import { ActionInvalid, DEPENDENCY_FILE, actionRisk, safeJson, validateAction, type Normalised } from "./actions";
+import { ActionInvalid, DEPENDENCY_FILE, actionRisk, isDependencyBot, safeJson, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, refreshDecisionCard, resendDecisionCard, sendAgentMessage, startSession } from "./agents";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
@@ -426,6 +426,7 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     const ref = prRef(ctx, n.target);
     const sha = String(n.payload.sha ?? "");
     const f = await prFacts(ctx, ref);
+    if (f.state !== "OPEN") throw new ToolError(`${f.target} is ${f.state.toLowerCase()}: nothing to do.`);
     if (!(await ctx.db.isTracked(f.target))) throw new ToolError(`${f.target} isn't a PR the network tracks, so it gets no CI fixes. Leave it.`);
     if (!f.sha.startsWith(sha)) throw new ToolError(`The PR has new commits (head is ${f.sha.slice(0, 7)}): its CI runs again. Don't retry for ${sha.slice(0, 7)}.`);
     const earlier = (await ctx.db.decisionsOn(f.target, kind)).find((d) => String(safeJson(d.payload).sha ?? "").startsWith(sha.slice(0, 7)) && !["rejected", "lapsed"].includes(d.status));
@@ -433,8 +434,10 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     if (kind === "github.fix_pr") {
       const fix = await ciFixOf(ctx, sessionId);
       if (!fix || fix.target.toLowerCase() !== f.target.toLowerCase()) throw new ToolError(`Fixes come from a ci_fix task for that PR, and this session's task isn't one for ${f.target}.`);
+      // Whole files written for the task's head would undo commits made since.
+      if (!f.sha.startsWith(fix.sha)) throw new ToolError(`Your task was for ${fix.sha.slice(0, 7)}, and the PR has moved on to ${f.sha.slice(0, 7)}. Stop: its CI runs again.`);
       const deps = (n.payload.files as { path: string }[]).map((x) => x.path).filter((p) => DEPENDENCY_FILE.test(p));
-      if (deps.length && !f.author?.endsWith("[bot]")) {
+      if (deps.length && !isDependencyBot((await (await ctx.github()).pull(ref)).user)) {
         throw new ToolError(`Not queued: ${deps.join(", ")} ${deps.length > 1 ? "are dependency files" : "is a dependency file"}, which a fix may change only on a dependency bot's PR.`);
       }
     }

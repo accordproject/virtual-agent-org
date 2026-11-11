@@ -179,6 +179,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
       head: { sha: p.head, ref: "fix-parser", repo: { full_name: gh.headRepo } },
       base: { repo: { full_name: "accordproject/concerto" } },
       state: p.state === "OPEN" ? "open" : "closed",
+      user: { login: p.author, type: p.author.endsWith("[bot]") ? "Bot" : "User" },
     }),
     fixes: [] as Parameters<GitHub["proposeFix"]>[1][],
     proposeFix: async (_r: unknown, fix: Parameters<GitHub["proposeFix"]>[1]) => {

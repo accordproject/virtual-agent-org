@@ -4,9 +4,10 @@
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../src/context";
-import { Db } from "../src/db";
+import { AFTER_RERUN, Db } from "../src/db";
 import type { Env } from "../src/env";
 import { executeDecision } from "../src/executors";
+import { GitHub } from "../src/github";
 import { decisionButtons, decisionCard } from "../src/format";
 import {
   activityLine,
@@ -577,9 +578,42 @@ describe("failed CI on tracked PRs (decision 63)", () => {
     await expect(handleTool(ctx, "felix", "sesn_other", "request_action", fix())).rejects.toThrow(/Fixes come from a ci_fix task for that PR/);
     await expect(handleTool(ctx, "felix", sid, "request_action", fix([{ path: ".github/workflows/ci.yml", content: "x" }]))).rejects.toThrow(/anything under .github\/ is the maintainers'/);
     await expect(handleTool(ctx, "felix", sid, "request_action", fix([{ path: "package-lock.json", content: "{}" }]))).rejects.toThrow(/only on a dependency bot's PR/);
+    await expect(handleTool(ctx, "felix", sid, "request_action", fix([{ path: "pyproject.toml", content: "x" }]))).rejects.toThrow(/only on a dependency bot's PR/);
+    gh.pr.author = "release-please[bot]";
+    await expect(handleTool(ctx, "felix", sid, "request_action", fix([{ path: "package.json", content: "{}" }]))).rejects.toThrow(/only on a dependency bot's PR/);
     gh.pr.author = "dependabot[bot]";
     expect(await handleTool(ctx, "felix", sid, "request_action", fix([{ path: "package-lock.json", content: "{}" }]))).toMatch(/^Queued as D-\d+/);
     await expect(handleTool(ctx, "felix", sid, "request_action", fix())).rejects.toThrow(/already asked for github.fix_pr at abcdef1/);
+  });
+
+  it("refuses a fix from a task for an older head, even when it names the new one", async () => {
+    const { ctx, gh } = setup(fakeGitHub(FAILED));
+    const sid = await felixOn(ctx);
+    gh.pr.head = OLD;
+    const moved = fix();
+    moved.payload.sha = OLD;
+    await expect(handleTool(ctx, "felix", sid, "request_action", moved)).rejects.toThrow(/Your task was for abcdef1, and the PR has moved on to 0123456/);
+  });
+
+  it("keeps a script's executable bit in a fix", async () => {
+    const calls: [string, string, any][] = [];
+    const R = "/repos/accordproject/concerto";
+    const fetchImpl = (async (url: string, init: any) => {
+      const path = new URL(url).pathname;
+      calls.push([init.method, path, init.body ? JSON.parse(init.body) : undefined]);
+      const body =
+        path === `${R}/git/commits/head1` ? { tree: { sha: "tree1" } }
+        : path === `${R}/git/trees/tree1` ? { tree: [{ path: "scripts/build.sh", mode: "100755" }, { path: "src/a.ts", mode: "100644" }] }
+        : path === `${R}/git/trees` ? { sha: "tree2" }
+        : path === `${R}/git/commits` ? { sha: "commit2" }
+        : path === `${R}/pulls` ? { html_url: "https://github.com/accordproject/concerto/pull/101", number: 101 }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const files = [{ path: "scripts/build.sh", content: "#!/bin/sh\n" }, { path: "src/a.ts", content: "a" }, { path: "src/new.ts", content: "n" }];
+    await new GitHub("t", fetchImpl).proposeFix({ owner: "accordproject", repo: "concerto" }, { branch: "agents/felix-d-1", headSha: "head1", headBranch: "fix", files, message: "m", title: "t", body: "b" });
+    const tree = calls.find((c) => c[0] === "POST" && c[1] === `${R}/git/trees`)?.[2];
+    expect(tree.tree.map((x: { mode: string }) => x.mode)).toEqual(["100755", "100644", "100644"]);
   });
 
   it("opens a fix PR into a branch in the repo, posts a fork's fix as a comment, and refuses a moved head", async () => {
@@ -610,6 +644,56 @@ describe("failed CI on tracked PRs (decision 63)", () => {
     expect(gh.reruns).toEqual([7]);
     expect(fakes.sent).toEqual([]);
     await expect(handleTool(ctx, "mira", "s", "request_action", rerun([7]))).rejects.toThrow(/Once per head/);
+  });
+
+  it("wakes Mira once more when her re-run fails too, telling her it's real", async () => {
+    const { ctx, fakes } = setup(fakeGitHub(FAILED), { dryRun: false });
+    await review(ctx);
+    await apply(ctx, "workflow_run", runFailed());
+    await (ctx.db as any).db.prepare("UPDATE github_wakes SET due_at = datetime('now')").run();
+    await dispatchWakes(ctx);
+    expect((await wakes(ctx))[0]).toMatchObject({ trigger: "ci_failed", status: "started" });
+    await apply(ctx, "workflow_run", runFailed());
+    expect((await wakes(ctx))[0]).toMatchObject({ status: "started" });
+
+    await handleTool(ctx, "mira", "s", "request_action", { kind: "github.rerun_ci", target: PR, summary: "Re-run", rationale: "r", risk: "low", payload: { sha: HEAD, run_ids: [7] } });
+    await apply(ctx, "workflow_run", runFailed());
+    expect((await wakes(ctx))[0]).toMatchObject({ status: "pending", note: AFTER_RERUN });
+    await (ctx.db as any).db.prepare("UPDATE github_wakes SET due_at = datetime('now')").run();
+    await dispatchWakes(ctx);
+    expect(sessions(fakes)[1].text).toContain("It failed again after your re-run at this head, so treat it as real");
+    await apply(ctx, "workflow_run", runFailed());
+    expect((await wakes(ctx))[0]).toMatchObject({ status: "started" });
+  });
+
+  it("keeps a CI wake when the review wake that made the PR tracked is dropped", async () => {
+    const { ctx, fakes } = setup(fakeGitHub(FAILED));
+    await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
+    await apply(ctx, "workflow_run", runFailed());
+    await (ctx.db as any).db.prepare("UPDATE github_wakes SET due_at = datetime('now')").run();
+    await dispatchWakes(ctx);
+    expect((await wakes(ctx)).map((w) => [w.trigger, w.status])).toEqual([
+      ["review", "dropped"],
+      ["ci_failed", "started"],
+    ]);
+    expect(sessions(fakes)).toHaveLength(1);
+  });
+
+  it("queues a missed CI failure from the daily check", async () => {
+    const { ctx } = setup(fakeGitHub(FAILED));
+    await review(ctx);
+    await dailyCheck(ctx, new Date("2026-11-11T06:00:00Z"));
+    expect((await wakes(ctx)).map((w) => w.trigger)).toContain("ci_failed");
+  });
+
+  it("refuses a re-run on a closed PR, at request and at execution", async () => {
+    const { ctx, gh } = setup(fakeGitHub(FAILED), { dryRun: false });
+    await review(ctx);
+    const d = await ctx.db.createDecision({ agent: "mira", kind: "github.rerun_ci", target: PR, summary: "Re-run", rationale: "r", risk: "high", payload: { sha: HEAD, run_ids: [7] } });
+    gh.pr.state = "CLOSED";
+    await expect(handleTool(ctx, "mira", "s", "request_action", { kind: "github.rerun_ci", target: PR, summary: "Re-run", rationale: "r", risk: "low", payload: { sha: HEAD, run_ids: [7] } })).rejects.toThrow(/is closed: nothing to do/);
+    expect((await executeDecision(ctx, d)).result).toBe("The PR is closed");
+    expect(gh.reruns).toEqual([]);
   });
 
   it("re-runs only runs that failed at the current head", async () => {

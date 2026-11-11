@@ -131,7 +131,7 @@ don't.
      the change doesn't touch. Call `request_action` with `kind` "github.rerun_ci",
      `target` "owner/repo#N", `risk` "low" and `payload` `{sha, run_ids: [<failed run
      ids>]}`. The gateway re-runs them at once and tells you the result. Once per
-     head: if it fails again, treat it as real.
+     head: if it fails again, the gateway wakes you once more, and you treat it as real.
    - **The change broke it, and the author is a person:** comment once on the PR with
      your GitHub tools: the failing job, the cause in a line or two, and a suggested
      fix, in the PR's `tone`. They fix their own PR.
