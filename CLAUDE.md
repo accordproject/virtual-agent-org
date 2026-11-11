@@ -28,8 +28,10 @@ feature easier.
    The gateway executes it only after Matt approves.
 3. **Never go ahead by default** on anything that needs Matt's approval. The `auto`
    action kinds are `github.approve_ci` (decision 20), whose file check sends risky PRs
-   to Matt instead, and `github.review` (decision 36), which posts a review check's
-   findings after the gateway checks them. Adding another `auto` kind is Matt's decision.
+   to Matt instead, `github.review` (decision 36), which posts a review check's
+   findings after the gateway checks them, and `github.rerun_ci` (decision 63), which
+   re-runs a tracked PR's failed runs at its current head, once per head. Adding
+   another `auto` kind is Matt's decision.
 4. **Agents never block.** `request_action` returns a decision id at once.
 5. **Owner rights** come only from the `OWNER_TELEGRAM_ID` and `OWNER_DISCORD_ID`
    secrets. `config/people.yaml` grants read-and-ask access only.

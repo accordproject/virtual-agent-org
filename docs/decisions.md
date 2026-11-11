@@ -698,8 +698,11 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   owner approves the card, it opens a PR into the PR's branch when that branch is in
   the same repo; for a fork, which the App can't push to, it posts the files as a
   comment for the author to apply.
-- `github.rerun_ci` is queued for the owner, not `auto`: making it run without the
-  owner is the owner's decision (rule 3).
+- `github.rerun_ci` is `auto`, by the owner's decision: a re-run uses code that has
+  already run, so it can't publish anything or change a repo. The gateway still checks
+  it: tracked PRs only, once per head, and only runs that failed at the PR's current
+  head. A request Mira rates high risk goes to the owner as a card. Re-runs are left
+  out of approval measures, like `github.approve_ci`.
 - Not chosen: giving Mira a shell. Building runs the repo's and its dependencies' code.
   Vault credentials are bound to MCP servers rather than exposed to the sandbox, so
   the risk is smaller than first thought, but a separate agent with only a read-only

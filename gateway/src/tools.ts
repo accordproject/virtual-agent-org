@@ -438,6 +438,13 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
         throw new ToolError(`Not queued: ${deps.join(", ")} ${deps.length > 1 ? "are dependency files" : "is a dependency file"}, which a fix may change only on a dependency bot's PR.`);
       }
     }
+    // Decision 63: a re-run of failed jobs runs without Matt, once per head, on a tracked PR
+    // (checked above). The executor re-checks that each run failed at the current head.
+    if (kind === "github.rerun_ci" && ctx.network.action_kinds[kind]?.auto && declared !== "high" && !member) {
+      const d = await ctx.db.createDecision({ agent, kind, target: n.target, summary: s(input.summary, "summary").slice(0, 200), rationale: s(input.rationale, "rationale"), risk: "low", payload: n.payload, session_id: sessionId });
+      const r = await runAuto(ctx, d, "re-run automatically: a tracked PR's failed runs at its current head, once per head (decision 63)");
+      return `${d.id} ${r.ok ? "done" : "failed"}: ${r.result}`;
+    }
   }
   if (kind === "spec.change") {
     // Rule 5: a member may ask about the network, never set changing it going.

@@ -83,7 +83,8 @@
     },
     "github.rerun_ci": {
       "risk": "low",
-      "executor": "github"
+      "executor": "github",
+      "auto": true
     },
     "github.fix_pr": {
       "risk": "medium",

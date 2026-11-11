@@ -102,7 +102,7 @@ Critical actions are never given to agents as tools. Each agent has a custom too
    the agent in its next session.
 5. A rejection note goes back to the agent as an instruction.
 
-Two action kinds run without the owner, each after the gateway's own checks:
+Three action kinds run without the owner, each after the gateway's own checks:
 
 - `github.approve_ci` (decision 20): Mira may approve waiting CI runs on a fork PR after
   reviewing it. The gateway itself sends any PR that touches workflows, build scripts,
@@ -111,6 +111,9 @@ Two action kinds run without the owner, each after the gateway's own checks:
 - `github.review` (decision 36): a review check's confirmed findings, posted as one
   comment-only review. The gateway checks each finding against the PR and refuses text
   that @mentions anyone but the author or talks about how the review was made.
+- `github.rerun_ci` (decision 63): Mira may re-run the failed jobs of a tracked PR's CI
+  when she judges the failure flaky. The gateway allows it once per head, only for runs
+  that failed at the PR's current head, and puts any she rates high risk to the owner.
 
 A merge proposal is checked by the gateway itself, not just by the model, when it is
 queued and again on approval (decision 35). The checks: the reviewed head, a posted

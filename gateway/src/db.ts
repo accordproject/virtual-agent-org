@@ -7,7 +7,7 @@ export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "fa
 export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 
 /** Decision kinds that say nothing about an agent's judgement, left out of approval measures. */
-export const NOT_JUDGEMENT = ["tool.confirm", "github.review", "github.approve_ci"];
+export const NOT_JUDGEMENT = ["tool.confirm", "github.review", "github.approve_ci", "github.rerun_ci"];
 
 export interface Decision {
   id: string;

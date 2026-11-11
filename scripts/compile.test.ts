@@ -24,7 +24,7 @@ test("compile leaves platform ids out of network.json", () => {
 test("validate allows auto only for the kinds the gateway checks itself", () => {
   const cfg = loadAll();
   const permissions = { ...cfg.permissions, action_kinds: { ...cfg.permissions.action_kinds, "github.merge": { risk: "medium" as const, executor: "github" as const, auto: true } } };
-  assert.ok(validate({ ...cfg, permissions }).includes("action kind github.merge: auto is only allowed for github.approve_ci and github.review"));
+  assert.ok(validate({ ...cfg, permissions }).includes("action kind github.merge: auto is only allowed for github.approve_ci, github.review and github.rerun_ci"));
   assert.deepEqual(validate(cfg), []);
 });
 

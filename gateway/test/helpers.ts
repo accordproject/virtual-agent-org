@@ -42,7 +42,7 @@ export const NETWORK: NetworkConfig = {
     "vimeo.publish": { risk: "medium", executor: "vimeo" },
     "linkedin.post": { risk: "medium", executor: "manual" },
     "github.approve_ci": { risk: "low", executor: "github", auto: true },
-    "github.rerun_ci": { risk: "low", executor: "github" },
+    "github.rerun_ci": { risk: "low", executor: "github", auto: true },
     "github.fix_pr": { risk: "medium", executor: "github" },
     "github.review": { risk: "low", executor: "github", auto: true },
     "spec.change": { risk: "low", executor: "task" },

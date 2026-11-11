@@ -601,18 +601,32 @@ describe("failed CI on tracked PRs (decision 63)", () => {
     }
   });
 
-  it("re-runs only failed runs at the current head, once per head", async () => {
-    const { ctx, gh } = setup(fakeGitHub(FAILED), { dryRun: false });
+  it("re-runs a tracked PR's failed runs at once, without a card, once per head", async () => {
+    const { ctx, gh, fakes } = setup(fakeGitHub(FAILED), { dryRun: false });
     const rerun = (run_ids: number[]) => ({ kind: "github.rerun_ci", target: PR, summary: "Re-run", rationale: "Runner timed out", risk: "low", payload: { sha: HEAD, run_ids } });
     await expect(handleTool(ctx, "mira", "s", "request_action", rerun([7]))).rejects.toThrow(/isn't a PR the network tracks/);
     await review(ctx);
-    const out = await handleTool(ctx, "mira", "s", "request_action", rerun([7]));
-    await expect(handleTool(ctx, "mira", "s", "request_action", rerun([7]))).rejects.toThrow(/once per head|Once per head/);
-    const d = (await ctx.db.getDecision(out.match(/D-\d+/)![0]))!;
-    expect(d.status).toBe("open");
-    expect((await executeDecision(ctx, { ...d, payload: JSON.stringify({ sha: HEAD, run_ids: [9] }) })).result).toMatch(/9 isn't a failed run/);
-    expect((await executeDecision(ctx, d)).result).toMatch(/Re-running the failed jobs of 1 run/);
+    expect(await handleTool(ctx, "mira", "s", "request_action", rerun([7]))).toMatch(/^D-\d+ done: Re-running the failed jobs of 1 run/);
     expect(gh.reruns).toEqual([7]);
+    expect(fakes.sent).toEqual([]);
+    await expect(handleTool(ctx, "mira", "s", "request_action", rerun([7]))).rejects.toThrow(/Once per head/);
+  });
+
+  it("re-runs only runs that failed at the current head", async () => {
+    const { ctx, gh } = setup(fakeGitHub(FAILED), { dryRun: false });
+    await review(ctx);
+    const out = await handleTool(ctx, "mira", "s", "request_action", { kind: "github.rerun_ci", target: PR, summary: "Re-run", rationale: "r", risk: "low", payload: { sha: HEAD, run_ids: [9] } });
+    expect(out).toMatch(/^D-\d+ failed: Not re-run: 9 isn't a failed run at abcdef1/);
+    expect(gh.reruns).toEqual([]);
+  });
+
+  it("puts a re-run Mira rates high risk to Matt as a card", async () => {
+    const { ctx, gh, fakes } = setup(fakeGitHub(FAILED), { dryRun: false });
+    await review(ctx);
+    const out = await handleTool(ctx, "mira", "s", "request_action", { kind: "github.rerun_ci", target: PR, summary: "Re-run", rationale: "r", risk: "high", payload: { sha: HEAD, run_ids: [7] } });
+    expect(out).toMatch(/^Queued as D-\d+/);
+    expect(gh.reruns).toEqual([]);
+    expect(fakes.sent.length).toBe(1);
   });
 
   it("keeps Felix out of Ada's assignments", async () => {

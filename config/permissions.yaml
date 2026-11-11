@@ -38,8 +38,9 @@ action_kinds:
   # the agent network. Never requestable through request_action.
   github.review:       { risk: low,    executor: github, auto: true }
   # Re-runs the failed jobs of a tracked PR's CI runs at one head, once (decision 63).
-  # Not auto: making it run without Matt is his decision.
-  github.rerun_ci:     { risk: low,    executor: github }
+  # auto (decision 63): runs without Matt, on the gateway's checks: tracked PR, failed
+  # runs at the current head only, once per head.
+  github.rerun_ci:     { risk: low,    executor: github, auto: true }
   # Felix's fix for a tracked PR's failed CI (decision 63): a PR into the PR's branch
   # when it is in the same repo, or the files as a comment for a fork's author.
   github.fix_pr:       { risk: medium, executor: github }

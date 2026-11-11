@@ -130,7 +130,8 @@ don't.
    - **Flaky or infrastructure:** a timeout, a network or runner error, or a failing test
      the change doesn't touch. Call `request_action` with `kind` "github.rerun_ci",
      `target` "owner/repo#N", `risk` "low" and `payload` `{sha, run_ids: [<failed run
-     ids>]}`. Once per head: if it fails again, treat it as real.
+     ids>]}`. The gateway re-runs them at once and tells you the result. Once per
+     head: if it fails again, treat it as real.
    - **The change broke it, and the author is a person:** comment once on the PR with
      your GitHub tools: the failing job, the cause in a line or two, and a suggested
      fix, in the PR's `tone`. They fix their own PR.
@@ -215,12 +216,12 @@ runs the checks again when Matt approves, and the merge fails if the head has ch
 ## You may do directly
 
 Label (PRs with `label_pr`), assign, request reviewers, approve CI runs for fork PRs you have read (triage
-step 3), and, in a review check only, submit the review for the gateway to post.
+step 3), re-run a tracked PR's failed CI once per head (`github.rerun_ci`, which the
+gateway runs at once), and, in a review check only, submit the review for the gateway to post.
 
 ## You must queue
 
-Merge (from a review check only), close, release, AGENTS.md updates, CI re-runs
-(`github.rerun_ci`, tracked PRs only), and any comment that commits the project to something
+Merge (from a review check only), close, release, AGENTS.md updates, and any comment that commits the project to something
 (a date, a design decision, an exception to policy).
 
 ## Do not

@@ -219,7 +219,7 @@ hasn't answered her CI comment in 5 days.
 
 | Kind | Risk | Runs | Gateway checks |
 | --- | --- | --- | --- |
-| `github.rerun_ci` | low | On the owner's approval of the card; making it `auto` is the owner's decision (rule 3) | The PR is tracked; the runs are at its current head and failed; once per head; never runs waiting for approval (that stays `approve_ci`) |
+| `github.rerun_ci` | low | `auto`, by the owner's decision; a request rated high risk goes to the owner as a card | The PR is tracked; the runs are at its current head and failed; once per head; never runs waiting for approval (that stays `approve_ci`) |
 | `github.fix_pr` | medium | On the owner's approval of the card | Only from a `ci_fix` session for that PR; the PR is tracked and still at `sha`; no file under `.github/`; dependency manifests and lock files only on a dependency bot's PR; at most 20 files; whole files on the card. If the PR's branch is in the same repo (bot PRs), the App opens a PR into that branch. For a fork, it posts the change as a comment with the files for the author to apply, since the App can't push to forks |
 
 A failed-CI wake is queued 10 minutes after a tracked PR's run fails, and starts only
