@@ -2,7 +2,8 @@
 
 import type { Tokens } from "./managed";
 
-export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "failed";
+/** lapsed: the gateway closed it because GitHub moved on, e.g. the PR merged or got new commits (decision 62). */
+export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "failed" | "lapsed";
 export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 
 /** Decision kinds that say nothing about an agent's judgement, left out of approval measures. */
@@ -26,6 +27,9 @@ export interface Decision {
   tg_message_id: number | null;
   discord_channel_id: string | null;
   discord_message_id: string | null;
+  /** A merge card's checks as the gateway last re-ran them, and when (decision 62). */
+  checks_now: string | null;
+  checks_at: string | null;
   created_at: string;
   decided_at: string | null;
   executed_at: string | null;
@@ -106,6 +110,34 @@ export interface Finding {
   created_at: string;
 }
 
+/** One GitHub delivery the gateway used (decision 62). Holds no text from GitHub. */
+export interface GitHubEvent {
+  delivery: string;
+  target: string;
+  event: string;
+  action: string;
+  actor: string | null;
+  association: string | null;
+  sha: string | null;
+  detail: string | null;
+}
+
+export type WakeTrigger = "review" | "merge" | "first_response";
+
+/** Work the gateway will start for an agent when an event calls for it (decision 62). */
+export interface Wake {
+  id: number;
+  trigger: WakeTrigger;
+  target: string;
+  sha: string;
+  agent: string;
+  due_at: string;
+  status: "pending" | "started" | "dropped";
+  reason: string | null;
+  session_id: string | null;
+  created_at: string;
+}
+
 /** A message an agent sent to someone, kept so a reply reaches the session that wrote it. */
 export interface SentMessage {
   id: number;
@@ -127,7 +159,7 @@ export type StartedBy = "owner" | "schedule" | "unknown" | `member:${string}`;
 export interface SessionRow {
   id: string;
   agent: string;
-  origin: "telegram" | "discord" | "task" | "deployment" | "follow_up";
+  origin: "telegram" | "discord" | "task" | "deployment" | "follow_up" | "github";
   chat_id: number | null;
   discord_user: string | null;
   task_id: string | null;
@@ -359,6 +391,129 @@ export class Db {
       .then((r) => r.results);
   }
 
+  // ---- GitHub events and wakes (decision 62) --------------------------------
+
+  async recordGitHubEvent(e: GitHubEvent) {
+    await this.db
+      .prepare("INSERT OR IGNORE INTO github_events (delivery, target, event, action, actor, association, sha, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(e.delivery, e.target.toLowerCase(), e.event, e.action, e.actor, e.association, e.sha, e.detail)
+      .run();
+  }
+
+  /** What happened on the PRs and issues of a repo since `since`, oldest first. */
+  async githubActivity(repo: string, since: string): Promise<GitHubEvent[]> {
+    const { results } = await this.db
+      .prepare("SELECT * FROM github_events WHERE target LIKE ? AND received_at >= ? ORDER BY received_at ASC LIMIT 500")
+      .bind(`${repo.toLowerCase()}#%`, since)
+      .all<GitHubEvent>();
+    return results;
+  }
+
+  /**
+   * Queues a wake, once per trigger, target and head. Queuing one that is already
+   * pending brings it forward if this one is due sooner, and one that was dropped
+   * (say, while the PR was a draft) is queued again; one that started never is.
+   * True if queued.
+   */
+  async queueWake(w: { trigger: WakeTrigger; target: string; sha?: string; agent: string; delayMinutes?: number }): Promise<boolean> {
+    const r = await this.db
+      .prepare(
+        "INSERT INTO github_wakes (trigger, target, sha, agent, due_at) VALUES (?, ?, ?, ?, datetime('now', ?)) " +
+          "ON CONFLICT (trigger, target, sha) DO UPDATE SET due_at = excluded.due_at, status = 'pending', reason = NULL " +
+          "WHERE github_wakes.status = 'dropped' OR (github_wakes.status = 'pending' AND excluded.due_at < github_wakes.due_at)",
+      )
+      .bind(w.trigger, w.target.toLowerCase(), w.sha ?? "", w.agent, `+${w.delayMinutes ?? 0} minutes`)
+      .run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+
+  /** Puts a pending wake off for `minutes`, e.g. while CI is still running. */
+  async delayWake(id: number, minutes: number, reason: string) {
+    await this.db.prepare("UPDATE github_wakes SET due_at = datetime('now', ?), reason = ? WHERE id = ? AND status = 'pending'").bind(`+${minutes} minutes`, reason, id).run();
+  }
+
+  /** Whether the PR or issue was closed on GitHub since `since`, by the events received. */
+  async closedSince(target: string, since: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS x FROM github_events WHERE target = ? AND action = 'closed' AND received_at >= ? LIMIT 1")
+      .bind(target.toLowerCase(), since)
+      .first();
+    return !!row;
+  }
+
+  /** Whether a review check for this PR is open or running. */
+  async reviewCheckActive(target: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS x FROM tasks WHERE kind = 'review_check' AND lower(review_target) = ? AND status IN ('open', 'running') LIMIT 1")
+      .bind(target.toLowerCase())
+      .first();
+    return !!row;
+  }
+
+  async dueWakes(limit: number): Promise<Wake[]> {
+    const { results } = await this.db
+      .prepare("SELECT * FROM github_wakes WHERE status = 'pending' AND due_at <= datetime('now') ORDER BY due_at ASC, id ASC LIMIT ?")
+      .bind(limit)
+      .all<Wake>();
+    return results;
+  }
+
+  /** Wakes of one trigger started since midnight UTC. */
+  async wakesStartedToday(trigger: WakeTrigger): Promise<number> {
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM github_wakes WHERE trigger = ? AND status = 'started' AND started_at >= date('now')")
+      .bind(trigger)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  /** PRs a wake started work on since `since`, as owner/repo#n. */
+  async wokenTargets(repo: string, since: string): Promise<Set<string>> {
+    const { results } = await this.db
+      .prepare("SELECT target FROM github_wakes WHERE target LIKE ? AND status = 'started' AND started_at >= ?")
+      .bind(`${repo.toLowerCase()}#%`, since)
+      .all<{ target: string }>();
+    return new Set(results.map((r) => r.target));
+  }
+
+  async startWake(id: number, sessionId: string) {
+    await this.db.prepare("UPDATE github_wakes SET status = 'started', session_id = ?, started_at = datetime('now') WHERE id = ?").bind(sessionId, id).run();
+  }
+
+  async dropWake(id: number, reason: string) {
+    await this.db.prepare("UPDATE github_wakes SET status = 'dropped', reason = ? WHERE id = ? AND status = 'pending'").bind(reason, id).run();
+  }
+
+  /** Drops every pending wake for a PR or issue, e.g. once it closes. */
+  async dropWakesFor(target: string, reason: string): Promise<number> {
+    const r = await this.db.prepare("UPDATE github_wakes SET status = 'dropped', reason = ? WHERE target = ? AND status = 'pending'").bind(reason, target.toLowerCase()).run();
+    return r.meta?.changes ?? 0;
+  }
+
+  /** Puts a wake off until midnight UTC, e.g. over the daily cap. */
+  async deferWake(id: number, reason: string) {
+    await this.db.prepare("UPDATE github_wakes SET due_at = datetime(date('now', '+1 day')), reason = ? WHERE id = ?").bind(reason, id).run();
+  }
+
+  /**
+   * Open PRs and issues the network tracks, for the daily check: targets of open GitHub
+   * decisions, reviewed PRs with no outcome, and pending wakes.
+   * Oldest first.
+   */
+  async trackedTargets(limit: number): Promise<string[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT target, MIN(at) AS at FROM (" +
+          "SELECT lower(target) AS target, created_at AS at FROM decisions WHERE status = 'open' AND kind LIKE 'github.%' AND target LIKE '%#%' " +
+          "UNION ALL SELECT target, created_at AS at FROM reviews WHERE outcome IS NULL " +
+          "UNION ALL SELECT target, created_at AS at FROM github_wakes WHERE status = 'pending'" +
+          ") GROUP BY target ORDER BY at ASC LIMIT ?",
+      )
+      .bind(limit)
+      .all<{ target: string }>();
+    return results.map((r) => r.target);
+  }
+
   // ---- events: idempotency ------------------------------------------------
 
   /** Returns true the first time an event id is claimed. */
@@ -465,6 +620,28 @@ export class Db {
       .prepare("SELECT * FROM decisions WHERE agent = ? AND target = ? AND seq > ? ORDER BY seq DESC LIMIT 1")
       .bind(d.agent, d.target, d.seq)
       .first<Decision>();
+  }
+
+  /** Open decisions on a PR or issue. Approved GitHub decisions run at once, so only open ones can lapse. */
+  async openDecisionsOn(target: string): Promise<Decision[]> {
+    const { results } = await this.db
+      .prepare("SELECT * FROM decisions WHERE lower(target) = ? AND status = 'open' ORDER BY seq ASC")
+      .bind(target.toLowerCase())
+      .all<Decision>();
+    return results;
+  }
+
+  /** Closes a decision GitHub has moved past (decision 62). Returns false if it was no longer open. */
+  async lapse(id: string, note: string): Promise<boolean> {
+    const r = await this.db
+      .prepare("UPDATE decisions SET status = 'lapsed', note = ?, decided_at = datetime('now') WHERE id = ? AND status = 'open'")
+      .bind(note, id.toUpperCase())
+      .run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+
+  async setChecksNow(id: string, checks: string) {
+    await this.db.prepare("UPDATE decisions SET checks_now = ?, checks_at = datetime('now') WHERE id = ?").bind(checks, id.toUpperCase()).run();
   }
 
   async setNote(id: string, note: string) {
@@ -1057,7 +1234,7 @@ export class Db {
   }
 
   /** Deletes event claims and tool results older than `eventDays`, and audit rows older than `auditDays`. */
-  async prune(eventDays: number, auditDays: number): Promise<{ events: number; tool_results: number; audit: number; sent_messages: number }> {
+  async prune(eventDays: number, auditDays: number): Promise<{ events: number; tool_results: number; audit: number; sent_messages: number; github_events: number; github_wakes: number }> {
     const del = async (sql: string, days: number) =>
       (await this.db.prepare(sql).bind(`-${days} days`).run()).meta?.changes ?? 0;
     return {
@@ -1065,6 +1242,8 @@ export class Db {
       tool_results: await del("DELETE FROM tool_results WHERE created_at < datetime('now', ?)", eventDays),
       audit: await del("DELETE FROM audit WHERE ts < datetime('now', ?)", auditDays),
       sent_messages: await del("DELETE FROM sent_messages WHERE created_at < datetime('now', ?)", auditDays),
+      github_events: await del("DELETE FROM github_events WHERE received_at < datetime('now', ?)", eventDays),
+      github_wakes: await del("DELETE FROM github_wakes WHERE status != 'pending' AND created_at < datetime('now', ?)", auditDays),
     };
   }
 }
