@@ -595,9 +595,16 @@ export class Db {
       .run();
   }
 
-  /** How many event ids starting with `prefix` were claimed, e.g. one day's daily-check targets. */
+  /**
+   * How many event ids starting with `prefix` were claimed, e.g. one day's daily-check targets.
+   * A key range, not LIKE, so it reads only those claims from the primary key's index.
+   */
   async countClaims(prefix: string): Promise<number> {
-    const row = await this.db.prepare("SELECT COUNT(*) AS n FROM processed_events WHERE event_id LIKE ?").bind(`${prefix}%`).first<{ n: number }>();
+    const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM processed_events WHERE event_id >= ? AND event_id < ?")
+      .bind(prefix, upper)
+      .first<{ n: number }>();
     return row?.n ?? 0;
   }
 
@@ -1295,7 +1302,8 @@ export class Db {
 
   /**
    * Sessions the sweeper should look at, least recently updated first. Finished,
-   * spent and stale sessions are left out; a webhook still wakes any of them.
+   * spent and stale sessions are left out; a webhook still wakes any of them. The WHERE
+   * clause matches the partial index sessions_unfinished (migration 0013): keep them alike.
    */
   async sweepableSessions(limit: number): Promise<SessionRow[]> {
     const { results } = await this.db
@@ -1325,8 +1333,9 @@ export class Db {
 
   /** Marks idle sessions nobody has touched for `days` as stale. Returns how many. */
   async markStaleSessions(days: number): Promise<number> {
+    // A range on status ("idle:" up to "idle;"), not LIKE, so it uses the status index.
     const r = await this.db
-      .prepare("UPDATE sessions SET status = 'stale' WHERE status LIKE 'idle:%' AND updated_at < datetime('now', ?)")
+      .prepare("UPDATE sessions SET status = 'stale' WHERE status >= 'idle:' AND status < 'idle;' AND updated_at < datetime('now', ?)")
       .bind(`-${days} days`)
       .run();
     return r.meta?.changes ?? 0;

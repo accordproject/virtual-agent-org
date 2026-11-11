@@ -748,3 +748,14 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   so only the weekly evaluation reads it, not every one of her sessions.
 - Judge each step by Vera's cost per outcome and Ada's scores for the agent concerned.
 
+
+**66. Keeping the cron within D1's free reads** · RESOLVED
+
+- D1's free tier allows 5 million rows read a day, counting every row a query scans.
+  The five-minute cron ran queries that scanned whole tables: counting the daily
+  check's claims read every event claim, and the session, task and pruning queries
+  read all their rows on every run.
+- Fixed in the queries rather than by moving to the paid plan: the daily check counts
+  its claims by key range and stops once the day's allowance is used, the session and
+  task queries use indexes (migration 0013), and housekeeping runs once an hour.
+- A test fails if a cron query scans a table, so new ones are caught before deploy.

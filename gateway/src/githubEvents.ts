@@ -484,6 +484,8 @@ export async function dailyCheck(ctx: Ctx, now = new Date()) {
   if (!due) return;
   const claimed = `github-daily:${date}:`;
   let budget = Math.min(DAILY_CHECK.perRun, DAILY_CHECK.total - (await ctx.db.countClaims(claimed)));
+  // Once the day's allowance is used, the rest of the day's cron runs read nothing more.
+  if (budget <= 0) return;
   let checked = 0;
   const closed: string[] = [];
   const errors: string[] = [];

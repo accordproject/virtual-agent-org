@@ -10,21 +10,25 @@ import type { DiscordBot } from "../src/discordBot";
 import type { ManagedClient } from "../src/managed";
 import type { Telegram } from "../src/telegram";
 
-/** Enough of the D1 API, backed by in-memory SQLite, to run the real queries. */
-export function memoryD1(): D1Database {
+/**
+ * Enough of the D1 API, backed by in-memory SQLite, to run the real queries. Pass `seen`
+ * to collect each statement run, and read `sqlite` from the result to inspect plans.
+ */
+export function memoryD1(seen?: Set<string>): D1Database & { sqlite: Database.Database } {
   const sqlite = new Database(":memory:");
   const dir = fileURLToPath(new URL("../migrations/", import.meta.url).href);
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) sqlite.exec(readFileSync(dir + f, "utf8"));
   const make = (sql: string, args: unknown[] = []): any => ({
     bind: (...a: unknown[]) => make(sql, a),
-    first: async () => sqlite.prepare(sql).get(...(args as any[])) ?? null,
-    all: async () => ({ results: sqlite.prepare(sql).all(...(args as any[])) }),
+    first: async () => (seen?.add(sql), sqlite.prepare(sql).get(...(args as any[])) ?? null),
+    all: async () => (seen?.add(sql), { results: sqlite.prepare(sql).all(...(args as any[])) }),
     run: async () => {
+      seen?.add(sql);
       const r = sqlite.prepare(sql).run(...(args as any[]));
       return { meta: { changes: r.changes } };
     },
   });
-  return { prepare: (sql: string) => make(sql) } as unknown as D1Database;
+  return { prepare: (sql: string) => make(sql), sqlite } as unknown as D1Database & { sqlite: Database.Database };
 }
 
 export const NETWORK: NetworkConfig = {
