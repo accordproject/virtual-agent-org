@@ -67,6 +67,18 @@
         "memstore_016a2PyDfBhNYKi7QkXfsiTp"
       ],
       "session_budget_cents": 100
+    },
+    "felix": {
+      "agent_id": "agent_016a2RJbukdL5JcEJLqZqHoG",
+      "environment_id": "env_0175m2oaFEjxvSHMavExf8LM",
+      "vault_ids": [
+        "vlt_011CgwXb4nCB42bURHeDVG3T"
+      ],
+      "memory_store_ids": [
+        "memstore_01EMEgnNM7cU8zTFEDVzzJpG",
+        "memstore_016a2PyDfBhNYKi7QkXfsiTp"
+      ],
+      "session_budget_cents": 100
     }
   },
   "deployments": {
