@@ -220,8 +220,12 @@ export async function sweep(ctx: Ctx, limit = SWEEP_LIMIT) {
 /** How long event claims and tool results are kept, and the audit log. */
 export const RETENTION = { eventDays: 14, auditDays: 365, staleSessionDays: 7 };
 
-/** The cron's tidying: idle sessions nobody touches go stale, and old rows are pruned. */
-export async function housekeeping(ctx: Ctx) {
+/**
+ * The cron's tidying: idle sessions nobody touches go stale, and old rows are pruned.
+ * Once an hour, not every five minutes: its thresholds are days, and every run reads rows.
+ */
+export async function housekeeping(ctx: Ctx, now = new Date()) {
+  if (!(await ctx.db.claimEvent(`housekeeping:${now.toISOString().slice(0, 13)}`))) return;
   const stale = await ctx.db.markStaleSessions(RETENTION.staleSessionDays);
   // Decision 53: a task whose session is over without finishing would otherwise stay
   // running for good. Blocked, it waits for Ada's next check-in; no wake for these.

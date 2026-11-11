@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { startSession } from "../src/agents";
-import { housekeeping, processSession } from "../src/sessions";
-import { DEPLOYED, makeTestCtx } from "./helpers";
+import { tickChanges } from "../src/changes";
+import { Db } from "../src/db";
+import { dailyCheck, dispatchWakes, triageCheck } from "../src/githubEvents";
+import { housekeeping, processSession, sweep } from "../src/sessions";
+import { DEPLOYED, NETWORK, fakeGitHub, makeTestCtx, memoryD1 } from "./helpers";
 
 describe("session processing", () => {
   it("answers custom tools once, queues ask-permission calls, and forwards Telegram replies", async () => {
@@ -465,5 +468,71 @@ describe("session memory stores", () => {
       { id: "mem_shared", access: "read_only" },
       { id: "mem_sage", access: "read_only" },
     ]);
+  });
+});
+
+describe("the five-minute cron's database reads", () => {
+  // D1's free tier counts every row a query scans, and the cron runs 288 times a day,
+  // so its queries must read through an index, not scan whole tables.
+  // The daily check's target list may scan: it runs only until the day's allowance is used.
+  const BOUNDED = ["FROM decisions WHERE status = 'open' AND kind LIKE 'github.%'"];
+  // Partial indexes hold only the rows a query wants, so walking one is not a table scan.
+  const PARTIAL = ["USING INDEX sessions_unfinished"];
+
+  it("reads through indexes", async () => {
+    const seen = new Set<string>();
+    const d1 = memoryD1(seen);
+    const gh = fakeGitHub();
+    const network = { ...NETWORK, github_wakes: { review: { daily: 6, budget_cents: 100 } }, triage_checks: { after: "08:00", times: ["13:00"], budget_cents: 100 } };
+    const { ctx } = makeTestCtx({ db: new Db(d1), network, github: async () => gh as never });
+    await ctx.db.upsertSession({ id: "sesn_run", agent: "mira", origin: "task", status: "running" });
+    const now = new Date("2026-11-11T13:01:00Z");
+    await housekeeping(ctx, now);
+    await tickChanges(ctx, now);
+    await sweep(ctx);
+    await triageCheck(ctx, now);
+    await dailyCheck(ctx, now);
+    await dispatchWakes(ctx);
+    const scans = [...seen]
+      .filter((sql) => !BOUNDED.some((b) => sql.includes(b)))
+      .map((sql) => {
+        const params = Array((sql.match(/\?/g) ?? []).length).fill("x");
+        const plan = d1.sqlite.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[];
+        return { sql: sql.replace(/\s+/g, " ").slice(0, 120), scans: plan.map((p) => p.detail).filter((d) => d.startsWith("SCAN") && !PARTIAL.some((i) => d.endsWith(i))) };
+      })
+      .filter((q) => q.scans.length);
+    expect(scans).toEqual([]);
+    expect(seen.size).toBeGreaterThan(10);
+  });
+
+  it("tidies once an hour", async () => {
+    const seen = new Set<string>();
+    const { ctx } = makeTestCtx({ db: new Db(memoryD1(seen)) });
+    await housekeeping(ctx, new Date("2026-11-11T13:01:00Z"));
+    const pruned = () => [...seen].filter((s) => s.startsWith("DELETE FROM audit")).length;
+    expect(pruned()).toBe(1);
+    seen.clear();
+    await housekeeping(ctx, new Date("2026-11-11T13:56:00Z"));
+    expect(pruned()).toBe(0);
+    await housekeeping(ctx, new Date("2026-11-11T14:01:00Z"));
+    expect(pruned()).toBe(1);
+  });
+
+  it("counts one day's claims by key range", async () => {
+    const { ctx } = makeTestCtx();
+    for (const id of ["github-daily:2026-11-11:a#1", "github-daily:2026-11-11:b#2", "github-daily:2026-11-10:a#1", "github-daily:2026-11-12:a#1", "github-daily:2026-11-11", "x"]) {
+      await ctx.db.claimEvent(id);
+    }
+    expect(await ctx.db.countClaims("github-daily:2026-11-11:")).toBe(2);
+  });
+
+  it("stops reading once the day's check allowance is used", async () => {
+    const seen = new Set<string>();
+    const { ctx } = makeTestCtx({ db: new Db(memoryD1(seen)), network: { ...NETWORK, github_wakes: { review: { daily: 6, budget_cents: 100 } } } });
+    const { DAILY_CHECK } = await import("../src/githubEvents");
+    for (let n = 0; n < DAILY_CHECK.total; n++) await ctx.db.claimEvent(`github-daily:2026-11-11:accordproject/concerto#${n}`);
+    seen.clear();
+    await dailyCheck(ctx, new Date("2026-11-11T13:01:00Z"));
+    expect([...seen].some((s) => s.includes("github_checks"))).toBe(false);
   });
 });

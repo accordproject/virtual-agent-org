@@ -235,7 +235,8 @@ describe("sweeper and retention", () => {
     const statuses = (await d1.prepare("SELECT id, status FROM sessions ORDER BY id").all<{ id: string; status: string }>()).results;
     expect(Object.fromEntries(statuses.map((s) => [s.id, s.status]))).toEqual({ new_idle: "idle:end_turn", old_idle: "stale", old_running: "running" });
     const ids = async (sql: string) => (await d1.prepare(sql).all<{ id: string }>()).results.map((r) => r.id);
-    expect(await ids("SELECT event_id AS id FROM processed_events")).toEqual(["wh:new"]);
+    // Housekeeping claims its hour there too (it runs once an hour).
+    expect(await ids("SELECT event_id AS id FROM processed_events WHERE event_id NOT LIKE 'housekeeping:%'")).toEqual(["wh:new"]);
     expect(await ids("SELECT event_id AS id FROM tool_results")).toEqual(["wh:new"]);
     expect(await ids("SELECT event_type AS id FROM audit ORDER BY rowid")).toEqual(["recent", "gateway.housekeeping"]);
   });
