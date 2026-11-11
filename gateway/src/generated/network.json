@@ -8,6 +8,14 @@
     "daily_wakes": 5,
     "budget_cents": 50
   },
+  "triage_checks": {
+    "after": "08:00",
+    "times": [
+      "13:00",
+      "18:00"
+    ],
+    "budget_cents": 100
+  },
   "github_wakes": {
     "review": {
       "daily": 6,
@@ -312,7 +320,14 @@
         "other",
         "discord.ops"
       ],
-      "model": "claude-opus-5-5"
+      "model": "claude-opus-5-5",
+      "effort": "low",
+      "tasks": {
+        "evaluation": {
+          "model": "claude-opus-5-5",
+          "effort": "medium"
+        }
+      }
     },
     "mira": {
       "name": "mira",
@@ -328,14 +343,36 @@
         "github.docs_pr",
         "discord.ops"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "tasks": {
+        "triage": {
+          "model": "claude-haiku-5-5",
+          "effort": "medium"
+        },
+        "review": {
+          "model": "claude-sonnet-5-5",
+          "effort": "high"
+        },
+        "check": {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      }
     },
     "vera": {
       "name": "vera",
       "title": "Metrics & Audit",
       "phase": 1,
       "requestable": [],
-      "model": "claude-haiku-5-5"
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "tasks": {
+        "analysis": {
+          "model": "claude-sonnet-5-5",
+          "effort": "medium"
+        }
+      }
     },
     "otto": {
       "name": "otto",
@@ -348,14 +385,22 @@
         "message.person",
         "discord.ops"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
     },
     "mandla": {
       "name": "mandla",
       "title": "Mechanic",
       "phase": 1,
       "requestable": [],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "tasks": {
+        "large_change": {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      }
     },
     "rosa": {
       "name": "rosa",
@@ -366,7 +411,14 @@
         "discord.announce",
         "message.person"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "tasks": {
+        "welcome": {
+          "model": "claude-haiku-5-5",
+          "effort": "low"
+        }
+      }
     },
     "juno": {
       "name": "juno",
@@ -377,14 +429,22 @@
         "linkedin.post",
         "github.comment"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
     },
     "sage": {
       "name": "sage",
       "title": "Research",
       "phase": 1,
       "requestable": [],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "tasks": {
+        "feed_filter": {
+          "model": "claude-haiku-5-5",
+          "effort": "low"
+        }
+      }
     },
     "kit": {
       "name": "kit",
@@ -395,7 +455,14 @@
         "other",
         "discord.ops"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "tasks": {
+        "threat_review": {
+          "model": "claude-opus-5-5",
+          "effort": "high"
+        }
+      }
     },
     "felix": {
       "name": "felix",
@@ -404,7 +471,8 @@
       "requestable": [
         "github.fix_pr"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
     },
     "nell": {
       "name": "nell",
@@ -414,7 +482,8 @@
         "email.send",
         "message.person"
       ],
-      "model": "claude-sonnet-5-5"
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
     }
   }
 }

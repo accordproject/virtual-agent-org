@@ -65,10 +65,18 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "github.rerun_ci", "discord.ops", "linkedin.post"], model: "claude-sonnet-5-5" },
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "github.rerun_ci", "discord.ops", "linkedin.post"],
+      model: "claude-sonnet-5-5",
+      effort: "medium",
+      tasks: {
+        triage: { model: "claude-haiku-5-5", effort: "medium" },
+        review: { model: "claude-sonnet-5-5", effort: "high" },
+        check: { model: "claude-opus-5-5", effort: "high" },
+      },
+    },
     felix: { name: "felix", title: "CI Fixes", phase: 1, requestable: ["github.fix_pr"] },
     otto: { name: "otto", title: "Meetings", phase: 1, requestable: ["vimeo.publish", "discord.announce"] },
-    mandla: { name: "mandla", title: "Mechanic", phase: 1, requestable: [] },
+    mandla: { name: "mandla", title: "Mechanic", phase: 1, requestable: [], tasks: { large_change: { model: "claude-opus-5-5", effort: "high" } } },
     rosa: { name: "rosa", title: "Community", phase: 2, requestable: [] },
   },
 };
@@ -172,6 +180,15 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     /** Open PRs as the queue lists them; tests set it to match a fork's workflow run. */
     openPullsList: [] as { number: number; headRefOid: string }[],
     openPulls: async () => gh.openPullsList,
+    /** PRs and issues opened since a time, by repo; tests fill it. Records each call's repo and time. */
+    opened: {} as Record<string, { number: number; pr: boolean }[]>,
+    openedCalls: [] as { repo: string; since: string }[],
+    failOpened: null as string | null,
+    openedSince: async (r: RepoRef, since: string) => {
+      gh.openedCalls.push({ repo: `${r.owner}/${r.repo}`, since });
+      if (gh.failOpened) throw new Error(gh.failOpened);
+      return gh.opened[`${r.owner}/${r.repo}`] ?? [];
+    },
     issueState: async () => ({ state: p.state === "OPEN" ? "open" : p.state === "MERGED" ? "merged" : "closed", pr: true }),
     /** The repo the PR's branch lives in: the base repo for a bot's branch, a fork otherwise. */
     headRepo: "contrib/concerto",
