@@ -114,7 +114,10 @@ Two action kinds run without the owner, each after the gateway's own checks:
 A merge proposal is checked by the gateway itself, not just by the model, when it is
 queued and again on approval (decision 35). The checks: the reviewed head, a posted
 review with nothing blocking, green CI, mergeable, no changes requested, no unresolved
-threads, and a maintainer's approval unless the PR is low risk. The card lists them.
+threads, and, for a high-risk PR, a maintainer's approval on GitHub. For a low or
+medium-risk PR, the owner's approval of the card stands in for it (C-6). The
+card lists the checks, with the files and lines changed, the review's findings by
+severity, the CI runs and links to the PR and diff.
 
 ## Safety rules
 

@@ -10,7 +10,7 @@ import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import { memberOf } from "./people";
 import {
-  GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
+  GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeCard, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
 } from "./review";
 import { maxRisk, toRisk, type Risk } from "./risk";
 import { schemaProblems } from "./schema";
@@ -391,7 +391,9 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
       throw new ToolError(`Not queued. The merge can't go ahead yet:\n${checklist(failed(checks))}\nDon't retry in this session; report it.`);
     }
     risk = maxRisk(risk, f.risk === "high" ? "high" : "medium");
-    rationale = `${rationale}\n\nGateway checks at ${f.sha.slice(0, 7)} (${f.risk} risk: ${f.risk_reasons.join("; ")}):\n${checklist(checks)}`;
+    // C-6: the card carries what Matt needs to check the merge from the card alone.
+    const findings = review ? await ctx.db.reviewFindings(review.id) : [];
+    rationale = `${rationale}\n\n${mergeCard(f, review, findings)}\n\nGateway checks at ${f.sha.slice(0, 7)} (${f.risk} risk: ${f.risk_reasons.join("; ")}):\n${checklist(checks)}`;
     reviewId = review?.id;
   }
   if (kind === "spec.change") {
@@ -774,9 +776,14 @@ async function requestReviewCheck(ctx: Ctx, sessionId: string, input: Input): Pr
     `   only about the PR, in a ${f.tone} tone: be kind and specific, and say what would make it mergeable. Mention no one`,
     "   except the author and put code in backticks. If the gateway refuses the text, fix it and submit again.",
     "5. Only if submit_review reports nothing blocking, queue request_action(kind=\"github.merge\") with payload",
-    `   {sha: "${f.sha}", merge_method: "squash"} and a rationale citing your verification. The gateway checks CI,`,
-    "   mergeability, threads and (unless the PR is low risk) a maintainer's approval, and refuses with the reasons if",
-    "   any fails. If it refuses, put the reasons in report_status; don't retry.",
+    `   {sha: "${f.sha}", merge_method: "squash"}. Write the rationale so Matt can check the merge from the card alone:`,
+    "   - what the change does, in plain English, and any effect on public APIs, the build or dependencies;",
+    "   - the discussion: the author's description, each review and comment with its author, resolved threads and how",
+    "     they were resolved, and any open questions;",
+    "   - the review decision id submit_review gave you, and the CI run and its result.",
+    "   The gateway adds the files and lines changed, your findings by severity, the CI runs and the links. It checks CI,",
+    "   mergeability, threads and (for a high-risk PR) a maintainer's approval, and refuses with the reasons if any",
+    "   fails. If it refuses, put the reasons in report_status; don't retry.",
     "",
     `Facts from the gateway: ${factsLine(f)}.`,
     ...(f.path_notes.length ? ["Path rules:", ...f.path_notes.map((n) => `- ${n}`)] : []),

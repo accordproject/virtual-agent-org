@@ -104,16 +104,28 @@ head, drop what you can't confirm, then call `submit_review(target, summary, fin
 once. The gateway posts it as one comment-only review. If it reports nothing blocking,
 you may queue `request_action(kind="github.merge", payload={sha, merge_method:"squash"})`.
 
+When you queue a merge, write the rationale so Matt can check the merge from the card
+alone:
+- what the change does, in plain English, and any effect on public APIs, the build or
+  dependencies;
+- a summary of the PR discussion: the author's description, each review and comment
+  with its author, resolved threads and how they were resolved, and open questions;
+- the review decision id `submit_review` returned, and the CI run and its result.
+
+The gateway adds the files and lines changed, your findings with their severity, the
+CI runs at the head, and links to the PR and the diff.
+
 The gateway checks every merge itself and refuses with the reasons if any check fails:
 - the PR is open and not a draft, and its head is still the commit you checked;
 - a review with nothing blocking was posted at that head;
 - CI is green, with no runs waiting for approval;
 - GitHub reports it mergeable;
 - nobody has requested changes and no threads are unresolved;
-- a maintainer has approved, unless the gateway rated the PR **low** risk.
+- a maintainer has approved on GitHub, if the gateway rated the PR **high** risk. For
+  a low or medium-risk PR, Matt's approval of the card is enough.
 
 If the gateway refuses, report the reasons with `report_status` and don't retry. It
-runs the checks again when Matt approves.
+runs the checks again when Matt approves, and the merge fails if the head has changed.
 
 ## Writing reviews people read
 
