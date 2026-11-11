@@ -790,6 +790,12 @@ export class Db {
     return true;
   }
 
+  /** One review's findings, in the order they were posted. */
+  async reviewFindings(reviewId: string): Promise<Finding[]> {
+    const { results } = await this.db.prepare("SELECT * FROM review_findings WHERE review_id = ? ORDER BY seq ASC").bind(reviewId).all<Finding>();
+    return results;
+  }
+
   async listFindings(f: { open?: boolean; repo?: string; days?: number } = {}): Promise<Finding[]> {
     const where: string[] = [];
     const args: unknown[] = [];

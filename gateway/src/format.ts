@@ -60,11 +60,19 @@ const CONTENT_MAX = 1990;
 const EMBED_PART = 4000; // each embed's description may be 4,096 characters
 const EMBED_BUDGET = 5900; // and 6,000 across a message's embeds, titles included
 
+/**
+ * A merge card carries the whole case for the merge (C-6), so on Discord its
+ * rationale goes in an embed, where it either fits or the card loses its Approve button,
+ * rather than being cut silently to fit the message.
+ */
+const rationaleInEmbed = (d: Decision) => d.kind === "github.merge";
+
 /** A card's long text as Discord embeds, and whether all of it fitted. */
 function embedsFor(d: Decision): { embeds: DiscordEmbed[]; complete: boolean } {
   const embeds: DiscordEmbed[] = [];
   let budget = EMBED_BUDGET;
-  for (const block of describeAction(d).blocks) {
+  const blocks = describeAction(d).blocks;
+  for (const block of rationaleInEmbed(d) ? [{ title: "Why, and what the gateway found", text: d.rationale }, ...blocks] : blocks) {
     for (const [i, part] of splitText(block.text || "(empty)", EMBED_PART).entries()) {
       const title = i === 0 ? block.title.slice(0, 256) : undefined;
       const room = budget - (title?.length ?? 0);
@@ -105,7 +113,7 @@ export function discordCard(d: Decision): DiscordPayload {
   const head = [
     `${STATUS_ICON[d.status] ?? "•"} **${d.id} · ${cap(d.agent)} · ${d.kind}** · ${RISK[d.risk] ?? d.risk}`,
     `**${d.summary}**`,
-    d.rationale,
+    rationaleInEmbed(d) ? "The change, the discussion and the checks are below." : d.rationale,
     "**If approved:**",
     ...view.lines.map((l) => `- ${l}`),
   ];
@@ -117,7 +125,7 @@ export function discordCard(d: Decision): DiscordPayload {
   if (content.length > CONTENT_MAX) {
     // Shorten the rationale, never the decision line, what approval does, or the status.
     const over = content.length - CONTENT_MAX + 2;
-    head[2] = `${d.rationale.slice(0, Math.max(0, d.rationale.length - over))}…`;
+    head[2] = `${head[2].slice(0, Math.max(0, head[2].length - over))}…`;
     content = head.join("\n");
   }
   const buttons = discordButtons(d).filter((b) => complete || !b.custom_id.startsWith("a:"));
