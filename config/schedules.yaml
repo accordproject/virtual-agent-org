@@ -1,8 +1,10 @@
-# Recurring work, deployed as Managed Agents scheduled deployments.
+# Recurring work. Most runs as Managed Agents scheduled deployments; see task: below.
 # Times are wall-clock Europe/London; avoid 01:00-03:00 (DST skips/duplicates).
 # budget_usd is a per-run cap: the session pauses when it is reached.
 # task names one of the agent's tasks in models.yaml, whose tier and effort the run uses;
-# without it the run uses the agent's default tier and effort.
+# without it the run uses the agent's default tier and effort. A schedule with a task is
+# run by the gateway's cron, not as a Managed Agents deployment: deployments accept only a
+# plain agent reference, so they can't change the model (decision 67).
 
 schedules:
   - name: ada-checkin

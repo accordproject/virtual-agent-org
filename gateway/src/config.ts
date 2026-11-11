@@ -103,6 +103,12 @@ export interface NetworkConfig {
    * looks back to `after`, the daily scheduled pass). Absent = off.
    */
   triage_checks?: { after: string; times: string[]; budget_cents: number };
+  /**
+   * Schedules that name a task in models.yaml (decision 67). The gateway's cron starts
+   * them, since Managed Agents deployments can't override the model. Cron times are in
+   * `timezone`.
+   */
+  gateway_schedules?: { name: string; agent: string; cron: string; task: string; prompt: string; budget_cents: number }[];
   /** Model ids by tier, from models.yaml, for sessions the gateway starts on a stronger model. */
   model_tiers?: Record<string, string>;
 }

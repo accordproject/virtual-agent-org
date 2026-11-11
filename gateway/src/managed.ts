@@ -76,7 +76,8 @@ export class ManagedClient {
     budgetCents?: number;
     /**
      * Runs this session on another model or effort. The override replaces the agent's model
-     * object in full, so it carries its own effort. VERIFY: same override shape as scheduled deployments.
+     * object in full, so it carries its own effort. Documented on "Start a session"; not yet
+     * seen live. Scheduled deployments refuse this form (decision 67).
      */
     model?: ModelChoice;
   }): Promise<Session> {
@@ -161,6 +162,10 @@ export class ManagedClient {
   }
   createDeployment(body: unknown): Promise<{ id: string }> {
     return this.req("POST", "/deployments?beta=true", body);
+  }
+  /** Terminal: the schedule stops for good. Used when a schedule moves to the gateway (decision 67). */
+  archiveDeployment(id: string) {
+    return this.req("POST", `/deployments/${id}/archive?beta=true`, {});
   }
   updateDeployment(id: string, body: unknown): Promise<{ id: string }> {
     return this.req("POST", `/deployments/${id}?beta=true`, body);

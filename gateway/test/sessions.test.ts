@@ -3,6 +3,8 @@ import { startSession } from "../src/agents";
 import { tickChanges } from "../src/changes";
 import { Db } from "../src/db";
 import { dailyCheck, dispatchWakes, triageCheck } from "../src/githubEvents";
+import { cronMatches, localTime, parseCron } from "../src/cron";
+import { CATCH_UP_MINUTES, runSchedules } from "../src/schedules";
 import { housekeeping, processSession, sweep } from "../src/sessions";
 import { DEPLOYED, NETWORK, fakeGitHub, makeTestCtx, memoryD1 } from "./helpers";
 
@@ -493,6 +495,7 @@ describe("the five-minute cron's database reads", () => {
     await triageCheck(ctx, now);
     await dailyCheck(ctx, now);
     await dispatchWakes(ctx);
+    await runSchedules({ ...ctx, network: { ...ctx.network, gateway_schedules: [{ name: "x", agent: "mira", cron: "0 13 * * *", task: "triage", prompt: "p", budget_cents: 100 }] } }, now);
     const scans = [...seen]
       .filter((sql) => !BOUNDED.some((b) => sql.includes(b)))
       .map((sql) => {
@@ -534,5 +537,58 @@ describe("the five-minute cron's database reads", () => {
     seen.clear();
     await dailyCheck(ctx, new Date("2026-11-11T13:01:00Z"));
     expect([...seen].some((s) => s.includes("github_checks"))).toBe(false);
+  });
+});
+
+describe("schedules the gateway runs (decision 67)", () => {
+  const TRIAGE = { name: "mira-triage", agent: "mira", cron: "0 8 * * *", task: "triage", prompt: "Triage pass.", budget_cents: 100 };
+  const ctxWith = (schedules = [TRIAGE], over: Partial<typeof NETWORK> = {}) => makeTestCtx({ network: { ...NETWORK, gateway_schedules: schedules, ...over } });
+  const sessions = (fakes: { calls: { method: string; args: any[] }[] }) => fakes.calls.filter((c) => c.method === "createSession").map((c) => c.args[0]);
+  const audits = async (ctx: any, type: string) =>
+    (await ctx.db.db.prepare("SELECT detail FROM audit WHERE event_type = ? ORDER BY id").bind(type).all()).results.map((r: any) => JSON.parse(r.detail));
+
+  it("parses and matches cron in local time", () => {
+    const c = parseCron("0 10 * * 1-5");
+    // 2026-11-13 is a Friday: 10:00 in London is 10:00 UTC in winter.
+    expect(cronMatches(c, localTime("Europe/London", new Date("2026-11-13T10:00:00Z")))).toBe(true);
+    expect(cronMatches(c, localTime("Europe/London", new Date("2026-11-14T10:00:00Z")))).toBe(false);
+    // Summer: 10:00 in London is 09:00 UTC.
+    expect(cronMatches(c, localTime("Europe/London", new Date("2026-07-10T09:00:00Z")))).toBe(true);
+    expect(cronMatches(parseCron("30 7 */2 * *"), localTime("Europe/London", new Date("2026-11-11T07:30:00Z")))).toBe(true);
+    expect(cronMatches(parseCron("30 7 */2 * *"), localTime("Europe/London", new Date("2026-11-12T07:30:00Z")))).toBe(false);
+    expect(cronMatches(parseCron("0 9 * * 7"), localTime("Europe/London", new Date("2026-11-15T09:00:00Z")))).toBe(true);
+    expect(() => parseCron("0 8 * *")).toThrow(/5 fields/);
+    expect(() => parseCron("0 25 * * *")).toThrow(/out of range/);
+    expect(() => parseCron("0 8 * * MON")).toThrow(/not supported/);
+  });
+
+  it("starts a run once, on the task's model and effort, within the catch-up window", async () => {
+    const { ctx, fakes } = ctxWith();
+    await runSchedules(ctx, new Date("2026-11-11T07:59:00Z"));
+    expect(sessions(fakes)).toEqual([]);
+    await runSchedules(ctx, new Date("2026-11-11T08:03:00Z"));
+    await runSchedules(ctx, new Date("2026-11-11T08:08:00Z"));
+    const [s, ...rest] = sessions(fakes);
+    expect(rest).toEqual([]);
+    expect(s).toMatchObject({ agentId: "agent_mira", text: "Triage pass.", budgetCents: 100, model: { id: "claude-haiku-5-5", effort: "medium" } });
+    expect(await ctx.db.getSession("sesn_1")).toMatchObject({ origin: "deployment", started_by: "schedule", model: "claude-haiku-5-5" });
+    expect(await audits(ctx, "gateway.schedule_started")).toEqual([{ schedule: "mira-triage", at: "2026-11-11T08:00", task: "triage" }]);
+
+    // Too late to catch up: a tick that comes after the window misses that day's run.
+    const late = ctxWith();
+    await runSchedules(late.ctx, new Date(Date.parse("2026-11-11T08:00:00Z") + CATCH_UP_MINUTES * 60_000));
+    expect(sessions(late.fakes)).toEqual([]);
+  });
+
+  it("starts nothing with schedules off, and skips a paused agent with an audit", async () => {
+    const off = ctxWith([TRIAGE], { schedules_enabled: false });
+    await runSchedules(off.ctx, new Date("2026-11-11T08:01:00Z"));
+    expect(sessions(off.fakes)).toEqual([]);
+
+    const { ctx, fakes } = ctxWith();
+    await ctx.db.setAgentStatus("mira", "paused");
+    await runSchedules(ctx, new Date("2026-11-11T08:01:00Z"));
+    expect(sessions(fakes)).toEqual([]);
+    expect((await audits(ctx, "gateway.schedule_skipped"))[0]).toMatchObject({ schedule: "mira-triage", at: "2026-11-11T08:00", why: expect.stringMatching(/paused/i) });
   });
 });

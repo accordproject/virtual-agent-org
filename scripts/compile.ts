@@ -7,6 +7,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILTIN_TOOLS, EFFORTS, FILE_TOOLS, ROOT, loadAll, readText, type ReviewYaml } from "./lib";
+import { parseCron } from "../gateway/src/cron";
 import { REPOS_MARKER, REPO_RE } from "./repos";
 
 export const PERSON_ROLES = ["owner", "tsc_member", "maintainer"];
@@ -227,6 +228,14 @@ export function validate(cfg = loadAll()): string[] {
     if (!(s.budget_usd > 0 && s.budget_usd <= 10)) errs.push(`schedule ${s.name}: budget_usd must be between 0 and 10`);
     if ("tier" in s) errs.push(`schedule ${s.name}: name a task from models.yaml with task:, not a tier`);
     if (s.task !== undefined && !models.agents[s.agent]?.tasks?.[s.task]) errs.push(`schedule ${s.name}: ${s.agent} has no task "${s.task}" in models.yaml`);
+    // The gateway runs a task's schedule itself (decision 67), with its own cron parser.
+    if (s.task !== undefined) {
+      try {
+        parseCron(s.cron);
+      } catch (e) {
+        errs.push(`schedule ${s.name}: ${(e as Error).message}`);
+      }
+    }
   }
   // Mira's extra triage passes run only when something new was opened (decision 65).
   const checks = network.budgets.triage_checks;
@@ -267,6 +276,18 @@ function modelsOf(cfg: ReturnType<typeof loadAll>, n: string) {
   };
 }
 
+/**
+ * Schedules that name a task, for the gateway to run (decision 67): Managed Agents
+ * deployments accept only a plain agent reference, so they can't use a task's model.
+ * Only agents in the current phase.
+ */
+function gatewaySchedules(cfg: ReturnType<typeof loadAll>) {
+  const phase = cfg.network.network.current_phase;
+  return cfg.schedules.schedules
+    .filter((s) => s.task && (cfg.network.agents[s.agent] ?? Infinity) <= phase)
+    .map((s) => ({ name: s.name, agent: s.agent, cron: s.cron, task: s.task!, prompt: s.prompt.trim(), budget_cents: Math.round(s.budget_usd * 100) }));
+}
+
 function triageChecks(cfg: ReturnType<typeof loadAll>) {
   const checks = cfg.network.budgets.triage_checks;
   const daily = cfg.schedules.schedules.find((s) => s.name === TRIAGE_SCHEDULE);
@@ -288,6 +309,7 @@ export function compile(cfg = loadAll()) {
       budget_cents: Math.round((network.budgets.follow_up_budget_usd ?? 0.5) * 100),
     },
     ...triageChecks(cfg),
+    gateway_schedules: gatewaySchedules(cfg),
     github_wakes: Object.fromEntries(
       Object.entries(network.budgets.github_wakes ?? {}).map(([trigger, w]) => [trigger, { daily: w.daily, budget_cents: Math.round(w.usd * 100) }]),
     ),

@@ -16,6 +16,40 @@
     ],
     "budget_cents": 100
   },
+  "gateway_schedules": [
+    {
+      "name": "ada-weekly-evaluation",
+      "agent": "ada",
+      "cron": "0 16 * * 5",
+      "task": "evaluation",
+      "prompt": "Run the weekly evaluation for every active agent, reading the rubric first as your instructions say. Record each evaluation with record_evaluation and raise at most one spec.change request per agent, following \"Proposing a change\" in your instructions.",
+      "budget_cents": 300
+    },
+    {
+      "name": "mira-triage",
+      "agent": "mira",
+      "cron": "0 8 * * *",
+      "task": "triage",
+      "prompt": "Triage pass: first-respond to every new PR and issue, label and route, request reviewers, approve CI for reviewed fork PRs, nudge, and propose closures. Record the outcomes of posted findings and reviewed PRs. Do not review code in this pass.",
+      "budget_cents": 100
+    },
+    {
+      "name": "mira-review",
+      "agent": "mira",
+      "cron": "0 10 * * 1-5",
+      "task": "review",
+      "prompt": "Review pass, catching up on what GitHub wakes missed: review up to three PRs in pr_queue order, skipping any marked review_woken_at_head, following \"Reviewing a PR\" in your instructions, and hand each draft to request_review_check.",
+      "budget_cents": 300
+    },
+    {
+      "name": "vera-weekly",
+      "agent": "vera",
+      "cron": "0 14 * * 5",
+      "task": "analysis",
+      "prompt": "Build the weekly scorecard per agent: KPIs, decision outcomes, spend and cost per outcome, the evidence section and the change results.",
+      "budget_cents": 150
+    }
+  ],
   "github_wakes": {
     "review": {
       "daily": 6,
