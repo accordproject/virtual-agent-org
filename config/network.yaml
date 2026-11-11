@@ -54,12 +54,16 @@ budgets:
   # Mira is woken when GitHub events call for it (decision 62): to review a PR when CI
   # finishes at a head not yet reviewed, to propose a merge when every merge check
   # passes at a reviewed head, and to first-respond to a first-time contributor.
+  # For a tracked PR whose CI fails (decision 63), Mira diagnoses it (ci_failed) and
+  # may hand it to Felix to fix (ci_fix).
   # daily: wakes per day (UTC) for that trigger; 0 turns it off. usd: each session's
   # budget. Wakes also need schedules_enabled.
   github_wakes:
     review: { daily: 6, usd: 1.00 }
     merge: { daily: 6, usd: 0.50 }
     first_response: { daily: 10, usd: 0.50 }
+    ci_failed: { daily: 6, usd: 0.50 }
+    ci_fix: { daily: 3, usd: 2.00 }
   # Session budget for each of Mandla's tasks (USD): small is wording and tier changes,
   # large is tool changes and the owner-only types.
   mechanic_small_usd: 1
@@ -89,5 +93,5 @@ agents:
   juno: 2
   sage: 1
   kit: 3
-  felix: 3
+  felix: 1    # early, for one job: fixing failed CI on tracked PRs (decision 63)
   nell: 3

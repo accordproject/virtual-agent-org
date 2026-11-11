@@ -97,7 +97,7 @@ export class GitHub {
   }
 
   pull(r: Required<RepoRef>) {
-    return this.call<{ head: { sha: string; repo: { full_name: string } | null }; base: { repo: { full_name: string } }; state: string }>(
+    return this.call<{ head: { sha: string; ref: string; repo: { full_name: string } | null }; base: { repo: { full_name: string } }; state: string; user: { login: string; type: string } | null }>(
       "GET",
       `/repos/${r.owner}/${r.repo}/pulls/${r.number}`,
     );
@@ -267,6 +267,34 @@ export class GitHub {
       base: repo.default_branch,
       body: p.body,
     });
+  }
+
+  /**
+   * A fix for a PR (decision 63): files committed on a new branch from the PR's head,
+   * then a PR into the PR's own branch, so its author can merge the fix into theirs.
+   * Only for a branch in the same repo; the App can't push to forks.
+   */
+  async proposeFix(
+    r: RepoRef,
+    p: { branch: string; headSha: string; headBranch: string; files: { path: string; content: string }[]; message: string; title: string; body: string },
+  ): Promise<{ html_url: string; number: number }> {
+    const base = `/repos/${r.owner}/${r.repo}`;
+    const commit = await this.call<{ tree: { sha: string } }>("GET", `${base}/git/commits/${p.headSha}`);
+    // Keep a script's executable bit: CI that runs it directly would otherwise fail.
+    const existing = await this.call<{ tree: { path: string; mode: string }[] }>("GET", `${base}/git/trees/${commit.tree.sha}?recursive=1`);
+    const executable = new Set(existing.tree.filter((e) => e.mode === "100755").map((e) => e.path));
+    const tree = await this.call<{ sha: string }>("POST", `${base}/git/trees`, {
+      base_tree: commit.tree.sha,
+      tree: p.files.map((f) => ({ path: f.path, mode: executable.has(f.path) ? "100755" : "100644", type: "blob", content: f.content })),
+    });
+    const made = await this.call<{ sha: string }>("POST", `${base}/git/commits`, { message: p.message, tree: tree.sha, parents: [p.headSha] });
+    await this.call("POST", `${base}/git/refs`, { ref: `refs/heads/${p.branch}`, sha: made.sha });
+    return this.call<{ html_url: string; number: number }>("POST", `${base}/pulls`, { title: p.title, head: p.branch, base: p.headBranch, body: p.body });
+  }
+
+  /** Re-runs a workflow run's failed jobs. */
+  rerunFailedJobs(r: RepoRef, runId: number) {
+    return this.call("POST", `/repos/${r.owner}/${r.repo}/actions/runs/${runId}/rerun-failed-jobs`);
   }
 
   release(r: RepoRef, p: { tag: string; name?: string; body?: string; target?: string; draft?: boolean }) {

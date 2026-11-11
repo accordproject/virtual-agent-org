@@ -115,11 +115,8 @@ schedules:
     budget_usd: 2.00
     prompt: Check security posture and progress the training plan.
 
-  - name: felix-ci
-    agent: felix
-    cron: "0 7 * * *"
-    budget_usd: 0.75
-    prompt: Check CI health and flaky tests; prepare release notes if a release is due.
+  # Felix has no schedule: in Phase 1 he works only on CI fixes the gateway starts for
+  # PRs the network tracks (decision 63). No CI health sweeps, no releases.
 
   - name: nell-weekly
     agent: nell

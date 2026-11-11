@@ -1,14 +1,14 @@
 // Handlers for the custom tools agents call. The gateway is the enforcement point:
 // it checks who may call what before doing anything.
 
-import { ActionInvalid, actionRisk, validateAction, type Normalised } from "./actions";
+import { ActionInvalid, DEPENDENCY_FILE, actionRisk, isDependencyBot, safeJson, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, refreshDecisionCard, resendDecisionCard, sendAgentMessage, startSession } from "./agents";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
-import { ACTIVITY_DAYS, activityLine } from "./githubEvents";
+import { ACTIVITY_DAYS, activityLine, requestCiFix } from "./githubEvents";
 import { memberOf } from "./people";
 import {
   GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeCard, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
@@ -62,6 +62,16 @@ const HANDLERS: Record<ToolName, Handler> = {
   request_review_check: (ctx, { sessionId, input }) => requestReviewCheck(ctx, sessionId, input),
 
   submit_review: (ctx, { sessionId, input }) => submitReview(ctx, sessionId, input),
+
+  request_ci_fix: async (ctx, { sessionId, input }) => {
+    const member = await sessionMember(ctx, sessionId);
+    // A fix ends in a PR or a public comment: that is acting, not answering.
+    if (member) throw new ToolError(`${member.name} is a member: they can ask about a PR's CI, not set a fix going. Answer them.`);
+    const ref = prRef(ctx, input.target);
+    const out = await requestCiFix(ctx, ref, s(input.sha, "sha"), s(input.diagnosis, "diagnosis"));
+    if ("refused" in out) throw new ToolError(out.refused);
+    return out.queued;
+  },
 
   submit_change: (ctx, { agent, sessionId, input }) => submitChange(ctx, agent, sessionId, input),
 
@@ -411,6 +421,34 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     rationale = `${rationale}\n\n${mergeCard(f, review, findings)}\n\nGateway checks at ${f.sha.slice(0, 7)} (${f.risk} risk: ${f.risk_reasons.join("; ")}):\n${checklist(checks)}`;
     reviewId = review?.id;
   }
+  if (kind === "github.rerun_ci" || kind === "github.fix_pr") {
+    // Decision 63: only for PRs the network tracks, at the head that failed.
+    const ref = prRef(ctx, n.target);
+    const sha = String(n.payload.sha ?? "");
+    const f = await prFacts(ctx, ref);
+    if (f.state !== "OPEN") throw new ToolError(`${f.target} is ${f.state.toLowerCase()}: nothing to do.`);
+    if (!(await ctx.db.isTracked(f.target))) throw new ToolError(`${f.target} isn't a PR the network tracks, so it gets no CI fixes. Leave it.`);
+    if (!f.sha.startsWith(sha)) throw new ToolError(`The PR has new commits (head is ${f.sha.slice(0, 7)}): its CI runs again. Don't retry for ${sha.slice(0, 7)}.`);
+    const earlier = (await ctx.db.decisionsOn(f.target, kind)).find((d) => String(safeJson(d.payload).sha ?? "").startsWith(sha.slice(0, 7)) && !["rejected", "lapsed"].includes(d.status));
+    if (earlier) throw new ToolError(`${earlier.id} already asked for ${kind} at ${sha.slice(0, 7)}. Once per head: a second failure counts as real.`);
+    if (kind === "github.fix_pr") {
+      const fix = await ciFixOf(ctx, sessionId);
+      if (!fix || fix.target.toLowerCase() !== f.target.toLowerCase()) throw new ToolError(`Fixes come from a ci_fix task for that PR, and this session's task isn't one for ${f.target}.`);
+      // Whole files written for the task's head would undo commits made since.
+      if (!f.sha.startsWith(fix.sha)) throw new ToolError(`Your task was for ${fix.sha.slice(0, 7)}, and the PR has moved on to ${f.sha.slice(0, 7)}. Stop: its CI runs again.`);
+      const deps = (n.payload.files as { path: string }[]).map((x) => x.path).filter((p) => DEPENDENCY_FILE.test(p));
+      if (deps.length && !isDependencyBot((await (await ctx.github()).pull(ref)).user)) {
+        throw new ToolError(`Not queued: ${deps.join(", ")} ${deps.length > 1 ? "are dependency files" : "is a dependency file"}, which a fix may change only on a dependency bot's PR.`);
+      }
+    }
+    // Decision 63: a re-run of failed jobs runs without Matt, once per head, on a tracked PR
+    // (checked above). The executor re-checks that each run failed at the current head.
+    if (kind === "github.rerun_ci" && ctx.network.action_kinds[kind]?.auto && declared !== "high" && !member) {
+      const d = await ctx.db.createDecision({ agent, kind, target: n.target, summary: s(input.summary, "summary").slice(0, 200), rationale: s(input.rationale, "rationale"), risk: "low", payload: n.payload, session_id: sessionId });
+      const r = await runAuto(ctx, d, "re-run automatically: a tracked PR's failed runs at its current head, once per head (decision 63)");
+      return `${d.id} ${r.ok ? "done" : "failed"}: ${r.result}`;
+    }
+  }
   if (kind === "spec.change") {
     // Rule 5: a member may ask about the network, never set changing it going.
     if (member) throw new ToolDenied(`${member.name} is a member: they can't ask for a change to the network. Answer them, and leave proposals to your weekly evaluation.`);
@@ -651,6 +689,7 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   const earlier = followsUp?.startsWith("T-") ? await ctx.db.getTask(followsUp) : null;
   const change = earlier?.kind === "change" ? await ctx.db.changeForTask(earlier.id) : null;
   if (agent === "mandla" && !change) throw new ToolError("Mandla only works on approved changes: propose one with spec.change.");
+  if (agent === "felix") throw new ToolError("Felix only fixes CI on PRs the network tracks, when the gateway starts him from Mira's request_ci_fix (decision 63). Ask Mira instead.");
   if (change && agent !== "mandla") throw new ToolError(`${earlier!.id} is a change task: only Mandla can follow it up.`);
   if (change && (earlier!.status !== "blocked" || change.state !== "building")) {
     throw new ToolError(`${change.id} is ${change.state} and ${earlier!.id} is ${earlier!.status}: there is nothing to follow up.`);
@@ -739,6 +778,13 @@ async function reviewCheckOf(ctx: Ctx, sessionId: string): Promise<{ target: str
 
 async function isReviewCheck(ctx: Ctx, sessionId: string): Promise<boolean> {
   return !!(await reviewCheckOf(ctx, sessionId));
+}
+
+/** The PR and head a ci_fix session was started for (decision 63), or null for any other session. */
+async function ciFixOf(ctx: Ctx, sessionId: string): Promise<{ target: string; sha: string } | null> {
+  const t = await ctx.db.sessionTask(sessionId);
+  if (!t || t.kind !== "ci_fix" || !t.review_target || !t.review_sha) return null;
+  return { target: t.review_target, sha: t.review_sha };
 }
 
 const findingLine = (f: ReviewFinding) =>

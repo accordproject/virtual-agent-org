@@ -23,9 +23,9 @@ export function fullRepo(repo: string, org: string): string {
 }
 
 /** Kinds the gateway runs without the owner, after its own checks (decisions 20 and 36). */
-export const AUTO_KINDS = ["github.approve_ci", "github.review"];
+export const AUTO_KINDS = ["github.approve_ci", "github.review", "github.rerun_ci"];
 /** What GitHub events may wake Mira for (decision 62). */
-export const GITHUB_WAKES = ["review", "merge", "first_response"] as const;
+export const GITHUB_WAKES = ["review", "merge", "first_response", "ci_failed", "ci_fix"] as const;
 const TONES = ["welcoming", "neutral", "terse"];
 
 export function validateReview(r: ReviewYaml | undefined): string[] {
@@ -77,7 +77,7 @@ export function validate(cfg = loadAll()): string[] {
   for (const [k, v] of Object.entries(permissions.action_kinds)) {
     if (!["github", "discord", "discord_ops", "discord_dm", "vimeo", "manual", "task"].includes(v.executor)) errs.push(`action kind ${k}: unknown executor "${v.executor}"`);
     // Only kinds the gateway has its own safety checks for may skip the owner.
-    if (v.auto && !AUTO_KINDS.includes(k)) errs.push(`action kind ${k}: auto is only allowed for ${AUTO_KINDS.join(" and ")}`);
+    if (v.auto && !AUTO_KINDS.includes(k)) errs.push(`action kind ${k}: auto is only allowed for ${AUTO_KINDS.slice(0, -1).join(", ")} and ${AUTO_KINDS.at(-1)}`);
   }
   errs.push(...validateReview(review));
   const cap = network.budgets.member_daily_messages;

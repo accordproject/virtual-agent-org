@@ -678,19 +678,36 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   the gateway sends them, and would spend tokens waiting); polling as the main route.
 - Design: `docs/superpowers/specs/2026-11-11-github-events-design.md`.
 
-**63. Fixing failed CI** · RESOLVED (not built)
+**63. Fixing failed CI** · RESOLVED
 
 - Felix joins Phase 1 for one job: fixing failed CI on PRs the network tracks (one
-  Mira has reviewed, or with an open decision or a pending wake). His release work, and
-  any watch on untracked PRs or the default branch, stay off.
-- Mira diagnoses a tracked PR's failed CI from its logs. She asks for a re-run when it
-  is flaky, comments to a person whose change broke it, and hands a bot's PR, or one
-  failing because the base branch is broken, to Felix through the gateway.
-- Felix builds and tests the fix in a sandbox with no write credentials, as Mandla
-  does, and requests `github.fix_pr`; the gateway applies it only after the owner
-  approves the card.
-- Not chosen: giving Mira a shell. Building runs the repo's and its dependencies' code,
-  and her sandbox holds a token that posts as the project.
+  Mira has reviewed, or with an open decision or a pending wake). His release work,
+  his daily CI health check, and any watch on untracked PRs or the default branch,
+  stay off. He has no schedule, and Ada can't assign him tasks.
+- When a tracked PR's CI fails, the gateway wakes Mira once every run at the head has
+  finished (`ci_failed`, within a daily cap). From the logs she:
+  - requests `github.rerun_ci` when it is flaky, once per head; if the re-run fails
+    too, the gateway wakes her once more to treat it as real;
+  - comments to a person whose change broke it;
+  - hands a bot's PR, or one failing because the base branch is broken, to Felix with
+    `request_ci_fix`, which the gateway checks and turns into a `ci_fix` wake within
+    its own daily cap. In a triage pass she may also do this when the author hasn't
+    answered her CI comment in 5 days.
+- Felix reproduces, fixes and tests it in a sandbox with a read-only token, and
+  requests `github.fix_pr` with the whole changed files. The gateway refuses files
+  under `.github/`, and dependency files except on Dependabot's or Renovate's PR. After the
+  owner approves the card, it opens a PR into the PR's branch when that branch is in
+  the same repo; for a fork, which the App can't push to, it posts the files as a
+  comment for the author to apply.
+- `github.rerun_ci` is `auto`, by the owner's decision: a re-run uses code that has
+  already run, so it can't publish anything or change a repo. The gateway still checks
+  it: tracked PRs only, once per head, and only runs that failed at the PR's current
+  head. A request Mira rates high risk goes to the owner as a card. Re-runs are left
+  out of approval measures, like `github.approve_ci`.
+- Not chosen: giving Mira a shell. Building runs the repo's and its dependencies' code.
+  Vault credentials are bound to MCP servers rather than exposed to the sandbox, so
+  the risk is smaller than first thought, but a separate agent with only a read-only
+  token keeps Mira's sessions simple and her token out of any session that runs code.
 - Design: section 4a of the design in decision 62.
 
 **64. No advisor model** · RESOLVED

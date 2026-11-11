@@ -24,7 +24,7 @@ test("compile leaves platform ids out of network.json", () => {
 test("validate allows auto only for the kinds the gateway checks itself", () => {
   const cfg = loadAll();
   const permissions = { ...cfg.permissions, action_kinds: { ...cfg.permissions.action_kinds, "github.merge": { risk: "medium" as const, executor: "github" as const, auto: true } } };
-  assert.ok(validate({ ...cfg, permissions }).includes("action kind github.merge: auto is only allowed for github.approve_ci and github.review"));
+  assert.ok(validate({ ...cfg, permissions }).includes("action kind github.merge: auto is only allowed for github.approve_ci, github.review and github.rerun_ci"));
   assert.deepEqual(validate(cfg), []);
 });
 
@@ -103,9 +103,11 @@ test("compile carries the GitHub wake caps and budgets, and validate checks them
     review: { daily: 6, budget_cents: 100 },
     merge: { daily: 6, budget_cents: 50 },
     first_response: { daily: 10, budget_cents: 50 },
+    ci_failed: { daily: 6, budget_cents: 50 },
+    ci_fix: { daily: 3, budget_cents: 200 },
   });
   const bad = (github_wakes: object) => validate({ ...cfg, network: { ...cfg.network, budgets: { ...cfg.network.budgets, github_wakes } } });
-  assert.ok(bad({ release: { daily: 1, usd: 1 } }).includes("network.yaml: budgets.github_wakes.release: unknown trigger; use review, merge, first_response"));
+  assert.ok(bad({ release: { daily: 1, usd: 1 } }).includes("network.yaml: budgets.github_wakes.release: unknown trigger; use review, merge, first_response, ci_failed, ci_fix"));
   assert.ok(bad({ review: { daily: -1, usd: 1 } }).includes("network.yaml: budgets.github_wakes.review.daily must be a whole number from 0 to 50"));
   assert.ok(bad({ merge: { daily: 2, usd: 4 } }).includes("network.yaml: budgets.github_wakes.merge.usd must be more than 0 and at most 3"));
   assert.deepEqual(bad({ review: { daily: 0, usd: 1 } }), validate(cfg));

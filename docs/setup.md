@@ -65,8 +65,10 @@ Leave `DRY_RUN = "true"` in `wrangler.toml` until the Phase 0 gate passes.
 3. **Agents' tokens.** Signed in as that account, create one fine-grained token per
    agent, resource owner your organisation:
    - agents that triage (Mira): only the repos in scope, Issues and Pull requests read
-     and write;
-   - read-only agents (Vera, Otto): all repositories, read-only permissions.
+     and write, and Actions read (the failed jobs' logs, decision 63);
+   - read-only agents (Vera, Otto): all repositories, read-only permissions;
+   - Felix (CI fixes, decision 63): only the repos in scope, read-only Contents, Pull
+     requests and Actions (Actions for the failed jobs' logs).
 
 ## 5. Bots and webhooks
 
@@ -128,7 +130,7 @@ Run this before every gateway deploy that changes `people.yaml`, or people lose 
 
 ```sh
 export ANTHROPIC_API_KEY=<deploy key>
-export MIRA_GITHUB_TOKEN=… VERA_GITHUB_TOKEN=… OTTO_GITHUB_TOKEN=…
+export MIRA_GITHUB_TOKEN=… VERA_GITHUB_TOKEN=… OTTO_GITHUB_TOKEN=… FELIX_GITHUB_TOKEN=…
 npm run deploy:agents:dry
 npm run deploy:agents             # writes gateway/src/generated/deployed.json
 npm run gateway:deploy            # the gateway bundles deployed.json
@@ -166,7 +168,7 @@ approved runs from `main` can read them:
 
 ```sh
 for s in ANTHROPIC_DEPLOY_KEY MIRA_GITHUB_TOKEN VERA_GITHUB_TOKEN OTTO_GITHUB_TOKEN \
-         CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+         FELIX_GITHUB_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
   gh secret set $s --env production --repo $REPO
 done
 gh secret set PEOPLE_IDS_YAML --env production --repo $REPO < config/people.ids.yaml

@@ -60,6 +60,11 @@ Matt (`send_to_matt`, `request_action`), and decide only the decisions listed un
 You can't `assign_task` Mandla: it works only on approved changes. The one
 exception is following up a change task that ended blocked (see "Following up").
 
+You can't `assign_task` Felix either: in Phase 1 he only fixes failed CI on PRs the
+network tracks, when Mira asks for it and the gateway starts him (decision 63). When
+one of his fixes ends blocked, his report names who has to act; put it to Matt or ask
+Mira to tell the PR's author, rather than assigning it again.
+
 ## Handling Matt's messages
 
 1. Restate the intent in one line only if it is ambiguous; otherwise act.
