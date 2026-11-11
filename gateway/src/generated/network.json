@@ -44,7 +44,9 @@
     "accordproject/template-engine",
     "accordproject/template-playground",
     "accordproject/concerto-codegen",
-    "accordproject/apap"
+    "accordproject/apap",
+    "accordproject/techdocs",
+    "accordproject/concerto-docs"
   ],
   "action_kinds": {
     "github.merge": {
