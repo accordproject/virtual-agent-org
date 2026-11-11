@@ -107,8 +107,14 @@ closes gets `reviews.outcome` = `merged` or `closed`. Mira's triage step 6 keeps
 the judgement calls: findings acted on or dismissed, reverts and follow-ups.
 
 **Mira's queue.** Each PR in `pr_queue` gains `activity`, a line summing up the last
-3 days (pushes, comments, reviews, the latest CI result), and `woken_lately` when a
-wake started work on it.
+3 days (pushes, comments, reviews, the latest CI result), and `review_woken_at_head`
+when a review wake started on its current head in the last day. Only that marks a PR
+as handled for the catch-up pass: a first response, an older head, or a wake that
+failed a day ago leaves it in.
+
+**Late and out-of-order deliveries.** A close or push is applied against GitHub's
+current state, not the delivery's snapshot: a close is ignored if the PR or issue is
+open again, and a push lapses and queues a review against the head as it is now.
 
 ### 4. Waking Mira
 
@@ -135,10 +141,16 @@ draft) is queued again; a started one never is.
 **Before starting, the gateway re-checks.** At dispatch it reads the PR's facts again.
 It drops the wake, with the reason, if the PR closed or is a draft, the head moved (the
 new head gets its own wake), a review at that head now exists, CI failed, or a review
-check for the PR is already running. A review wake whose CI is still running waits 15
-minutes and looks again, for up to 24 hours. A merge wake is also dropped if a merge
-was already proposed for that review or any merge check fails. A first response is
-dropped if the PR or issue closed first.
+check for the PR is already running. A review wake starts only on green CI: while CI is
+still running, or hasn't reported at all, it waits 15 minutes and looks again, for up to
+24 hours from when it was queued. A merge wake is also dropped if a merge was already
+proposed for that review or any merge check fails. A first response asks GitHub whether
+the PR or issue is still open, and is dropped if not.
+
+**Claiming.** Before the re-check, the cron run claims the wake and one of its
+trigger's daily slots in a single statement, so overlapping runs can't both start it
+or both pass the cap. A wake that goes back to waiting, or is dropped, gives its slot
+back. A claim never followed by a start within 30 minutes is dropped.
 
 **Guards,** the same as Ada's follow-up wakes (decision 50):
 
@@ -220,19 +232,21 @@ GitHub doesn't retry failed deliveries. Once a day at 05:30, before Vera's 06:00
 reads the day's records, the cron re-reads every open PR and issue the network tracks:
 
 - targets of open GitHub decisions;
-- reviewed PRs with no outcome yet;
+- PRs whose latest review has no outcome yet;
 - targets with a pending wake.
 
-Oldest first, up to 100 a day, 12 per five-minute cron run so no run exhausts the
-Worker's subrequests. It applies the same rules as section 3 and queues any review or
-merge wake section 4 would have queued. No repo-wide listing.
+Least recently checked first (each target's last check is kept in `github_checks`), up
+to 100 a day, 12 per five-minute cron run so no run exhausts the Worker's subrequests.
+A list longer than 100 rotates over the following days. It applies the same rules as
+section 3 and queues any review or merge wake section 4 would have queued. No
+repo-wide listing.
 
 ### 6. Setup
 
 - On the gateway's App: webhook URL `https://<worker>/github`, a random secret, and
   the six events above (`docs/setup.md`, step 5).
-- `wrangler secret put GITHUB_WEBHOOK_SECRET`. Until it is set, `/github` answers 404
-  and nothing else changes.
+- `wrangler secret put GITHUB_WEBHOOK_SECRET`. Until it is set, `/github` answers 404,
+  and the cron neither runs the daily check nor starts wakes: nothing changes.
 
 ## Build order
 

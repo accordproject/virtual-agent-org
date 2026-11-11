@@ -39,7 +39,7 @@ schedules:
     budget_usd: 3.00
     prompt: >
       Review pass, catching up on what GitHub wakes missed: review up to three PRs in
-      pr_queue order, skipping any marked woken_lately, following "Reviewing a PR" in your
+      pr_queue order, skipping any marked review_woken_at_head, following "Reviewing a PR" in your
       instructions, and hand each draft to request_review_check.
 
   - name: mira-lessons

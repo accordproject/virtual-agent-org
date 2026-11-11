@@ -132,7 +132,7 @@ export interface Wake {
   sha: string;
   agent: string;
   due_at: string;
-  status: "pending" | "started" | "dropped";
+  status: "pending" | "starting" | "started" | "dropped";
   reason: string | null;
   session_id: string | null;
   created_at: string;
@@ -411,34 +411,21 @@ export class Db {
 
   /**
    * Queues a wake, once per trigger, target and head. Queuing one that is already
-   * pending brings it forward if this one is due sooner, and one that was dropped
-   * (say, while the PR was a draft) is queued again; one that started never is.
-   * True if queued.
+   * pending brings it forward if this one is due sooner. One that was dropped (say,
+   * while the PR was a draft) is queued again as new, so its wait for CI starts over;
+   * one that started never is. True if queued.
    */
   async queueWake(w: { trigger: WakeTrigger; target: string; sha?: string; agent: string; delayMinutes?: number }): Promise<boolean> {
     const r = await this.db
       .prepare(
         "INSERT INTO github_wakes (trigger, target, sha, agent, due_at) VALUES (?, ?, ?, ?, datetime('now', ?)) " +
-          "ON CONFLICT (trigger, target, sha) DO UPDATE SET due_at = excluded.due_at, status = 'pending', reason = NULL " +
+          "ON CONFLICT (trigger, target, sha) DO UPDATE SET due_at = excluded.due_at, status = 'pending', reason = NULL, " +
+          "created_at = CASE WHEN github_wakes.status = 'dropped' THEN datetime('now') ELSE github_wakes.created_at END " +
           "WHERE github_wakes.status = 'dropped' OR (github_wakes.status = 'pending' AND excluded.due_at < github_wakes.due_at)",
       )
       .bind(w.trigger, w.target.toLowerCase(), w.sha ?? "", w.agent, `+${w.delayMinutes ?? 0} minutes`)
       .run();
     return (r.meta?.changes ?? 0) > 0;
-  }
-
-  /** Puts a pending wake off for `minutes`, e.g. while CI is still running. */
-  async delayWake(id: number, minutes: number, reason: string) {
-    await this.db.prepare("UPDATE github_wakes SET due_at = datetime('now', ?), reason = ? WHERE id = ? AND status = 'pending'").bind(`+${minutes} minutes`, reason, id).run();
-  }
-
-  /** Whether the PR or issue was closed on GitHub since `since`, by the events received. */
-  async closedSince(target: string, since: string): Promise<boolean> {
-    const row = await this.db
-      .prepare("SELECT 1 AS x FROM github_events WHERE target = ? AND action = 'closed' AND received_at >= ? LIMIT 1")
-      .bind(target.toLowerCase(), since)
-      .first();
-    return !!row;
   }
 
   /** Whether a review check for this PR is open or running. */
@@ -458,30 +445,51 @@ export class Db {
     return results;
   }
 
-  /** Wakes of one trigger started since midnight UTC. */
-  async wakesStartedToday(trigger: WakeTrigger): Promise<number> {
-    const row = await this.db
-      .prepare("SELECT COUNT(*) AS n FROM github_wakes WHERE trigger = ? AND status = 'started' AND started_at >= date('now')")
-      .bind(trigger)
-      .first<{ n: number }>();
-    return row?.n ?? 0;
+  /**
+   * Claims a pending wake and one of its trigger's daily slots (UTC) in one statement,
+   * so overlapping cron runs can't both start it or both pass the cap. A claimed wake
+   * is 'starting' until it starts, is dropped, or is handed back to wait.
+   */
+  async claimWake(id: number, trigger: WakeTrigger, dailyCap: number): Promise<"claimed" | "cap" | "gone"> {
+    const r = await this.db
+      .prepare(
+        "UPDATE github_wakes SET status = 'starting', started_at = datetime('now') WHERE id = ? AND status = 'pending' " +
+          "AND (SELECT COUNT(*) FROM github_wakes WHERE trigger = ? AND status IN ('starting', 'started') AND started_at >= date('now')) < ?",
+      )
+      .bind(id, trigger, dailyCap)
+      .run();
+    if ((r.meta?.changes ?? 0) > 0) return "claimed";
+    const row = await this.db.prepare("SELECT status FROM github_wakes WHERE id = ?").bind(id).first<{ status: string }>();
+    return row?.status === "pending" ? "cap" : "gone";
   }
 
-  /** PRs a wake started work on since `since`, as owner/repo#n. */
-  async wokenTargets(repo: string, since: string): Promise<Set<string>> {
-    const { results } = await this.db
-      .prepare("SELECT target FROM github_wakes WHERE target LIKE ? AND status = 'started' AND started_at >= ?")
-      .bind(`${repo.toLowerCase()}#%`, since)
-      .all<{ target: string }>();
-    return new Set(results.map((r) => r.target));
+  /** Hands a claimed wake back to wait `minutes`, e.g. while CI is still running; it no longer holds a daily slot. */
+  async delayWake(id: number, minutes: number, reason: string) {
+    await this.db
+      .prepare("UPDATE github_wakes SET status = 'pending', started_at = NULL, due_at = datetime('now', ?), reason = ? WHERE id = ? AND status IN ('pending', 'starting')")
+      .bind(`+${minutes} minutes`, reason, id)
+      .run();
   }
 
   async startWake(id: number, sessionId: string) {
-    await this.db.prepare("UPDATE github_wakes SET status = 'started', session_id = ?, started_at = datetime('now') WHERE id = ?").bind(sessionId, id).run();
+    await this.db.prepare("UPDATE github_wakes SET status = 'started', session_id = ? WHERE id = ?").bind(sessionId, id).run();
   }
 
+  /** Drops a wake that hasn't started; a claimed one gives its daily slot back. */
   async dropWake(id: number, reason: string) {
-    await this.db.prepare("UPDATE github_wakes SET status = 'dropped', reason = ? WHERE id = ? AND status = 'pending'").bind(reason, id).run();
+    await this.db
+      .prepare("UPDATE github_wakes SET status = 'dropped', started_at = NULL, reason = ? WHERE id = ? AND status IN ('pending', 'starting')")
+      .bind(reason, id)
+      .run();
+  }
+
+  /** Drops claims a cron run never finished (the Worker stopped mid-start). Returns how many. */
+  async dropStuckWakes(minutes: number): Promise<number> {
+    const r = await this.db
+      .prepare("UPDATE github_wakes SET status = 'dropped', started_at = NULL, reason = 'claimed but never started' WHERE status = 'starting' AND started_at < datetime('now', ?)")
+      .bind(`-${minutes} minutes`)
+      .run();
+    return r.meta?.changes ?? 0;
   }
 
   /** Drops every pending wake for a PR or issue, e.g. once it closes. */
@@ -490,28 +498,50 @@ export class Db {
     return r.meta?.changes ?? 0;
   }
 
-  /** Puts a wake off until midnight UTC, e.g. over the daily cap. */
+  /** Puts a pending wake off until midnight UTC, when the daily cap resets. */
   async deferWake(id: number, reason: string) {
-    await this.db.prepare("UPDATE github_wakes SET due_at = datetime(date('now', '+1 day')), reason = ? WHERE id = ?").bind(reason, id).run();
+    await this.db.prepare("UPDATE github_wakes SET due_at = datetime(date('now', '+1 day')), reason = ? WHERE id = ? AND status = 'pending'").bind(reason, id).run();
+  }
+
+  /** "owner/repo#12@sha" for each review wake started at that head since `since`. */
+  async reviewWokenHeads(repo: string, since: string): Promise<Set<string>> {
+    const { results } = await this.db
+      .prepare("SELECT target, sha FROM github_wakes WHERE trigger = 'review' AND target LIKE ? AND status = 'started' AND started_at >= ?")
+      .bind(`${repo.toLowerCase()}#%`, since)
+      .all<{ target: string; sha: string }>();
+    return new Set(results.map((r) => `${r.target}@${r.sha}`));
   }
 
   /**
    * Open PRs and issues the network tracks, for the daily check: targets of open GitHub
-   * decisions, reviewed PRs with no outcome, and pending wakes.
-   * Oldest first.
+   * decisions, PRs whose latest review has no outcome, and pending wakes. Those checked
+   * least recently come first, never-checked ones first of all, so a long list rotates.
    */
   async trackedTargets(limit: number): Promise<string[]> {
     const { results } = await this.db
       .prepare(
-        "SELECT target, MIN(at) AS at FROM (" +
+        "SELECT t.target, MIN(t.at) AS at, c.checked_at FROM (" +
           "SELECT lower(target) AS target, created_at AS at FROM decisions WHERE status = 'open' AND kind LIKE 'github.%' AND target LIKE '%#%' " +
-          "UNION ALL SELECT target, created_at AS at FROM reviews WHERE outcome IS NULL " +
+          "UNION ALL SELECT r.target, r.created_at AS at FROM reviews r WHERE r.outcome IS NULL AND r.seq = (SELECT MAX(seq) FROM reviews x WHERE x.target = r.target) " +
           "UNION ALL SELECT target, created_at AS at FROM github_wakes WHERE status = 'pending'" +
-          ") GROUP BY target ORDER BY at ASC LIMIT ?",
+          ") t LEFT JOIN github_checks c ON c.target = t.target GROUP BY t.target ORDER BY c.checked_at IS NOT NULL, c.checked_at ASC, at ASC LIMIT ?",
       )
       .bind(limit)
       .all<{ target: string }>();
     return results.map((r) => r.target);
+  }
+
+  async markChecked(target: string) {
+    await this.db
+      .prepare("INSERT INTO github_checks (target, checked_at) VALUES (?, datetime('now')) ON CONFLICT (target) DO UPDATE SET checked_at = excluded.checked_at")
+      .bind(target.toLowerCase())
+      .run();
+  }
+
+  /** How many event ids starting with `prefix` were claimed, e.g. one day's daily-check targets. */
+  async countClaims(prefix: string): Promise<number> {
+    const row = await this.db.prepare("SELECT COUNT(*) AS n FROM processed_events WHERE event_id LIKE ?").bind(`${prefix}%`).first<{ n: number }>();
+    return row?.n ?? 0;
   }
 
   // ---- events: idempotency ------------------------------------------------

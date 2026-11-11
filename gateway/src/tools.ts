@@ -87,13 +87,20 @@ const HANDLERS: Record<ToolName, Handler> = {
     if (!inScope(ctx, ref)) throw new ToolError(`${repo} is not in the configured repos`);
     const name = `${ref.owner}/${ref.repo}`;
     const gh = await ctx.github();
-    const since = new Date(Date.now() - ACTIVITY_DAYS * 86_400_000).toISOString().replace("T", " ").slice(0, 19);
-    const [pulls, reviewed, events, woken] = await Promise.all([gh.openPulls(ref), ctx.db.reviewedHeads(name), ctx.db.githubActivity(name, since), ctx.db.wokenTargets(name, since)]);
-    // Decision 62: what moved on each PR lately, and whether a wake already started work on it.
+    const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().replace("T", " ").slice(0, 19);
+    const [pulls, reviewed, events, woken] = await Promise.all([
+      gh.openPulls(ref),
+      ctx.db.reviewedHeads(name),
+      ctx.db.githubActivity(name, ago(ACTIVITY_DAYS)),
+      ctx.db.reviewWokenHeads(name, ago(1)),
+    ]);
+    // Decision 62: what moved on each PR lately, and whether a review wake started on its
+    // current head in the last day. Only that marks it as handled: a first response, an
+    // older head or a wake from days ago leaves it to the catch-up pass.
     return JSON.stringify(
       queueFrom(name, pulls, reviewed).map((p) => {
         const activity = activityLine(events.filter((e) => e.target === p.target.toLowerCase()));
-        return { ...p, ...(activity ? { activity } : {}), ...(woken.has(p.target.toLowerCase()) ? { woken_lately: true } : {}) };
+        return { ...p, ...(activity ? { activity } : {}), ...(woken.has(`${p.target.toLowerCase()}@${p.sha}`) ? { review_woken_at_head: true } : {}) };
       }),
     );
   },

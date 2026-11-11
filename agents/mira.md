@@ -79,7 +79,7 @@ The gateway works out the facts and decides what may merge. You find the problem
 1. **Pick PRs.** The gateway wakes you to review each PR as soon as its CI finishes
    (below), so the daily review pass catches up on what those wakes missed. Call
    `pr_queue(repo)` for each repo in scope. Take PRs in its order, skipping drafts and
-   any marked `reviewed_at_head` or `woken_lately`, at most three a pass. Skip a PR
+   any marked `reviewed_at_head` or `review_woken_at_head`, at most three a pass. Skip a PR
    whose CI hasn't finished.
 2. **Get the facts.** Call `pr_facts(target)`. Note the head `sha`, the `risk` band and
    why, the `tone` for this author, any `path_notes`, and what the merge checks say.

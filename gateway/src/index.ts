@@ -112,8 +112,11 @@ export default {
         await housekeeping(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.housekeeping_error", detail: String(e) }));
         await tickChanges(ctx);
         await sweep(ctx);
-        await dailyCheck(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.github_daily_check_error", detail: String(e) }));
-        await dispatchWakes(ctx);
+        // Decision 62 is opt-in: without the webhook secret the gateway neither polls GitHub nor wakes anyone.
+        if (env.GITHUB_WEBHOOK_SECRET) {
+          await dailyCheck(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.github_daily_check_error", detail: String(e) }));
+          await dispatchWakes(ctx);
+        }
       })(),
     );
   },

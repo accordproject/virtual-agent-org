@@ -29,6 +29,8 @@ export const CI_WAIT = { hours: 24, minutes: 15 };
  */
 export const WAKE_LIMIT = 10;
 export const DAILY_CHECK = { perRun: 12, total: 100 };
+/** A wake claimed this long ago that never started (the Worker stopped mid-start) is dropped. */
+export const STUCK_MINUTES = 30;
 
 type Payload = Record<string, any>;
 
@@ -108,13 +110,21 @@ export async function applyEvent(ctx: Ctx, n: Normalised): Promise<void> {
     const first = FIRST_TIME.includes((e.association ?? "").toUpperCase()) && !n.authorBot;
     switch (`${e.event}.${e.action}`) {
       case "pull_request.closed":
-      case "issues.closed":
-        await onClosed(ctx, e.target, e.detail === "merged" ? "merged" : "closed", e.actor);
+      case "issues.closed": {
+        // Deliveries can arrive late or out of order: a close processed after a reopen
+        // must not lapse decisions on what is open again, so ask GitHub how it is now.
+        const { state } = await (await ctx.github()).issueState(parseTarget(e.target) as Required<RepoRef>);
+        if (state !== "open") await onClosed(ctx, e.target, state, e.actor);
         break;
-      case "pull_request.synchronize":
-        await lapseOldHeads(ctx, e.target, e.sha!);
-        await queueReview(ctx, e.target, e.sha!, REVIEW_DELAY);
+      }
+      case "pull_request.synchronize": {
+        // Likewise a late push: lapse and review against the head as it is now.
+        const pr = await (await ctx.github()).pull(parseTarget(e.target) as Required<RepoRef>);
+        if (pr.state !== "open") break;
+        await lapseOldHeads(ctx, e.target, pr.head.sha);
+        await queueReview(ctx, e.target, pr.head.sha, REVIEW_DELAY);
         break;
+      }
       case "pull_request.opened":
       case "pull_request.reopened":
       case "pull_request.ready_for_review":
@@ -229,10 +239,13 @@ type Verdict = { go: true; facts?: PrFacts } | { drop: string } | { wait: number
 /**
  * Starts the wakes that are due, within the guards: the trigger is on, schedules are
  * on (this is work nobody asked for), Mira is active, and the trigger's daily cap isn't
- * reached. Each wake re-reads the PR first and is dropped if it no longer applies.
+ * reached. Each wake is claimed with a daily slot in one statement, so overlapping cron
+ * runs can't both start it, then re-reads the PR and is dropped if it no longer applies.
  * Never throws; every start, drop and delay is audited.
  */
 export async function dispatchWakes(ctx: Ctx, limit = WAKE_LIMIT) {
+  const stuck = await ctx.db.dropStuckWakes(STUCK_MINUTES);
+  if (stuck) await ctx.db.audit({ event_type: "gateway.wakes_unstuck", detail: { dropped: stuck } });
   for (const w of await ctx.db.dueWakes(limit)) {
     try {
       const cfg = ctx.network.github_wakes?.[w.trigger];
@@ -249,7 +262,9 @@ export async function dispatchWakes(ctx: Ctx, limit = WAKE_LIMIT) {
         await drop(ctx, w, `${w.agent} is ${status}`);
         continue;
       }
-      if ((await ctx.db.wakesStartedToday(w.trigger)) >= cfg.daily) {
+      const claim = await ctx.db.claimWake(w.id, w.trigger, cfg.daily);
+      if (claim === "gone") continue; // another run has it
+      if (claim === "cap") {
         await ctx.db.deferWake(w.id, `daily cap of ${cfg.daily} ${w.trigger} wakes reached`);
         continue;
       }
@@ -271,8 +286,13 @@ async function drop(ctx: Ctx, w: Wake, why: string) {
 
 /** Whether the wake still applies, by the PR as it is now. */
 async function recheck(ctx: Ctx, w: Wake): Promise<Verdict> {
-  if (w.trigger === "first_response") return (await ctx.db.closedSince(w.target, w.created_at)) ? { drop: "closed before the first response" } : { go: true };
-  const f = await prFacts(ctx, parseTarget(w.target) as Required<RepoRef>);
+  const ref = parseTarget(w.target) as Required<RepoRef>;
+  if (w.trigger === "first_response") {
+    // Asks GitHub, not the events received: the close delivery may have been missed.
+    const { state } = await (await ctx.github()).issueState(ref);
+    return state === "open" ? { go: true } : { drop: `${state} before the first response` };
+  }
+  const f = await prFacts(ctx, ref);
   if (f.state !== "OPEN") return { drop: `the PR is ${f.state.toLowerCase()}` };
   if (f.draft) return { drop: "the PR is a draft" };
   if (!f.sha.startsWith(w.sha)) return { drop: `new commits: the head is now ${f.sha.slice(0, 7)}` };
@@ -281,7 +301,8 @@ async function recheck(ctx: Ctx, w: Wake): Promise<Verdict> {
   if (w.trigger === "review") {
     if (review) return { drop: `already reviewed at ${f.sha.slice(0, 7)}` };
     if (f.ci === "failure") return { drop: "CI failed at this head" };
-    if (f.ci === "success" || f.ci === "none") return { go: true, facts: f };
+    // "none" means nothing has reported yet, not that CI passed: keep waiting.
+    if (f.ci === "success") return { go: true, facts: f };
     const waited = (Date.now() - Date.parse(`${w.created_at.replace(" ", "T")}Z`)) / 3_600_000;
     return waited >= CI_WAIT.hours ? { drop: `CI still ${f.ci} after ${CI_WAIT.hours} hours` } : { wait: CI_WAIT.minutes, why: `CI is ${f.ci}` };
   }
@@ -367,19 +388,25 @@ export function dailyCheckDue(timezone: string, now = new Date()): { date: strin
  * GitHub doesn't retry failed deliveries, so once a day the gateway re-reads the open
  * PRs and issues the network tracks and applies the same rules. It never lists whole
  * repos. Runs from the five-minute cron: each run after 05:30 local time takes the
- * next few targets not yet checked that day, until none are left.
+ * targets checked least recently, a few at a time, until the day's allowance is used or
+ * none are left. Since the least recently checked go first, a list longer than the
+ * allowance rotates over the following days instead of starving its newest targets.
  */
 export async function dailyCheck(ctx: Ctx, now = new Date()) {
   const { date, due } = dailyCheckDue(ctx.network.timezone, now);
   if (!due) return;
+  const claimed = `github-daily:${date}:`;
+  let budget = Math.min(DAILY_CHECK.perRun, DAILY_CHECK.total - (await ctx.db.countClaims(claimed)));
   let checked = 0;
   const closed: string[] = [];
   const errors: string[] = [];
   for (const target of await ctx.db.trackedTargets(DAILY_CHECK.total)) {
-    if (checked + errors.length >= DAILY_CHECK.perRun) break;
+    if (budget <= 0) break;
     const ref = parseTarget(target);
     if (!ref?.number || !inScope(ctx, ref)) continue;
-    if (!(await ctx.db.claimEvent(`github-daily:${date}:${target}`))) continue;
+    if (!(await ctx.db.claimEvent(`${claimed}${target}`))) continue;
+    budget--;
+    await ctx.db.markChecked(target);
     try {
       const { state, pr } = await (await ctx.github()).issueState(ref as Required<RepoRef>);
       checked++;

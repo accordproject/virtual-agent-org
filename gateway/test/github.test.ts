@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../src/context";
+import { Db } from "../src/db";
 import type { Env } from "../src/env";
 import { decisionButtons, decisionCard } from "../src/format";
 import {
@@ -100,6 +101,21 @@ describe("the /github webhook", () => {
     expect(await (await worker.fetch(await post(body, await headers()), e, exec)).text()).toBe("ok");
     expect(await (await worker.fetch(await post(body, await headers()), e, exec)).text()).toBe("duplicate");
   });
+
+  it("neither polls GitHub nor starts wakes from the cron until the secret is set", async () => {
+    const run = async (over: Partial<Env>) => {
+      const e = env(over);
+      const db = new Db(e.DB);
+      await db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
+      const pending: Promise<unknown>[] = [];
+      await worker.scheduled({} as ScheduledController, e, { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => undefined } as unknown as ExecutionContext);
+      await Promise.all(pending);
+      return (await (db as any).db.prepare("SELECT status FROM github_wakes").first()).status;
+    };
+    expect(await run({ GITHUB_WEBHOOK_SECRET: undefined })).toBe("pending");
+    // With the secret, dispatch runs: here review wakes are off in the bundled config or GitHub isn't set up, so it's dropped.
+    expect(await run({})).toBe("dropped");
+  });
 });
 
 describe("normalising events", () => {
@@ -129,7 +145,7 @@ describe("normalising events", () => {
 
 describe("lapsing decisions", () => {
   it("lapses open decisions on a PR someone else merged, records the review outcome and drops its wakes", async () => {
-    const { ctx } = setup();
+    const { ctx } = setup(fakeGitHub({ state: "MERGED" }));
     const m = await merge(ctx);
     const comment = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: PR, summary: "c", rationale: "r", risk: "low", payload: { text: "hi" } });
     const ops = await ctx.db.createDecision({ agent: "mira", kind: "discord.ops", target: PR, summary: "nudge", rationale: "r", risk: "low", payload: {} });
@@ -145,8 +161,19 @@ describe("lapsing decisions", () => {
     expect((await wakes(ctx)).map((w) => w.status)).toEqual(["dropped"]);
   });
 
+  it("ignores a close that arrives after the PR was reopened", async () => {
+    const { ctx } = setup(fakeGitHub({ state: "OPEN" }));
+    const m = await merge(ctx);
+    await review(ctx);
+    await ctx.db.queueWake({ trigger: "first_response", target: PR, agent: "mira" });
+    await apply(ctx, "pull_request", prEvent("closed"));
+    expect((await ctx.db.getDecision(m.id))?.status).toBe("open");
+    expect((await ctx.db.latestReview(PR))?.outcome).toBeNull();
+    expect((await wakes(ctx)).map((w) => w.status)).toEqual(["pending"]);
+  });
+
   it("keeps the gateway's own merge outcome", async () => {
-    const { ctx } = setup();
+    const { ctx } = setup(fakeGitHub({ state: "MERGED" }));
     await review(ctx);
     await ctx.db.setReviewOutcome(PR, "merged", "merged by the gateway (D-5)");
     await apply(ctx, "pull_request", prEvent("closed", { merged: true }));
@@ -163,8 +190,16 @@ describe("lapsing decisions", () => {
     expect(Date.parse(`${w.due_at.replace(" ", "T")}Z`)).toBeGreaterThan(Date.now() + (REVIEW_DELAY - 1) * 60_000);
   });
 
-  it("lapses decisions on a closed issue, and shows a lapsed card without buttons", async () => {
+  it("judges a late push by the head as it is now, not the delivery's", async () => {
     const { ctx } = setup();
+    const m = await merge(ctx, HEAD);
+    await apply(ctx, "pull_request", prEvent("synchronize", { head: { sha: OLD } }));
+    expect((await ctx.db.getDecision(m.id))?.status).toBe("open");
+    expect((await wakes(ctx)).map((w) => w.sha)).toEqual([HEAD]);
+  });
+
+  it("lapses decisions on a closed issue, and shows a lapsed card without buttons", async () => {
+    const { ctx } = setup(fakeGitHub({ state: "CLOSED" }));
     const issue = "accordproject/concerto#40";
     const close = await ctx.db.createDecision({ agent: "mira", kind: "github.close", target: issue, summary: "close", rationale: "dup", risk: "low", payload: {} });
     await apply(ctx, "issues", { action: "closed", repository: repo(), sender: { login: "alikhan" }, issue: { number: 40, state_reason: "completed", author_association: "NONE", user: { login: "x" } } });
@@ -175,11 +210,23 @@ describe("lapsing decisions", () => {
   });
 
   it("never lapses an approved decision, which the gateway is already running", async () => {
-    const { ctx } = setup();
+    const { ctx } = setup(fakeGitHub({ state: "MERGED" }));
     const m = await merge(ctx);
     await ctx.db.decide(m.id, "approved");
     await apply(ctx, "pull_request", prEvent("closed", { merged: true }));
     expect((await ctx.db.getDecision(m.id))?.status).toBe("approved");
+  });
+
+  it("records a workflow run's event for each PR it belongs to", async () => {
+    const { ctx } = setup();
+    const run = {
+      action: "completed",
+      repository: repo(),
+      workflow_run: { event: "pull_request", head_sha: HEAD, conclusion: "failure", pull_requests: [{ number: 12 }, { number: 13 }], repository: { id: 1 } },
+    };
+    await apply(ctx, "workflow_run", run, "d-shared");
+    const rows = (await (ctx.db as any).db.prepare("SELECT target FROM github_events WHERE delivery = 'd-shared' ORDER BY target").all()).results;
+    expect(rows.map((r: any) => r.target)).toEqual([PR, "accordproject/concerto#13"]);
   });
 });
 
@@ -249,7 +296,14 @@ describe("waking Mira", () => {
     const pending = setup(fakeGitHub({ rollup: "PENDING", runs: [{ id: 3, workflow_id: 10, event: "pull_request", status: "in_progress", conclusion: null }] }));
     await pending.ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
     await dispatchWakes(pending.ctx);
-    expect((await wakes(pending.ctx))[0]).toMatchObject({ status: "pending", reason: "CI is pending" });
+    expect((await wakes(pending.ctx))[0]).toMatchObject({ status: "pending", reason: "CI is pending", started_at: null });
+
+    // No CI reported yet isn't green CI: it waits too, and starts no session.
+    const none = setup(fakeGitHub({ rollup: null, runs: [] }));
+    await none.ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
+    await dispatchWakes(none.ctx);
+    expect((await wakes(none.ctx))[0]).toMatchObject({ status: "pending", reason: "CI is none" });
+    expect(sessions(none.fakes)).toEqual([]);
 
     for (const [gh, why] of [
       [fakeGitHub({ draft: true }), "the PR is a draft"],
@@ -263,13 +317,37 @@ describe("waking Mira", () => {
     }
   });
 
-  it("queues a dropped wake again when the PR comes back, but never one that started", async () => {
+  it("queues a dropped wake again as new, so its wait for CI starts over, but never one that started", async () => {
     const { ctx } = setup(fakeGitHub({ draft: true }));
     await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
     await dispatchWakes(ctx);
+    await (ctx.db as any).db.prepare("UPDATE github_wakes SET created_at = datetime('now', '-2 days')").run();
     expect(await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" })).toBe(true);
+    const [w] = await wakes(ctx);
+    expect(Date.now() - Date.parse(`${w.created_at.replace(" ", "T")}Z`)).toBeLessThan(60_000);
     await (ctx.db as any).db.prepare("UPDATE github_wakes SET status = 'started'").run();
     expect(await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" })).toBe(false);
+  });
+
+  it("lets only one cron run claim a wake, and counts claims against the daily cap", async () => {
+    const { ctx } = setup();
+    await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
+    await ctx.db.queueWake({ trigger: "review", target: "accordproject/concerto#13", sha: HEAD, agent: "mira" });
+    const [a, b] = await ctx.db.dueWakes(10);
+    expect(await ctx.db.claimWake(a.id, "review", 1)).toBe("claimed");
+    expect(await ctx.db.claimWake(a.id, "review", 1)).toBe("gone");
+    expect(await ctx.db.claimWake(b.id, "review", 1)).toBe("cap");
+    // A claim handed back to wait frees its slot.
+    await ctx.db.delayWake(a.id, 15, "CI is pending");
+    expect(await ctx.db.claimWake(b.id, "review", 1)).toBe("claimed");
+  });
+
+  it("drops a claim that never started", async () => {
+    const { ctx } = setup();
+    await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira", delayMinutes: 60 });
+    await (ctx.db as any).db.prepare("UPDATE github_wakes SET status = 'starting', started_at = datetime('now', '-1 hour')").run();
+    await dispatchWakes(ctx);
+    expect((await wakes(ctx))[0]).toMatchObject({ status: "dropped", reason: "claimed but never started", started_at: null });
   });
 
   it("starts a merge proposal as a review check that skips the review", async () => {
@@ -284,14 +362,15 @@ describe("waking Mira", () => {
     expect([task?.kind, task?.review_target, task?.review_sha]).toEqual(["review_check", PR, HEAD.slice(0, 7)]);
   });
 
-  it("drops a first response when the issue closed first", async () => {
-    const { ctx, fakes } = setup();
+  it("drops a first response when GitHub says it closed, even if the close delivery was missed", async () => {
+    const gh = fakeGitHub();
+    const { ctx, fakes } = setup(gh);
     const issue = "accordproject/concerto#41";
     await apply(ctx, "issues", { action: "opened", repository: repo(), sender: { login: "newbie" }, issue: { number: 41, author_association: "FIRST_TIME_CONTRIBUTOR", user: { login: "newbie", type: "User" } } });
-    await apply(ctx, "issues", { action: "closed", repository: repo(), sender: { login: "newbie" }, issue: { number: 41, state_reason: "not_planned", user: { login: "newbie" } } });
+    gh.pr.state = "CLOSED";
     await due(ctx);
     await dispatchWakes(ctx);
-    expect((await wakes(ctx)).map((w) => [w.target, w.status])).toEqual([[issue, "dropped"]]);
+    expect((await wakes(ctx)).map((w) => [w.target, w.status, w.reason])).toEqual([[issue, "dropped", "closed before the first response"]]);
     expect(sessions(fakes)).toEqual([]);
   });
 
@@ -360,6 +439,22 @@ describe("the daily check", () => {
     expect(await open()).toBe(0);
   });
 
+  it("tracks a PR by its latest review only, and reads the least recently checked first", async () => {
+    const { ctx } = setup();
+    await review(ctx, "comment", OLD);
+    await review(ctx, "comment", HEAD);
+    await ctx.db.setReviewOutcome(PR, "merged");
+    expect(await ctx.db.trackedTargets(10)).toEqual([]);
+
+    const a = "accordproject/concerto#1";
+    const b = "accordproject/concerto#2";
+    for (const t of [a, b]) await ctx.db.createDecision({ agent: "mira", kind: "github.close", target: t, summary: "c", rationale: "r", risk: "low", payload: {} });
+    expect(await ctx.db.trackedTargets(10)).toEqual([a, b]);
+    await ctx.db.markChecked(a);
+    expect(await ctx.db.trackedTargets(10)).toEqual([b, a]);
+    expect(await ctx.db.trackedTargets(1)).toEqual([b]);
+  });
+
   it("queues the review a missed CI event would have queued", async () => {
     const { ctx } = setup();
     await ctx.db.queueWake({ trigger: "first_response", target: PR, agent: "mira", delayMinutes: 60 });
@@ -369,6 +464,18 @@ describe("the daily check", () => {
 });
 
 describe("activity in pr_queue", () => {
+  it("marks a PR as handled only for a review wake started on its current head", async () => {
+    const { ctx } = setup();
+    const since = "2000-01-01 00:00:00";
+    await ctx.db.queueWake({ trigger: "first_response", target: "accordproject/concerto#13", agent: "mira" });
+    await ctx.db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
+    for (const w of await ctx.db.dueWakes(10)) {
+      await ctx.db.claimWake(w.id, w.trigger, 10);
+      await ctx.db.startWake(w.id, `sesn_${w.id}`);
+    }
+    expect(await ctx.db.reviewWokenHeads("accordproject/concerto", since)).toEqual(new Set([`${PR}@${HEAD}`]));
+  });
+
   it("sums up what moved", () => {
     expect(activityLine([])).toBe("");
     expect(
