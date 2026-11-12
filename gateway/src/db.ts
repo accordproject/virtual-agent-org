@@ -182,6 +182,9 @@ export interface SessionRow {
   cache_write_tokens: number;
 }
 
+/** Audit rows that record a failure of the gateway itself, for Vera's weekly scorecard. */
+const GATEWAY_ERROR = "(event_type LIKE 'gateway.%error' OR event_type = 'gateway.misconfigured')";
+
 export class Db {
   constructor(private db: D1Database) {}
 
@@ -350,6 +353,34 @@ export class Db {
       )
       .bind(since, until, limit)
       .all<{ id: number; ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; permission: string | null; detail: string | null }>()
+      .then((r) => r.results);
+  }
+
+  /**
+   * The gateway's own failures: every `gateway.*error` row (webhooks, schedules, sweeps,
+   * GitHub events, follow-ups, Telegram and Discord, tool handlers) and misconfiguration.
+   * New `*_error` event types are picked up without a change here.
+   */
+  gatewayErrors(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare(
+        "SELECT id, ts, agent, session_id, event_type, tool, substr(detail, 1, 300) AS detail FROM audit " +
+          `WHERE ts >= ? AND ts < ? AND ${GATEWAY_ERROR} ORDER BY id LIMIT ?`,
+      )
+      .bind(since, until, limit)
+      .all<{ id: number; ts: string; agent: string | null; session_id: string | null; event_type: string; tool: string | null; detail: string | null }>()
+      .then((r) => r.results);
+  }
+
+  /** How many gateway errors of each type in [since, until): exact, unlike the capped rows. */
+  gatewayErrorCounts(since: string, until: string) {
+    return this.db
+      .prepare(
+        "SELECT event_type, COUNT(*) AS count, MIN(ts) AS first, MAX(ts) AS last FROM audit " +
+          `WHERE ts >= ? AND ts < ? AND ${GATEWAY_ERROR} GROUP BY event_type ORDER BY count DESC, event_type`,
+      )
+      .bind(since, until)
+      .all<{ event_type: string; count: number; first: string; last: string }>()
       .then((r) => r.results);
   }
 

@@ -95,9 +95,17 @@ week, then:
    `measure`, `verdict`, `before`, `after`, the case counts, `overlaps` and `pr_url`.
    Copy the gateway's figures and verdict; never compute or adjust them. The gateway
    measures every change, so no agent grades a change to itself, you included.
-3. In the scorecard's text for Ada, list each change result in one line, and say when
+3. **Gateway errors**, under `network.gateway_errors`: the gateway's own failures,
+   from `read_audit`'s `gateway_errors` and `gateway_error_counts`. Group the rows by
+   `event_type`, then where the error text says the same thing. Each group: the
+   `event_type`, a one-line `summary`, its `count`, its `first` and `last` times, up
+   to three `quotes`, and up to 30 rows as `audit:<id>` in `ids`. Take each type's
+   total from `gateway_error_counts`: `gateway_errors` stops at 200 rows, so it can
+   undercount. Leave the list out when there were none.
+4. In the scorecard's text for Ada, list each change result in one line, and say when
    a result overlaps another change to the same agent, since their figures are
-   shared.
+   shared. Then list each gateway error group in one line, most frequent first, and
+   mark any that also appeared last week as recurring.
 
 ## Sage's KPI (weekly)
 
@@ -118,8 +126,8 @@ this after each meeting; Sage never reports on itself.
 
 ## Tools
 
-- `read_audit(since, until?)`: the gateway's spend and audit records, and measured
-  changes (above).
+- `read_audit(since, until?)`: the gateway's spend and audit records, measured
+  changes and the gateway's own errors (above).
 - `get_decisions(status)`: the decision queue, every agent's decisions (open, decided
   or all), with who asked, when, Matt's notes and when he decided. Read-only. Use it
   for how long open decisions have waited and when rejections were made.
