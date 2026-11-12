@@ -805,5 +805,20 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - The second cron costs little: 288 more runs a day, most of which make no outside
   request.
 - Not chosen: slowing the GitHub cron to every 15 minutes (little saving, slower
-  wakes); or a paid Workers plan with a higher allowance and one cron, which stays open
-  if the per-run limit keeps getting in the way.
+  wakes). The paid plan (decision 70) later raised the allowance; the two crons stay,
+  since they cost little.
+
+
+**70. The gateway runs on Workers Paid** · RESOLVED
+
+- The free Workers plan allows 50 outside requests per invocation. Processing one long
+  session (reading it, paging through its events, answering its tool calls) can use
+  that up, so a tool call late in a session could fail: a change's PR wasn't opened
+  because `submit_change` hit the limit.
+- The account is on Workers Paid: a $5 monthly minimum, with a default of 10,000
+  outside requests and 1,000 D1 queries per invocation. The gateway's traffic is well
+  inside the included requests and CPU time. No code or config change was needed.
+- The cost belongs with the funding question in decision 10.
+- Not chosen: staying on the free plan (long sessions stay unreliable), or cutting
+  requests per invocation in code (paging events from a bookmark, queueing tool calls),
+  which would leave every feature budgeting against 50.
