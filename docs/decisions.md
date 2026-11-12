@@ -822,3 +822,21 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: staying on the free plan (long sessions stay unreliable), or cutting
   requests per invocation in code (paging events from a bookmark, queueing tool calls),
   which would leave every feature budgeting against 50.
+
+
+**71. The PR backlog is triaged outside the network first** · RESOLVED
+
+- Most open PRs had no gateway record: they were opened before the webhook (decision
+  62) and nothing had happened on them since. The daily check never lists whole repos,
+  so nothing brought them in.
+- They're triaged in a Claude Code session the owner runs on their own subscription.
+  It follows Mira's instructions and a read-only copy of her notes, and changes nothing
+  on GitHub. It sorts each PR into review, maintainer, nudge, close or draft, with draft
+  comments (`docs/plans/backlog-triage.md`).
+- The network acts only on the result: review wakes for the shortlist (paid from API
+  credits as usual), and closures and nudges as decisions for the owner.
+- The network's own agents still use API keys. Anthropic doesn't allow services to run
+  on subscription credentials; the owner using Claude Code directly is allowed.
+- Not chosen: queueing a review for every PR (one Mira session each, many likely
+  stale), or reviewing in Claude Code and posting under the owner's account (no
+  gateway checks, labels or tracking).
