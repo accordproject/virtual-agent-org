@@ -320,6 +320,41 @@ describe("read_audit (decision 47)", () => {
     expect(r.tool_calls).toHaveLength(2);
   });
 
+  it("read_audit lists the gateway's own errors with exact counts per type", async () => {
+    const { ctx } = makeTestCtx();
+    await ctx.db.audit({ event_type: "gateway.schedule_error", detail: { schedule: "vera-weekly", error: "boom" } });
+    await ctx.db.audit({ event_type: "gateway.schedule_error", detail: { schedule: "vera-weekly", error: "boom again" } });
+    await ctx.db.audit({ agent: "mira", session_id: "sm", event_type: "gateway.tool_error", tool: "request_action", detail: "TypeError" });
+    await ctx.db.audit({ event_type: "gateway.misconfigured", detail: { problems: ["no secret"] } });
+    // Not errors: routine gateway events, refusals and agent events stay out.
+    await ctx.db.audit({ event_type: "gateway.schedule_started" });
+    await ctx.db.audit({ agent: "vera", event_type: "gateway.tool_refused", tool: "record_evaluation", detail: "agent is required" });
+    await ctx.db.audit({ agent: "mira", event_type: "agent.error" });
+
+    const r = JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: today() }));
+    expect(r.gateway_errors.map((e: { event_type: string }) => e.event_type)).toEqual([
+      "gateway.schedule_error",
+      "gateway.schedule_error",
+      "gateway.tool_error",
+      "gateway.misconfigured",
+    ]);
+    expect(r.gateway_errors[2]).toMatchObject({ agent: "mira", tool: "request_action", detail: JSON.stringify("TypeError") });
+    expect(typeof r.gateway_errors[0].id).toBe("number");
+    expect(r.gateway_error_counts.map((c: { event_type: string; count: number }) => [c.event_type, c.count])).toEqual([
+      ["gateway.schedule_error", 2],
+      ["gateway.misconfigured", 1],
+      ["gateway.tool_error", 1],
+    ]);
+  });
+
+  it("counts gateway errors past the row cap", async () => {
+    const { ctx } = makeTestCtx();
+    for (let i = 0; i < 205; i++) await ctx.db.audit({ event_type: "gateway.sweep_error", detail: String(i) });
+    const r = JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: today() }));
+    expect(r.gateway_errors).toHaveLength(200);
+    expect(r.gateway_error_counts).toEqual([expect.objectContaining({ event_type: "gateway.sweep_error", count: 205 })]);
+  });
+
   it("read_audit lists refusals", async () => {
     const { ctx } = makeTestCtx();
     await ctx.db.audit({ agent: "vera", event_type: "gateway.tool_refused", tool: "record_evaluation", detail: "agent is required" });

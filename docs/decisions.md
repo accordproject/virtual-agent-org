@@ -773,3 +773,19 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: a copy of each agent per task (more agents to keep in step), or dropping
   tasks from schedules (most of decision 65's saving lost).
 
+
+**68. Someone reads the gateway's errors** · RESOLVED
+
+- The gateway writes its own failures to the audit log as `gateway.*error` rows
+  (webhooks, schedules, sweeps, GitHub events, follow-ups, Telegram and Discord, tool
+  handlers), but no agent read them: Vera's weekly view held only agents' tool
+  refusals and denials.
+- `read_audit` now returns these rows (capped at 200) with an exact count per type.
+  Vera groups them in the weekly scorecard under `network.gateway_errors` and marks
+  groups seen the week before as recurring. Ada passes recurring or frequent groups
+  to the owner in her weekly message, with their audit ids.
+- They are not evidence for spec changes: the fault is in the gateway, not an agent's
+  work, and a fix is the owner's.
+- Not chosen: giving the review to Mandla, who only builds approved changes and starts
+  no work of its own (decision 55); or an alert on each error, which can follow if
+  weekly proves too slow.

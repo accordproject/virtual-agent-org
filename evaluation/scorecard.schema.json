@@ -16,7 +16,12 @@
         "retention_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
         "pr_closure_ratio": { "type": "number" },
         "spend_usd_month_to_date": { "type": "number" },
-        "spend_usd_forecast_month": { "type": "number" }
+        "spend_usd_forecast_month": { "type": "number" },
+        "gateway_errors": {
+          "type": "array",
+          "description": "Weekly only: the gateway's own failures from read_audit, grouped where they say the same thing",
+          "items": { "$ref": "#/$defs/error_group" }
+        }
       }
     },
     "agents": {
@@ -84,6 +89,19 @@
       "properties": {
         "summary": { "type": "string" },
         "tool": { "type": "string" },
+        "quotes": { "type": "array", "items": { "type": "string" } },
+        "ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "error_group": {
+      "type": "object",
+      "description": "Gateway errors of one type that say the same thing: how many, when, quoted text, and the ids",
+      "properties": {
+        "event_type": { "type": "string" },
+        "summary": { "type": "string" },
+        "count": { "type": "integer" },
+        "first": { "type": "string" },
+        "last": { "type": "string" },
         "quotes": { "type": "array", "items": { "type": "string" } },
         "ids": { "type": "array", "items": { "type": "string" } }
       }

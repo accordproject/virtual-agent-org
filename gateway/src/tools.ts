@@ -323,7 +323,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   }
   // Open-ended: include rows written this very second, which "now" to the second would cut off.
   const until = input.until ? end : "9999-12-31 23:59:59";
-  const [usage, daily, decisions, denials, refusals, toolCalls, changes, blocked, dismissed] = await Promise.all([
+  const [usage, daily, decisions, denials, refusals, toolCalls, changes, blocked, dismissed, gatewayErrors, gatewayErrorCounts] = await Promise.all([
     ctx.db.sessionUsage(since, until),
     ctx.db.dailySpend(since, until),
     ctx.db.decisionsBetween(since, until),
@@ -333,6 +333,8 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     ctx.db.changesMeasured(since, until),
     ctx.db.blockedReports(since, until),
     ctx.db.dismissedFindings(since, until),
+    ctx.db.gatewayErrors(since, until),
+    ctx.db.gatewayErrorCounts(since, until),
   ]);
 
   type Totals = { sessions: number; cost_cents: number } & Record<(typeof TOKEN_FIELDS)[number], number>;
@@ -365,6 +367,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent, or to the network, that went live within those windows.",
       "blocked_reports: status reports that listed blockers. Cite one by its id (status:<id>).",
       "dismissed_findings: Mira's review findings dismissed in this period, with the note saying why. Cite one by its id (F-<n>) in the text; it isn't an evidence id.",
+      "gateway_errors: failures of the gateway itself (webhooks, schedules, sweeps, GitHub events, follow-ups, Telegram and Discord, tool handlers), oldest first and capped at 200; agent is set only when the failure was in that agent's session. gateway_error_counts gives the exact count per event_type. Cite one as audit:<id>.",
     ],
     agents,
     daily_spend: daily,
@@ -378,6 +381,8 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     changes: changes.map(changeView),
     blocked_reports: blocked,
     dismissed_findings: dismissed,
+    gateway_errors: gatewayErrors,
+    gateway_error_counts: gatewayErrorCounts,
   });
 }
 
