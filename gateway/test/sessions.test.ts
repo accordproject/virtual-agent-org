@@ -66,6 +66,21 @@ describe("session processing", () => {
     expect(await ctx.db.getSession("s4")).toMatchObject({ cost_cents: 42, input_tokens: 1200, status: "idle:end_turn" });
   });
 
+  it("reads an idle session's stop reason from its latest idle event, so a finished session leaves the sweep", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sx", agent: "mira", origin: "task" });
+    // As the live API returns it: no stop_reason on the session object.
+    fakes.sessions.sx = { id: "sx", status: "idle", agent: { id: "agent_mira" } };
+    fakes.events.sx = [
+      { id: "i1", type: "session.status_idle", stop_reason: { type: "requires_action" } },
+      { id: "r1", type: "session.status_running" },
+      { id: "i2", type: "session.status_idle", stop_reason: { type: "end_turn" } },
+    ];
+    await processSession(ctx, "sx");
+    expect((await ctx.db.getSession("sx"))?.status).toBe("idle:end_turn");
+    expect((await ctx.db.sweepableSessions(10)).map((s) => s.id)).not.toContain("sx");
+  });
+
   it("records the model a scheduled run on a task reports, not the agent's default", async () => {
     const { ctx, fakes } = makeTestCtx();
     fakes.sessions.s5 = { id: "s5", status: "running", agent: { id: "agent_mira", model: { id: "claude-haiku-5-5", effort: "medium" } } };

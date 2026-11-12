@@ -4,10 +4,21 @@
 
 import { defaultModel, postDecision, replyToOrigin } from "./agents";
 import { agentByManagedId } from "./config";
-import { cap, type Ctx } from "./context";
+import { cap, outOfSubrequests, type Ctx } from "./context";
 import { wakeAda } from "./followUp";
 import { costCents, messageText, sessionAgentId, sessionModel, sessionTokens, type SessionEvent } from "./managed";
 import { ToolDenied, ToolError, handleTool } from "./tools";
+
+/**
+ * Why an idle session stopped. The session object carries no stop reason; the latest
+ * `session.status_idle` event does. Empty if the events don't include one.
+ */
+export function stopReason(events: SessionEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "session.status_idle") return events[i].stop_reason?.type ?? "";
+  }
+  return "";
+}
 
 export async function processSession(ctx: Ctx, sessionId: string): Promise<void> {
   const session = await ctx.managed.retrieveSession(sessionId);
@@ -50,7 +61,7 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
   }
   if (through && through !== doneThrough) await ctx.db.setEventsDoneThrough(sessionId, through);
 
-  const status = session.status === "idle" ? `idle:${session.stop_reason?.type ?? ""}` : session.status;
+  const status = session.status === "idle" ? `idle:${stopReason(events)}` : session.status;
   await ctx.db.updateSession(sessionId, status, costCents(session), sessionTokens(session));
 
   if (row?.task_id) {
@@ -213,6 +224,8 @@ export async function sweep(ctx: Ctx, limit = SWEEP_LIMIT) {
       await processSession(ctx, r.id);
     } catch (err) {
       await ctx.db.audit({ agent: r.agent, session_id: r.id, event_type: "gateway.sweep_error", detail: String(err) });
+      // The rest would fail the same way; the next run picks them up.
+      if (outOfSubrequests(err)) break;
     }
   }
 }

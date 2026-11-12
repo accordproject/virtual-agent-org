@@ -3,7 +3,7 @@
 // PRs (decision 63): Mira's diagnosis, re-runs, Felix's fixes.
 
 import { describe, expect, it } from "vitest";
-import type { Ctx } from "../src/context";
+import { CRONS, type Ctx } from "../src/context";
 import { AFTER_RERUN, Db } from "../src/db";
 import type { Env } from "../src/env";
 import { executeDecision } from "../src/executors";
@@ -128,6 +128,34 @@ describe("the /github webhook", () => {
     expect(await run({ GITHUB_WEBHOOK_SECRET: undefined })).toBe("pending");
     // With the secret, dispatch runs: here review wakes are off in the bundled config or GitHub isn't set up, so it's dropped.
     expect(await run({})).toBe("dropped");
+  });
+
+  it("runs the GitHub work on its own cron, so the sweep can't use up its subrequests", async () => {
+    const run = async (cron?: string) => {
+      const e = env();
+      const db = new Db(e.DB);
+      await db.queueWake({ trigger: "review", target: PR, sha: HEAD, agent: "mira" });
+      const pending: Promise<unknown>[] = [];
+      await worker.scheduled({ cron } as ScheduledController, e, { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => undefined } as unknown as ExecutionContext);
+      await Promise.all(pending);
+      const raw = (db as any).db;
+      return {
+        wake: (await raw.prepare("SELECT status FROM github_wakes").first()).status,
+        housekeeping: !!(await raw.prepare("SELECT 1 FROM processed_events WHERE event_id LIKE 'housekeeping:%'").first()),
+      };
+    };
+    expect(await run(CRONS.main)).toEqual({ wake: "pending", housekeeping: true });
+    expect(await run(CRONS.github)).toEqual({ wake: "dropped", housekeeping: false });
+    // A fork that kept a single cron still gets both.
+    expect(await run("*/10 * * * *")).toEqual({ wake: "dropped", housekeeping: true });
+  });
+
+  it("keeps wrangler.toml's crons in step with the gateway's", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const toml = readFileSync(fileURLToPath(new URL("../wrangler.toml", import.meta.url).href), "utf8");
+    const crons = JSON.parse(toml.match(/^crons\s*=\s*(\[.*\])/m)![1]);
+    expect(crons).toEqual([CRONS.main, CRONS.github]);
   });
 });
 
@@ -463,6 +491,32 @@ describe("the daily check", () => {
     expect(await open()).toBe(3);
     await dailyCheck(ctx, at);
     expect(await open()).toBe(0);
+  });
+
+  it("stops at the subrequest limit without using up the day's allowance", async () => {
+    const gh = fakeGitHub({ state: "CLOSED" });
+    let calls = 0;
+    const real = gh.issueState;
+    (gh as any).issueState = async (...a: Parameters<typeof real>) => {
+      if (++calls > 2) throw new Error("Too many subrequests by single Worker invocation.");
+      return real(...a);
+    };
+    const { ctx } = setup(gh);
+    for (let n = 1; n <= 5; n++) {
+      await ctx.db.createDecision({ agent: "mira", kind: "github.close", target: `accordproject/concerto#${n}`, summary: "c", rationale: "r", risk: "low", payload: {} });
+    }
+    const at = new Date("2026-11-11T06:00:00Z");
+    await dailyCheck(ctx, at);
+    // Two read, then it stops: the third isn't claimed, and nothing after it is tried.
+    expect(calls).toBe(3);
+    expect(await ctx.db.countClaims("github-daily:2026-11-11:")).toBe(2);
+    const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.github_daily_check'").first();
+    expect(JSON.parse(audit.detail)).toMatchObject({ checked: 2, errors: [], stopped: "out of subrequests" });
+
+    // The next run picks up where this one stopped.
+    calls = -100;
+    await dailyCheck(ctx, at);
+    expect((await ctx.db.listDecisions({ status: "open" })).length).toBe(0);
   });
 
   it("tracks a PR by its latest review only, and reads the least recently checked first", async () => {

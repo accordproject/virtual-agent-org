@@ -2,7 +2,7 @@ import { tickChanges } from "./changes";
 import { handleUpdate } from "./commands";
 import { verifyDiscord } from "./discordBot";
 import { handleInteraction, type Interaction } from "./discordInteractions";
-import { makeCtx } from "./context";
+import { CRONS, makeCtx } from "./context";
 import { Db } from "./db";
 import { checkEnv, type Env } from "./env";
 import { runSchedules } from "./schedules";
@@ -101,26 +101,33 @@ export default {
     return new Response("not found", { status: 404 });
   },
 
-  async scheduled(_event: ScheduledController, env: Env, exec: ExecutionContext) {
+  async scheduled(event: ScheduledController, env: Env, exec: ExecutionContext) {
     const problems = checkEnv(env);
     if (problems.length) {
       exec.waitUntil(new Db(env.DB).audit({ event_type: "gateway.misconfigured", detail: { problems } }));
       return;
     }
     const ctx = makeCtx(env);
+    // Each invocation has its own subrequest allowance, so the GitHub work runs on its
+    // own cron and the sweep can't use it up. Any other cron (a fork's single one) runs both.
+    const part = event.cron === CRONS.main ? "main" : event.cron === CRONS.github ? "github" : "both";
     exec.waitUntil(
       (async () => {
-        await housekeeping(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.housekeeping_error", detail: String(e) }));
-        await tickChanges(ctx);
-        await sweep(ctx);
-        // Schedules that name a task run here, not as Managed Agents deployments (decision 67).
-        await runSchedules(ctx);
-        // Polls GitHub itself, so it runs whether or not the webhook is set up (decision 65).
-        await triageCheck(ctx);
-        // Decision 62 is opt-in: without the webhook secret the gateway neither polls GitHub nor wakes anyone.
-        if (env.GITHUB_WEBHOOK_SECRET) {
-          await dailyCheck(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.github_daily_check_error", detail: String(e) }));
-          await dispatchWakes(ctx);
+        if (part !== "github") {
+          await housekeeping(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.housekeeping_error", detail: String(e) }));
+          await tickChanges(ctx);
+          await sweep(ctx);
+          // Schedules that name a task run here, not as Managed Agents deployments (decision 67).
+          await runSchedules(ctx);
+        }
+        if (part !== "main") {
+          // Polls GitHub itself, so it runs whether or not the webhook is set up (decision 65).
+          await triageCheck(ctx);
+          // Decision 62 is opt-in: without the webhook secret the gateway neither polls GitHub nor wakes anyone.
+          if (env.GITHUB_WEBHOOK_SECRET) {
+            await dailyCheck(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.github_daily_check_error", detail: String(e) }));
+            await dispatchWakes(ctx);
+          }
         }
       })(),
     );

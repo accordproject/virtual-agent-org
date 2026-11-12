@@ -6,7 +6,7 @@
 
 import { inScope, safeJson } from "./actions";
 import { AgentUnavailable, refreshDecisionCard, startSession, taskModel } from "./agents";
-import type { Ctx } from "./context";
+import { outOfSubrequests, type Ctx } from "./context";
 import { AFTER_RERUN, type GitHubEvent, type Wake } from "./db";
 import { parseTarget, type RepoRef } from "./github";
 import { FIRST_TIME, checklist, failed, mergeChecks, prFacts, type PrFacts } from "./review";
@@ -487,34 +487,49 @@ export async function dailyCheck(ctx: Ctx, now = new Date()) {
   // Once the day's allowance is used, the rest of the day's cron runs read nothing more.
   if (budget <= 0) return;
   let checked = 0;
+  let stopped: string | undefined;
   const closed: string[] = [];
   const errors: string[] = [];
   for (const target of await ctx.db.trackedTargets(DAILY_CHECK.total)) {
     if (budget <= 0) break;
     const ref = parseTarget(target);
     if (!ref?.number || !inScope(ctx, ref)) continue;
-    if (!(await ctx.db.claimEvent(`${claimed}${target}`))) continue;
-    budget--;
-    await ctx.db.markChecked(target);
+    const claim = `${claimed}${target}`;
+    if (!(await ctx.db.claimEvent(claim))) continue;
     try {
-      const { state, pr } = await (await ctx.github()).issueState(ref as Required<RepoRef>);
+      if (await checkTarget(ctx, target, ref as Required<RepoRef>)) closed.push(target);
       checked++;
-      if (state !== "open") {
-        closed.push(target);
-        await onClosed(ctx, target, state, null);
-        continue;
-      }
-      if (!pr) continue;
-      const f = await prFacts(ctx, ref as Required<RepoRef>);
-      await lapseOldHeads(ctx, target, f.sha);
-      await onPrMoved(ctx, target, f);
-      if (!f.draft && f.ci === "success") await queueReview(ctx, target, f.sha, 0);
-      if (!f.draft && f.ci === "failure" && f.ci_finished) await queueCiFailed(ctx, target, f.sha);
     } catch (err) {
+      if (outOfSubrequests(err)) {
+        // Not this target's fault: leave it unclaimed and first in line for the next run.
+        await ctx.db.releaseEvent(claim);
+        stopped = "out of subrequests";
+        break;
+      }
       errors.push(`${target}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`);
     }
+    budget--;
+    await ctx.db.markChecked(target);
   }
-  if (checked || errors.length) await ctx.db.audit({ event_type: "gateway.github_daily_check", detail: { date, checked, closed, errors } });
+  if (checked || errors.length || stopped) {
+    await ctx.db.audit({ event_type: "gateway.github_daily_check", detail: { date, checked, closed, errors, ...(stopped ? { stopped } : {}) } });
+  }
+}
+
+/** Reads one tracked PR or issue and applies the same rules as its events. True if it is no longer open. */
+async function checkTarget(ctx: Ctx, target: string, ref: Required<RepoRef>): Promise<boolean> {
+  const { state, pr } = await (await ctx.github()).issueState(ref);
+  if (state !== "open") {
+    await onClosed(ctx, target, state, null);
+    return true;
+  }
+  if (!pr) return false;
+  const f = await prFacts(ctx, ref);
+  await lapseOldHeads(ctx, target, f.sha);
+  await onPrMoved(ctx, target, f);
+  if (!f.draft && f.ci === "success") await queueReview(ctx, target, f.sha, 0);
+  if (!f.draft && f.ci === "failure" && f.ci_finished) await queueCiFailed(ctx, target, f.sha);
+  return false;
 }
 
 // ---- Mira's extra triage passes (decision 65) ------------------------------------------
