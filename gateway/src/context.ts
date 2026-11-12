@@ -66,3 +66,9 @@ export function makeCtx(env: Env, overrides: Partial<Ctx> = {}): Ctx {
 }
 
 export const cap = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+
+/** The two crons in wrangler.toml: the gateway's own housekeeping, and its GitHub work two minutes later. */
+export const CRONS = { main: "*/5 * * * *", github: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *" };
+
+/** The Workers runtime's error once one invocation has used its subrequests; every later call in it fails too. */
+export const outOfSubrequests = (err: unknown) => /too many subrequests/i.test(err instanceof Error ? err.message : String(err));

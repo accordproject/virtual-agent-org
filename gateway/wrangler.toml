@@ -14,7 +14,10 @@ database_id = "b2991630-bd5e-419f-94e0-9c0ffb451d05"
 migrations_dir = "migrations"
 
 [triggers]
-crons = ["*/5 * * * *"]   # sweeper: re-process unfinished sessions in case a webhook was missed
+# Must match CRONS in src/context.ts. The first runs housekeeping, the session sweeper and
+# schedules; the second, two minutes later, the GitHub work (triage, daily check, wakes),
+# so each has its own subrequest allowance.
+crons = ["*/5 * * * *", "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"]
 
 # Secrets (set with `wrangler secret put <NAME>`, never committed):
 # TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, OWNER_TELEGRAM_ID, TSC_TELEGRAM_IDS

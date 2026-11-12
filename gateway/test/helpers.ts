@@ -296,8 +296,20 @@ export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fa
       fakes.sessions[id] = { id, status: "running" };
       return { id, status: "running" };
     },
-    retrieveSession: async (id: string) => fakes.sessions[id],
-    listEvents: async (id: string) => fakes.events[id] ?? [],
+    // Like the live API: tests set `stop_reason` on a fake session for brevity, but the
+    // session object never carries it; it comes as the session's last `session.status_idle` event.
+    retrieveSession: async (id: string) => {
+      const s = fakes.sessions[id];
+      if (!s) return s;
+      const { stop_reason: _, ...session } = s;
+      return session;
+    },
+    listEvents: async (id: string) => {
+      const events = fakes.events[id] ?? [];
+      const s = fakes.sessions[id];
+      if (s?.status !== "idle" || !s.stop_reason || events.some((e: { type: string }) => e.type === "session.status_idle")) return events;
+      return [...events, { id: `${id}_idle`, type: "session.status_idle", stop_reason: s.stop_reason }];
+    },
     sendMessage: record("sendMessage"),
     sendToolResult: record("sendToolResult"),
     sendToolConfirmation: record("sendToolConfirmation"),

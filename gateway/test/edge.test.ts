@@ -127,7 +127,7 @@ describe("tool-call idempotency", () => {
   it("doesn't re-run handled events after their claims are pruned", async () => {
     const d1 = memoryD1();
     const { ctx, fakes } = makeTestCtx({ db: new Db(d1) });
-    fakes.sessions.s1 = { id: "s1", status: "idle", agent: { id: "agent_ada" }, stop_reason: { type: "end_turn" } };
+    fakes.sessions.s1 = { id: "s1", status: "running", agent: { id: "agent_ada" } };
     await ctx.db.upsertSession({ id: "s1", agent: "ada", origin: "task" });
     fakes.events.s1 = [
       { id: "e1", type: "agent.custom_tool_use", name: "send_to_matt", input: { text: "one" } },
@@ -213,6 +213,23 @@ describe("sweeper and retention", () => {
     expect(seen).toHaveLength(40);
     expect(seen[0]).toBe("s44");
     expect(seen).not.toContain("done");
+  });
+
+  it("stops at the first subrequest-limit error instead of failing every session after it", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    let calls = 0;
+    (ctx.managed as any).retrieveSession = async (id: string) => {
+      if (++calls > 2) throw new Error("Too many subrequests by single Worker invocation.");
+      return fakes.sessions[id];
+    };
+    for (let i = 0; i < 5; i++) {
+      fakes.sessions[`s${i}`] = { id: `s${i}`, status: "running", agent: { id: "agent_mira" } };
+      await ctx.db.upsertSession({ id: `s${i}`, agent: "mira", origin: "task" });
+    }
+    await sweep(ctx);
+    expect(calls).toBe(3);
+    const errors = (await (ctx.db as any).db.prepare("SELECT * FROM audit WHERE event_type = 'gateway.sweep_error'").all()).results;
+    expect(errors).toHaveLength(1);
   });
 
   it("marks idle sessions untouched for a week as stale and prunes old rows", async () => {

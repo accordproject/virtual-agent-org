@@ -26,7 +26,8 @@ export interface Session {
   status: "idle" | "running" | "rescheduling" | "terminated";
   /** After any per-session override (a scheduled deployment's task, say), so `model` is what the session runs on. */
   agent?: { id: string; version?: number; model?: string | { id: string } } | string;
-  stop_reason?: { type: string; event_ids?: string[] };
+  // No stop_reason here: an idle session's stop reason is only on its latest
+  // `session.status_idle` event (see `stopReason` in sessions.ts).
   // Checked against the live API: a session reports cache writes as
   // `cache_creation`, split by cache lifetime, not as `cache_creation_input_tokens`.
   usage?: {
