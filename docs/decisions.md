@@ -789,3 +789,21 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: giving the review to Mandla, who only builds approved changes and starts
   no work of its own (decision 55); or an alert on each error, which can follow if
   weekly proves too slow.
+
+
+**69. The GitHub work runs on its own cron** · RESOLVED
+
+- A Worker invocation has a fixed allowance of outside requests. The session sweep used
+  it up in each five-minute run, so the daily GitHub check (decision 62), which ran
+  after it, read nothing.
+- The gateway has two crons: every five minutes for housekeeping, the sweep and
+  schedules (decision 67); and two minutes later for the GitHub work (triage checks,
+  the daily check, wakes). Each run has its own allowance. A cron the gateway doesn't
+  know runs both parts, so a fork with one cron behaves as before.
+- When a run reaches the limit, the sweep and the daily check stop, and the daily check
+  leaves the target it stopped on for the next run.
+- The second cron costs little: 288 more runs a day, most of which make no outside
+  request.
+- Not chosen: slowing the GitHub cron to every 15 minutes (little saving, slower
+  wakes); or a paid Workers plan with a higher allowance and one cron, which stays open
+  if the per-run limit keeps getting in the way.
