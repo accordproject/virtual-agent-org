@@ -159,9 +159,9 @@ only for a fork without the workflow, or when a run fails.
   - the GraphQL read of `HEAD:.github/workflows` behind automatic CI approval
     (`workflowFiles` in `github.ts`, decision 45);
   - GitHub webhook payloads (`normalise` in `githubEvents.ts`, decision 62): pull
-    request and same-repo workflow events work live; not yet seen are a fork PR's
-    `workflow_run` (which names no PR, so the gateway matches its head against the
-    open PRs) and the `pull_request_review_thread` event's shape;
+    request, same-repo workflow and fork PR workflow events work live (a fork PR's
+    `workflow_run` names no PR, and matching its head against the open PRs found it);
+    not yet seen is the `pull_request_review_thread` event's shape;
   - CI fixes (decision 63): Felix reading failed jobs' logs through the GitHub MCP
     server with an Actions-read token; the re-run endpoint (`rerunFailedJobs`); and
     the App's commit and PR calls for a fix into a PR's branch (`proposeFix`), all in
