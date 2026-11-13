@@ -111,6 +111,11 @@
       "risk": "low",
       "executor": "github"
     },
+    "github.first_response": {
+      "risk": "low",
+      "executor": "github",
+      "auto": true
+    },
     "github.release": {
       "risk": "high",
       "executor": "github"
@@ -376,6 +381,7 @@
         "github.merge",
         "github.close",
         "github.comment",
+        "github.first_response",
         "github.release",
         "github.approve_ci",
         "github.rerun_ci",
