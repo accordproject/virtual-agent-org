@@ -270,6 +270,18 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
       gh.fileReads.push({ path, ref });
       return gh.repoFiles[path] ?? null;
     },
+    /** Branch heads by name, for a follow-up's commit to a change's open PR (C-10). */
+    branches: {} as Record<string, string>,
+    /** Commits added to existing branches. */
+    pushed: [] as Parameters<GitHub["commitToBranch"]>[1][],
+    branchHead: async (_r: RepoRef, branch: string) => gh.branches[branch] ?? null,
+    commitToBranch: async (_r: RepoRef, p: Parameters<GitHub["commitToBranch"]>[1]) => {
+      if (gh.failPropose) throw new Error(gh.failPropose);
+      gh.pushed.push(p);
+      const sha = `pushed${gh.pushed.length}`;
+      gh.branches[p.branch] = sha;
+      return { sha };
+    },
     proposeChange: async (r: RepoRef, change: Parameters<GitHub["proposeChange"]>[1]) => {
       if (gh.failPropose) throw new Error(gh.failPropose);
       proposed.push([r, change]);

@@ -239,8 +239,8 @@ export function changeFileProblems(input: unknown): { files: ChangeFile[]; probl
   return { files, problems };
 }
 
-/** The PR description: the gateway's header, then Mandla's own body. */
-function prBody(change: Change, decision: Decision | null, body: string): string {
+/** The PR description: the gateway's header, then Mandla's own body. A fix-up PR names the PR it fixes. */
+function prBody(change: Change, decision: Decision | null, body: string, fixUpOf?: string): string {
   const p = safeJson(decision?.payload);
   const evidence = Array.isArray(p.evidence) ? p.evidence.join(", ") : "none recorded";
   return [
@@ -248,6 +248,7 @@ function prBody(change: Change, decision: Decision | null, body: string): string
     `Decision: ${change.decision_id}`,
     `Evidence: ${evidence}`,
     `Measure: ${change.measure}${change.tool ? ` (tool ${change.tool})` : ""}`,
+    ...(fixUpOf ? [`Fix-up of: ${fixUpOf}`] : []),
     "",
     "Built by Mandla; needs the owner's review like any other PR.",
     "",
@@ -257,18 +258,30 @@ function prBody(change: Change, decision: Decision | null, body: string): string
   ].join("\n");
 }
 
+/** What a submission does in each state of its change (C-10); none in the others. */
+const SUBMIT_MODES: Partial<Record<Change["state"], "open" | "push" | "fix_up">> = { building: "open", pr_open: "push", live: "fix_up" };
+
+/** The branch a change's first PR is opened from. */
+const changeBranch = (change: Change) => `change/${change.id.toLowerCase()}`;
+
 /**
  * Mandla's submit_change: the only write to the network's own repo. Accepted only from
- * the session of the task the gateway started for a change still building, and only once.
+ * the session of the change's current task, once per task. The first submission opens
+ * the change's PR. A follow-up task (C-10) adds a commit to that PR's branch while it is
+ * open, or opens a fix-up PR once the change is live; each is recorded against the same C-n.
  */
 export async function submitChange(ctx: Ctx, agent: string, sessionId: string, input: Record<string, unknown>): Promise<string> {
   const task = await ctx.db.sessionTask(sessionId);
   const change = task && task.agent === agent && task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
-  if (!change) throw new ToolError("Only Mandla's task for an approved change can submit");
+  if (!task || !change) throw new ToolError("Only Mandla's task for an approved change can submit");
   const asked = String(input.change ?? "").trim();
   if (asked.toUpperCase() !== change.id) throw new ToolError(`This task is for ${change.id}, not ${asked}.`);
-  if (change.pr_url) throw new ToolError(`${change.id} already has a PR: ${change.pr_url}`);
-  if (change.state !== "building") throw new ToolError(`${change.id} is ${change.state}; there is nothing to submit.`);
+  const mode = SUBMIT_MODES[change.state];
+  if (!mode) throw new ToolError(`${change.id} is ${change.state}; there is nothing to submit.`);
+  if (mode !== "open" && !task.follows_up) throw new ToolError(`${change.id} already has a PR: ${change.pr_url}`);
+  const earlier = await ctx.db.taskSubmission(task.id);
+  if (earlier) throw new ToolError(`${task.id} has already submitted ${change.id}${earlier.pr_url ? ` (${earlier.pr_url})` : ""}: one submission per task. Call report_status and stop.`);
+  if (mode !== "open" && !change.pr_url) throw new ToolError(`${change.id} has no PR on record to follow up. Report it in report_status.`);
 
   const title = String(input.title ?? "").trim();
   const body = String(input.body ?? "").trim();
@@ -283,24 +296,40 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
 
   const ref = parseTarget(ctx.network.network_repo);
   if (!ref) throw new ToolError("The network repo isn't configured (network_repo). Report it in report_status.");
+  const at = new Date().toISOString().slice(0, 19).replace("T", " ");
   if (ctx.dryRun) {
-    // Closed, so the task ends done rather than blocked for want of a PR.
+    const n = `${files.length} file${files.length === 1 ? "" : "s"}`;
+    // Recorded, so the task ends done rather than blocked for want of a submission.
+    await ctx.db.recordSubmission({ change_id: change.id, task_id: task.id, mode: "dry_run", pr_url: null, at });
+    if (mode === "push") return `DRY RUN: would add a commit with ${n} to ${change.pr_url} for ${change.id}. Call report_status and stop.`;
+    if (mode === "fix_up") return `DRY RUN: would open a fix-up PR for ${change.id} on ${ref.owner}/${ref.repo} with ${n}. Call report_status and stop.`;
+    // Closed, so the change isn't left building.
     await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "dry run" });
-    return `DRY RUN: would open a PR for ${change.id} on ${ref.owner}/${ref.repo} with ${files.length} file${files.length === 1 ? "" : "s"}. ${change.id} is closed; call report_status and stop.`;
+    return `DRY RUN: would open a PR for ${change.id} on ${ref.owner}/${ref.repo} with ${n}. ${change.id} is closed; call report_status and stop.`;
   }
 
   const decision = await ctx.db.getDecision(change.decision_id);
   const author = ctx.network.self_improvement?.commit_author;
   if (!author) throw new ToolError("The commit author isn't configured (self_improvement.commit_author). Report it in report_status.");
-  let pr: { html_url: string; number: number };
+  // A push adds a commit to the open PR's branch; the others open a PR from a new branch.
+  const branch = mode === "fix_up" ? `${changeBranch(change)}-${task.id.toLowerCase()}` : changeBranch(change);
+  const fields = mode === "push" ? ["branch", "files"] : ["branch", "files", "title", "body"];
+  const prNumber = (url: string | null) => Number(url?.match(/\/pull\/(\d+)$/)?.[1]) || null;
+  const where = mode === "push" ? `the branch ${branch}` : "the default branch";
+  let pr: { html_url: string; number: number | null };
+  let commit: string | undefined;
   try {
     const gh = await ctx.github();
     const repo = { owner: ref.owner, repo: ref.repo };
-    // Edits are made to the files at one commit, and the change is built on that commit.
+    // Edits are made to the files at one commit, and the change is built on that commit:
+    // the open PR's head for a push, otherwise the default branch's head.
     let base: string | undefined;
+    if (mode === "push") {
+      base = (await gh.branchHead(repo, branch)) ?? undefined;
+      if (!base) throw new ToolError(`${change.id}'s branch ${branch} is gone, so there is nothing to add to. Report it in report_status.`);
+    } else if (files.some((f) => f.edits)) base = (await gh.defaultHead(repo)).sha;
     const whole: { path: string; content: string | null }[] = [];
     const unmade: string[] = [];
-    if (files.some((f) => f.edits)) base = (await gh.defaultHead(repo)).sha;
     for (const f of files) {
       if (!f.edits) {
         whole.push({ path: f.path, content: f.content });
@@ -308,37 +337,52 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
       }
       const text = await gh.fileText(repo, f.path, base!);
       if (text === null) {
-        unmade.push(`${f.path}: not on the default branch, so there is nothing to edit; give its whole content instead`);
+        unmade.push(`${f.path}: not on ${where}, so there is nothing to edit; give its whole content instead`);
         continue;
       }
       const done = applyEdits(f.path, text, f.edits);
-      unmade.push(...done.problems);
+      unmade.push(...done.problems.map((p) => (mode === "push" ? p.replace("on the default branch", `on ${where}`) : p)));
       whole.push({ path: f.path, content: done.text });
     }
     if (unmade.length) throw new ToolError(`Not submitted. Fix these and call again:\n- ${unmade.join("\n- ")}`);
-    pr = await gh.proposeChange(
-      repo,
-      {
-        branch: `change/${change.id.toLowerCase()}`,
+    const followsUp = task.follows_up ? `\nFollows up: ${task.follows_up}` : "";
+    const message = `${title}\n\nChange: ${change.id}\nDecision: ${change.decision_id}${followsUp}\n\nSigned-off-by: ${author.name} <${author.email}>`;
+    if (mode === "push") {
+      commit = (await gh.commitToBranch(repo, { branch, base: base!, files: whole, message, author })).sha;
+      pr = { html_url: change.pr_url!, number: prNumber(change.pr_url) };
+    } else {
+      pr = await gh.proposeChange(repo, {
+        branch,
         files: whole,
         ...(base ? { base } : {}),
-        message: `${title}\n\nChange: ${change.id}\nDecision: ${change.decision_id}\n\nSigned-off-by: ${author.name} <${author.email}>`,
+        message,
         author,
         title,
-        body: prBody(change, decision, body),
-      },
-    );
+        body: prBody(change, decision, body, mode === "fix_up" ? (change.pr_url ?? undefined) : undefined),
+      });
+    }
   } catch (e) {
-    // An edit that didn't apply was refused before anything reached GitHub.
+    // An edit that didn't apply, or a missing branch, was refused before anything reached GitHub.
     if (e instanceof ToolError) throw e;
     // The branch and commit may already be on GitHub, so the attempt is recorded (C-7).
-    await recordGithubWrite(ctx, { agent, sessionId, taskId: change.task_id, tool: "submit_change", decision: change.decision_id, repo: `${ref.owner}/${ref.repo}`, number: null, fields: ["branch", "files", "title", "body"], ok: false });
-    throw new ToolError(`The PR for ${change.id} wasn't opened: ${e instanceof Error ? e.message : String(e)}. ${change.id} is still building; fix the cause if it is yours and submit again, otherwise report it in report_status.`);
+    await recordGithubWrite(ctx, { agent, sessionId, taskId: change.task_id, tool: "submit_change", decision: change.decision_id, repo: `${ref.owner}/${ref.repo}`, number: mode === "push" ? prNumber(change.pr_url) : null, fields, ok: false });
+    const why = e instanceof Error ? e.message : String(e);
+    const what = mode === "push" ? `The commit for ${change.id} wasn't added to ${change.pr_url}` : `The ${mode === "fix_up" ? "fix-up " : ""}PR for ${change.id} wasn't opened`;
+    const still = mode === "open" ? `${change.id} is still building; ` : "";
+    throw new ToolError(`${what}: ${why}. ${still}Fix the cause if it is yours and submit again, otherwise report it in report_status.`);
   }
-  const at = new Date().toISOString().slice(0, 19).replace("T", " ");
-  await ctx.db.updateChange(change.id, { state: "pr_open", pr_url: pr.html_url, pr_opened_at: at });
-  await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.change_pr_opened", detail: { change: change.id, decision: change.decision_id, pr: pr.html_url } });
-  await recordGithubWrite(ctx, { agent, sessionId, taskId: change.task_id, tool: "submit_change", decision: change.decision_id, repo: `${ref.owner}/${ref.repo}`, number: pr.number, fields: ["branch", "files", "title", "body"], ok: true });
+  await ctx.db.recordSubmission({ change_id: change.id, task_id: task.id, mode, pr_url: pr.html_url, at });
+  if (mode === "open") await ctx.db.updateChange(change.id, { state: "pr_open", pr_url: pr.html_url, pr_opened_at: at });
+  const event = mode === "push" ? "gateway.change_pr_updated" : "gateway.change_pr_opened";
+  await ctx.db.audit({
+    agent,
+    session_id: sessionId,
+    event_type: event,
+    detail: { change: change.id, decision: change.decision_id, pr: pr.html_url, ...(mode !== "open" ? { task: task.id } : {}), ...(commit ? { commit } : {}), ...(mode === "fix_up" ? { fix_up_of: change.pr_url } : {}) },
+  });
+  await recordGithubWrite(ctx, { agent, sessionId, taskId: change.task_id, tool: "submit_change", decision: change.decision_id, repo: `${ref.owner}/${ref.repo}`, number: pr.number, fields, ok: true });
+  if (mode === "push") return `Added a commit to ${pr.html_url} for ${change.id}. The owner reviews it; call report_status and stop.`;
+  if (mode === "fix_up") return `Opened ${pr.html_url}, a fix-up PR for ${change.id}. The owner reviews it; call report_status and stop.`;
   return `Opened ${pr.html_url} for ${change.id}. The owner reviews it; call report_status and stop.`;
 }
 

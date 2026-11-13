@@ -315,6 +315,36 @@ export class GitHub {
     });
   }
 
+  /** The commit at the head of a branch, or null if there is no such branch. */
+  async branchHead(r: RepoRef, branch: string): Promise<string | null> {
+    try {
+      return (await this.call<{ object: { sha: string } }>("GET", `/repos/${r.owner}/${r.repo}/git/ref/heads/${encodePath(branch)}`)).object.sha;
+    } catch (e) {
+      if (/: 404 /.test(String(e))) return null;
+      throw e;
+    }
+  }
+
+  /**
+   * Several files in one commit on top of `base`, the head of an existing branch, which
+   * then moves to it (C-10: a follow-up adds to a change's open PR). Never forced: if the
+   * branch has moved since `base` was read, GitHub refuses the update and nothing changes.
+   */
+  async commitToBranch(
+    r: RepoRef,
+    p: { branch: string; base: string; files: { path: string; content: string | null }[]; message: string; author: { name: string; email: string } },
+  ): Promise<{ sha: string }> {
+    const base = `/repos/${r.owner}/${r.repo}`;
+    const commit = await this.call<{ tree: { sha: string } }>("GET", `${base}/git/commits/${p.base}`);
+    const tree = await this.call<{ sha: string }>("POST", `${base}/git/trees`, {
+      base_tree: commit.tree.sha,
+      tree: p.files.map((f) => ({ path: f.path, mode: "100644", type: "blob", ...(f.content === null ? { sha: null } : { content: f.content }) })),
+    });
+    const made = await this.call<{ sha: string }>("POST", `${base}/git/commits`, { message: p.message, tree: tree.sha, parents: [p.base], author: p.author });
+    await this.call("PATCH", `${base}/git/refs/heads/${encodePath(p.branch)}`, { sha: made.sha, force: false });
+    return { sha: made.sha };
+  }
+
   /**
    * A fix for a PR (decision 63): files committed on a new branch from the PR's head,
    * then a PR into the PR's own branch, so its author can merge the fix into theirs.

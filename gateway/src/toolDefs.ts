@@ -122,7 +122,7 @@ export const TOOLS = {
         priority: { type: "string", enum: ["low", "normal", "high"] },
         due: str("ISO date, optional"),
         follows_up: str(
-          "The blocked task or failed decision this task follows up, e.g. T-12 or D-41. Optional. Refused if an open task already follows it up; when this task finishes, a blocked task it follows up is closed.",
+          "The blocked task or failed decision this task follows up, e.g. T-12 or D-41. Optional. Refused if an open task already follows it up; when this task finishes, a blocked task it follows up is closed. For Mandla, the change's latest task or the decision that approved it: a blocked change still building, or one whose PR is open or live, to fix it up.",
         ),
       },
       required: ["agent", "title", "objective", "output", "done_when", "effort"],
@@ -418,11 +418,13 @@ export const TOOLS = {
   submit_change: {
     owner: "mandla",
     description:
-      "Submit the finished change once. For a file that already exists, give edits: each replaces one exact, unique piece of " +
+      "Submit the finished change once per task. For a file that already exists, give edits: each replaces one exact, unique piece of " +
       "its text on the default branch. Give whole content only for a new file, and delete: true to remove one. The gateway " +
       "checks the paths (nothing under .github/ or gateway/src/generated/, no '..', no absolute paths; at most 50 files and " +
       "500,000 characters), makes the edits, commits the files to a branch change/c-n and opens one PR on the network's repo " +
-      "for the owner to review. If an edit's old text isn't found exactly once, nothing is submitted and the reply says which.",
+      "for the owner to review. In a follow-up task for a change whose PR is open, the edits apply to the files on change/c-n " +
+      "and the commit is added to that PR; once the change is live, it opens a fix-up PR for the same change from main. " +
+      "If an edit's old text isn't found exactly once, nothing is submitted and the reply says which.",
     input_schema: {
       type: "object",
       properties: {

@@ -742,6 +742,158 @@ describe("Mandla's tasks that end without a PR", () => {
   });
 });
 
+describe("follow-ups of a change that has its PR (C-10)", () => {
+  const FILES = [{ path: "agents/mira.md", edits: [{ old: "Step 3.", new: "Step 3, thanking first." }] }];
+  const submit = (ctx: Ctx, sid: string, input: object = {}) =>
+    handleTool(ctx, "mandla", sid, "submit_change", { change: "C-1", title: "fix(mira): thank first", body: "Fixes the review findings.", files: FILES, ...input });
+  const end = async (ctx: Ctx, fakes: any, sid: string) => {
+    fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mandla" }, stop_reason: { type: "end_turn" } };
+    fakes.events[sid] = [];
+    await processSession(ctx, sid);
+  };
+  const follow = (ctx: Ctx, follows_up: string) =>
+    handleTool(ctx, "ada", "sesn_ada", "assign_task", {
+      agent: "mandla", title: "Fix up C-1", objective: "Fix the review findings", output: "A commit", done_when: "submit_change succeeded", effort: "small", follows_up,
+    });
+  /** C-1 approved, its PR opened by Mandla's first task, which has ended done. */
+  async function opened() {
+    const gh = fakeGitHub();
+    gh.repoFiles["agents/mira.md"] = "# Mira\nStep 3.\n";
+    gh.branches["change/c-1"] = "prhead1";
+    const { ctx, fakes } = loopCtx(undefined, { dryRun: false, github: async () => gh as any });
+    await decided(ctx, "mira", 10);
+    const out = await propose(ctx, "mira", { ...PAYLOAD, evidence: ["D-1", "D-2"] });
+    const decision = out.match(/D-\d+/)![0];
+    await approve(ctx, decision);
+    const task = (await ctx.db.openTasks("mandla"))[0];
+    expect(await submit(ctx, task.session_id!)).toContain("Opened https://github.com/accordproject/virtual-agent-org/pull/1");
+    await end(ctx, fakes, task.session_id!);
+    expect((await ctx.db.getTask(task.id))?.status).toBe("done");
+    return { ctx, fakes, gh, task, decision };
+  }
+  const nextTask = async (ctx: Ctx, follows: string) => (await ctx.db.openTasks("mandla")).find((t) => t.follows_up === follows)!;
+
+  it("a follow-up of an open PR's task adds a commit to its branch, built on the branch's head", async () => {
+    const { ctx, fakes, gh, task } = await opened();
+    expect(await follow(ctx, task.id)).toMatch(/^Assigned T-\d+ to Mandla/);
+    const next = await nextTask(ctx, task.id);
+    expect(next.kind).toBe("change");
+    expect((await ctx.db.getChange("C-1"))?.task_id).toBe(next.id);
+    expect(next.brief).toContain("C-1's PR is open: https://github.com/accordproject/virtual-agent-org/pull/1. Build on its branch change/c-1");
+
+    gh.fileReads.length = 0;
+    expect(await submit(ctx, next.session_id!)).toBe("Added a commit to https://github.com/accordproject/virtual-agent-org/pull/1 for C-1. The owner reviews it; call report_status and stop.");
+    expect(gh.fileReads).toEqual([{ path: "agents/mira.md", ref: "prhead1" }]);
+    expect(gh.proposed).toHaveLength(1);
+    expect(gh.pushed).toHaveLength(1);
+    expect(gh.pushed[0]).toMatchObject({ branch: "change/c-1", base: "prhead1", files: [{ path: "agents/mira.md", content: "# Mira\nStep 3, thanking first.\n" }] });
+    expect(gh.pushed[0].message).toContain(`Change: C-1\nDecision: ${(await ctx.db.getChange("C-1"))!.decision_id}\nFollows up: ${task.id}`);
+    expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "pr_open", pr_url: "https://github.com/accordproject/virtual-agent-org/pull/1" });
+
+    // Both submissions are recorded against C-1, and the follow-up's in the audit log.
+    expect((await ctx.db.changeSubmissions("C-1")).map((x) => [x.task_id, x.mode, x.pr_url])).toEqual([
+      [task.id, "open", "https://github.com/accordproject/virtual-agent-org/pull/1"],
+      [next.id, "push", "https://github.com/accordproject/virtual-agent-org/pull/1"],
+    ]);
+    const row: any = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.change_pr_updated'").first();
+    expect(JSON.parse(row.detail)).toMatchObject({ change: "C-1", pr: "https://github.com/accordproject/virtual-agent-org/pull/1", task: next.id, commit: "pushed1" });
+    const writes = await ctx.db.githubWrites("2000-01-01", "9999-12-31");
+    expect(writes.at(-1)).toMatchObject({ tool: "submit_change", args: { repo: "accordproject/virtual-agent-org", number: 1, fields: ["branch", "files"] }, ok: true });
+
+    // Once per task.
+    await expect(submit(ctx, next.session_id!)).rejects.toThrow(`${next.id} has already submitted C-1`);
+    expect(gh.pushed).toHaveLength(1);
+    await end(ctx, fakes, next.session_id!);
+    expect((await ctx.db.getTask(next.id))?.status).toBe("done");
+  });
+
+  it("a follow-up of a live change, by its decision, opens a fix-up PR from main and leaves the change live", async () => {
+    const { ctx, gh, decision } = await opened();
+    await ctx.db.updateChange("C-1", { state: "live", live_at: "2026-11-01 00:00:00" });
+    expect(await follow(ctx, decision)).toMatch(/^Assigned T-\d+ to Mandla/);
+    const next = await nextTask(ctx, decision);
+    expect(next.brief).toContain("C-1 is live: its PR https://github.com/accordproject/virtual-agent-org/pull/1 is merged. Build on main");
+
+    gh.fileReads.length = 0;
+    expect(await submit(ctx, next.session_id!)).toBe("Opened https://github.com/accordproject/virtual-agent-org/pull/2, a fix-up PR for C-1. The owner reviews it; call report_status and stop.");
+    expect(gh.fileReads).toEqual([{ path: "agents/mira.md", ref: "basecommit1" }]);
+    expect(gh.pushed).toHaveLength(0);
+    const [, fix] = gh.proposed[1];
+    expect(fix.branch).toBe(`change/c-1-${next.id.toLowerCase()}`);
+    expect(fix.base).toBe("basecommit1");
+    expect(fix.body).toContain("Change: C-1");
+    expect(fix.body).toContain("Fix-up of: https://github.com/accordproject/virtual-agent-org/pull/1");
+    expect(await ctx.db.getChange("C-1")).toMatchObject({ state: "live", live_at: "2026-11-01 00:00:00", pr_url: "https://github.com/accordproject/virtual-agent-org/pull/1" });
+    expect((await ctx.db.changeSubmissions("C-1")).map((x) => [x.mode, x.pr_url])).toEqual([
+      ["open", "https://github.com/accordproject/virtual-agent-org/pull/1"],
+      ["fix_up", "https://github.com/accordproject/virtual-agent-org/pull/2"],
+    ]);
+  });
+
+  it("a follow-up that doesn't submit is blocked, and leaves the change with its PR as it is", async () => {
+    const { ctx, fakes, task } = await opened();
+    await follow(ctx, task.id);
+    const next = await nextTask(ctx, task.id);
+    await end(ctx, fakes, next.session_id!);
+    expect(await ctx.db.getTask(next.id)).toMatchObject({ status: "blocked", blocked_reason: "C-1: no change submitted" });
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
+  });
+
+  it("a follow-up waits for the change's running task, and a closed change has nothing to follow up", async () => {
+    const gh = fakeGitHub();
+    const { ctx } = loopCtx(undefined, { dryRun: false, github: async () => gh as any });
+    await decided(ctx, "mira", 10);
+    const out = await propose(ctx, "mira", { ...PAYLOAD, evidence: ["D-1", "D-2"] });
+    await approve(ctx, out.match(/D-\d+/)![0]);
+    const task = (await ctx.db.openTasks("mandla"))[0];
+    await submit(ctx, task.session_id!, { files: [{ path: "agents/mira.md", content: "x" }] });
+    // Its session is still running.
+    await expect(follow(ctx, task.id)).rejects.toThrow(`C-1 is pr_open and ${task.id} is running: there is nothing to follow up.`);
+    await ctx.db.setTask(task.id, "done");
+    for (const state of ["closed", "measured"] as const) {
+      await ctx.db.updateChange("C-1", { state });
+      await expect(follow(ctx, task.id)).rejects.toThrow(`C-1 is ${state}`);
+    }
+    expect(await ctx.db.openTasks("mandla")).toHaveLength(0);
+  });
+
+  it("a follow-up whose PR branch is gone submits nothing", async () => {
+    const { ctx, gh, task } = await opened();
+    delete gh.branches["change/c-1"];
+    await follow(ctx, task.id);
+    const next = await nextTask(ctx, task.id);
+    await expect(submit(ctx, next.session_id!)).rejects.toThrow("C-1's branch change/c-1 is gone");
+    expect(gh.pushed).toHaveLength(0);
+    expect(await ctx.db.taskSubmission(next.id)).toBeNull();
+  });
+
+  it("GitHub.commitToBranch adds one commit on the branch's head without forcing it", async () => {
+    const calls: [string, string, any][] = [];
+    const R = "/repos/accordproject/virtual-agent-org";
+    const fetchImpl = (async (url: string, init: any) => {
+      const path = new URL(url).pathname;
+      calls.push([init.method, path, init.body ? JSON.parse(init.body) : undefined]);
+      if (path === `${R}/git/ref/heads/change/gone`) return new Response('{"message":"Not Found"}', { status: 404 });
+      const body =
+        path === `${R}/git/ref/heads/change/c-1` ? { object: { sha: "head1" } }
+        : path === `${R}/git/commits/head1` ? { tree: { sha: "tree1" } }
+        : path === `${R}/git/trees` ? { sha: "tree2" }
+        : path === `${R}/git/commits` ? { sha: "commit2" }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const gh = new GitHub("t", fetchImpl);
+    const r = { owner: "accordproject", repo: "virtual-agent-org" };
+    const author = { name: "bot", email: "bot@example.com" };
+    expect(await gh.branchHead(r, "change/c-1")).toBe("head1");
+    expect(await gh.branchHead(r, "change/gone")).toBeNull();
+    expect(await gh.commitToBranch(r, { branch: "change/c-1", base: "head1", files: [{ path: "a.md", content: "A" }], message: "fix: x", author })).toEqual({ sha: "commit2" });
+    expect(calls.find((c) => c[0] === "POST" && c[1] === `${R}/git/commits`)?.[2]).toEqual({ message: "fix: x", tree: "tree2", parents: ["head1"], author });
+    expect(calls.find((c) => c[0] === "PATCH")).toEqual(["PATCH", `${R}/git/refs/heads/change/c-1`, { sha: "commit2", force: false }]);
+    expect(calls.some((c) => c[1] === `${R}/pulls`)).toBe(false);
+  });
+});
+
 describe("measuring changes", () => {
   const sql = (ctx: Ctx, q: string, ...args: unknown[]) => (ctx.db as any).db.prepare(q).bind(...args).run();
   const w = (value: number | null, cases = 10) => ({ value, cases });

@@ -99,16 +99,18 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "fin
   const task = await ctx.db.getTask(taskId);
   if (!task || ["done", "blocked", "failed", "cancelled"].includes(task.status)) return;
   const change = task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
-  const unsubmitted = change?.state === "building";
-  // A change whose PR is open was submitted: its task's work is done, whatever stopped the session after.
-  const submitted = !!change && !unsubmitted && !!change.pr_url;
+  // Each task for a change submits once (C-10): the first opens its PR, a follow-up adds to it or fixes it up.
+  const submission = change ? await ctx.db.taskSubmission(task.id) : null;
+  const unsubmitted = !!change && !submission && change.state !== "closed";
+  // A task that submitted its change is done, whatever stopped the session after.
+  const submitted = !!submission;
   let reason = unsubmitted
     ? `${change.id}: no change submitted${{ finished: "", budget: " (budget reached)", ended: " (session ended)" }[end]}`
     : submitted
       ? null
       : { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
   // For a submitted change, a report from before the PR opened is out of date; one made after still counts.
-  const blockers = (await ctx.db.sessionBlockers(sessionId, submitted ? (change.pr_opened_at ?? undefined) : undefined)) ?? [];
+  const blockers = (await ctx.db.sessionBlockers(sessionId, submission ? submission.created_at : undefined)) ?? [];
   // A review check that finished is judged by whether its review was posted at its head, not by its
   // report (decision 75). Posted: what is left (a maintainer's approval, a refused merge) is the PR's
   // state, and the merge wake re-proposes it once its checks pass, so the task is done. Not posted:
@@ -128,8 +130,9 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "fin
     await ctx.db.setTask(task.id, "blocked");
     if (reason) await ctx.db.setBlockedReason(task.id, reason);
     await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.task_blocked", detail: { task: task.id, blockers: blockers.slice(0, 5) } });
-    // The second attempt at a change that ends this way closes it; Ada still puts it to the owner.
-    if (unsubmitted && task.follows_up?.startsWith("T-")) {
+    // The second attempt at building a change that ends this way closes it; Ada still puts it to the owner.
+    // A follow-up of a change that already has its PR leaves the change as it is.
+    if (unsubmitted && task.follows_up && change.state === "building") {
       await ctx.db.updateChange(change.id, { state: "closed", closed_reason: "blocked twice" });
       await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.change_closed", detail: { change: change.id, reason: "blocked twice" } });
     }
