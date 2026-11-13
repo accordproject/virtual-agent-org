@@ -931,3 +931,23 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   issues get no review.
 - Not chosen: making every `github.comment` auto (closing comments and other replies
   still need the owner's eye).
+
+**79. A weekly update deck for the owner** · DEFAULT
+
+- The owner asked for a weekly slide deck on the network, modelled on the progress deck
+  shown to the Tech WG on 11 November 2026: key decisions, changes, feedback, the
+  effect on the KPIs and anything interesting, in at most 10 slides.
+- Ada writes it on Fridays at 17:00, after Vera's weekly scorecard and her own
+  evaluation, from the scorecard, the decision queue and the agents' status reports.
+  It runs as a gateway schedule on the standard tier at medium effort, capped at $2 a run.
+- Its instructions and an example deck live in `reports/` and are written to the shared
+  memory store at deploy, like the rubric, so Ada's other sessions don't pay for them.
+- The deck is Markdown in Marp's format, sent to the owner as a file in a Discord DM,
+  as he prefers to Telegram: `send_to_matt` takes an optional `document`, a
+  lower-case `.md` file name and at most 20,000 characters, with no mentions, recorded
+  in the audit. A message couldn't carry it (Discord caps messages at 2,000
+  characters). Without `OWNER_DISCORD_ID` the gateway refuses it before sending
+  anything. The file can be presented as it is or turned into slides.
+- Ada still holds no new tool and no side effect beyond messaging the owner.
+- Not chosen: the gateway rendering and hosting the slides itself, which would need
+  a public page or a login for one report a week.

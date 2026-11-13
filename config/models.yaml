@@ -18,6 +18,7 @@ agents:
     effort: low                                # check-ins and chat with Matt
     tasks:
       evaluation: { tier: deep, effort: medium }
+      weekly_update: { tier: standard, effort: medium }   # the Friday deck for Matt (decision 79)
       follow_up: { tier: standard, effort: low }   # gateway-started sessions: task blocked, approved decision failed (decision 268)
   mira:
     default: standard

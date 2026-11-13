@@ -244,6 +244,7 @@ test("schedules with a task go to the gateway, with a cron it can read (decision
   const out = compile(cfg);
   assert.deepEqual(out.gateway_schedules.map((s) => [s.name, s.task]).sort(), [
     ["ada-weekly-evaluation", "evaluation"],
+    ["ada-weekly-update", "weekly_update"],
     ["mira-review", "review"],
     ["mira-triage", "triage"],
     ["vera-weekly", "analysis"],

@@ -28,6 +28,9 @@ export const READS_ALL_DECISIONS: readonly string[] = ["vera"];
 /** How many decision cards one send_to_matt call may re-send (C-4). */
 export const MAX_RESENT_CARDS = 10;
 
+/** The longest file send_to_matt sends: Ada's weekly update deck (decision 79). */
+export const MAX_DOCUMENT_CHARS = 20000;
+
 const str = (description: string): Schema => ({ type: "string", description });
 const strList = (description: string): Schema => ({ type: "array", items: { type: "string" }, description });
 
@@ -214,6 +217,15 @@ export const TOOLS = {
       properties: {
         text: str("Message text, plain text, under 3500 characters. Leave it out in a conversation with Matt."),
         decision_ids: strList(`Open decisions whose cards to re-send after the text, oldest first, e.g. ["D-117", "D-118"]; at most ${MAX_RESENT_CARDS}`),
+        document: {
+          type: "object",
+          description: `A Markdown file sent to Matt's Discord DMs, for the weekly update only. Allowed in a conversation too.`,
+          properties: {
+            filename: str("e.g. weekly-update-2026-w46.md: lower-case letters, digits and hyphens, ending .md"),
+            content: str(`The file's Markdown, at most ${MAX_DOCUMENT_CHARS} characters`),
+          },
+          required: ["filename", "content"],
+        },
       },
     },
   },
