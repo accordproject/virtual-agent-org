@@ -846,8 +846,9 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   posted on the PR at that check's head, whatever it listed as blocked. The blockers
   go to the audit log as `gateway.review_check_done`. The merge wake still proposes
   the merge once the PR's checks pass, since it follows the review, not the task.
-- A review check stays blocked when no review was posted at its head, or when its
-  session ran out of budget or ended in error.
+- A review check stays blocked when no review was posted at its head, whatever its
+  report says (even an empty one, or none), or when its session ran out of budget or
+  ended in error.
 - A question that needs a maintainer, such as closing a PR, goes to the owner as a
   `request_action` card, not as a blocked task.
 - Not chosen: closing review-check tasks when their PR merges, closes or gets new

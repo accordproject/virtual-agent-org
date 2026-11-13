@@ -369,12 +369,12 @@ describe("following up blocked tasks (decision 50)", () => {
 
   it("ends a review check done once its review is posted at that head, even if the merge was refused", async () => {
     const { ctx, fakes } = makeTestCtx();
-    const reviewCheck = async (sid: string, sha7: string) => {
+    const reviewCheck = async (sid: string, sha7: string, blocked: string[] | null = ["merge not queued: review required"]) => {
       const task = await ctx.db.createTask({ agent: "mira", title: "Review check", brief: "b", review: { target: "accordproject/concerto#1", sha: sha7 } });
       await ctx.db.upsertSession({ id: sid, agent: "mira", origin: "task", task_id: task.id });
       await ctx.db.setTask(task.id, "running", sid);
       fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "end_turn" } };
-      fakes.events[sid] = [{ id: `${sid}_e1`, type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked: ["merge not queued: review required"] } }];
+      fakes.events[sid] = blocked ? [{ id: `${sid}_e1`, type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked } }] : [];
       return task.id as string;
     };
     await ctx.db.createReview({ target: "accordproject/concerto#1", sha: "abc1234def5678", risk: "low", verdict: "approve", decision_id: "D-1", url: null, findings: [] });
@@ -386,6 +386,19 @@ describe("following up blocked tasks (decision 50)", () => {
     const other = await reviewCheck("sesn_rc_other", "fff0000");
     await processSession(ctx, "sesn_rc_other");
     expect((await ctx.db.getTask(other))?.status).toBe("blocked");
+    // With no review at its head, an empty report or no report at all still leaves it blocked, and says why.
+    const clean = await reviewCheck("sesn_rc_clean", "eee0000", []);
+    await processSession(ctx, "sesn_rc_clean");
+    expect(await ctx.db.getTask(clean)).toMatchObject({ status: "blocked", blocked_reason: "No review posted at eee0000" });
+    const silent = await reviewCheck("sesn_rc_silent", "ddd0000", null);
+    await processSession(ctx, "sesn_rc_silent");
+    expect(await ctx.db.getTask(silent)).toMatchObject({ status: "blocked", blocked_reason: "No review posted at ddd0000" });
+    // A posted review with a clean report is done, with nothing to audit.
+    await ctx.db.createReview({ target: "accordproject/concerto#1", sha: "ccc0000aaa", risk: "low", verdict: "approve", decision_id: "D-2", url: null, findings: [] });
+    const tidy = await reviewCheck("sesn_rc_tidy", "ccc0000", []);
+    await processSession(ctx, "sesn_rc_tidy");
+    expect((await ctx.db.getTask(tidy))?.status).toBe("done");
+    expect(await audit(ctx, "gateway.review_check_done")).toHaveLength(1);
     expect(adaWakes(fakes)).toHaveLength(0);
   });
 
