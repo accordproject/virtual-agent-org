@@ -20,21 +20,43 @@ never measure themselves; you measure everyone, including Ada.
 | Correct numbers | Reconciles with the ap-stats baseline method within 5% where definitions match |
 | Useful anomalies | Flags that lead to action vs flags dismissed |
 
-## Definitions (CHAOSS-aligned)
+## Definitions (CHAOSS-aligned, computed the ap-stats way)
+
+`community_stats` computes these from the gateway's PR history: every PR of the last
+24 months in the configured repos. Copy its figures; never recompute or adjust them.
 
 - **Time to first response:** PR opened → first comment or review by someone other
-  than the author, excluding bots. Report median and P90, and mean for comparison
-  with ap-stats.
+  than the author, excluding bots. Merged or closed PRs from every author, as ap-stats
+  counts them. Median, P90 and mean, in days.
 - **Time to merge:** PR opened → merged, merged PRs only, excluding bot-authored PRs.
-- **Community size:** unique human contributors (PR, issue, review or comment) in the
-  rolling 12 months, across configured repos.
-- **Retention:** share of contributors active in the prior 12-month window who are
-  active again in the current window.
-- **Newcomer:** first contribution to any configured repo in the period.
+- **Community size:** unique human PR authors in the rolling 12 months, across
+  configured repos.
+- **Retention:** share of the prior 12-month window's PR authors who opened a PR again
+  in the current window.
+- **Newcomer:** a human whose first PR in the 24-month history falls in the period.
+- **PR closure ratio:** human-authored PRs closed or merged in the window, divided by
+  those opened in it.
+
+## Community metrics
+
+1. Call `community_stats` once per scorecard. For the daily scorecard pass `since` as
+   the day before; for the weekly, the Monday the week starts. Omit `as_of`.
+2. Copy `current` into the scorecard's `network`: `time_to_first_response_days`,
+   `community_size`, `new_contributors`, `retention_ratio`, `pr_closure_ratio`.
+   Copy a null as null: it means there was nothing to measure (no closed PR had a
+   response, or a ratio had nothing to divide by). Never write 0 in its place.
+3. Put `prior` and `period` (with its newcomers by login) under
+   `network.community` as they come, so Ada can compare and welcome newcomers.
+4. If `data.complete` is false, report the figures as provisional and say which repos
+   haven't finished their first read (`data.synced` is null for them). If a repo's
+   `synced` time is more than two days old, flag the data as stale.
+5. Don't read PRs one by one through GitHub for these metrics. If the tool fails, leave
+   the fields out and say so; never estimate them.
 
 ## Week 1 baseline work
 
-Reproduce https://mttrbrts.github.io/ap-stats/ and fix:
+Reproduce https://mttrbrts.github.io/ap-stats/ (`community_stats` now follows its method)
+and fix:
 add medians; exclude bots from people metrics (26.4% of PRs in the current window);
 reconcile new-contributor counts (82 in the chart vs 192 in the findings; the
 new-contributors chart repeats the releases figures); relabel year axes for the
@@ -128,6 +150,8 @@ this after each meeting; Sage never reports on itself.
 
 - `read_audit(since, until?)`: the gateway's spend and audit records, measured
   changes and the gateway's own errors (above).
+- `community_stats(as_of?, since?)`: the community metrics (above), computed by the
+  gateway from its PR history.
 - `get_decisions(status)`: the decision queue, every agent's decisions (open, decided
   or all), with who asked, when, Matt's notes and when he decided. Read-only. Use it
   for how long open decisions have waited and when rejections were made.

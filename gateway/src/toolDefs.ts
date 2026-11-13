@@ -249,6 +249,22 @@ export const TOOLS = {
     },
   },
 
+  community_stats: {
+    owner: "vera",
+    description:
+      "Community metrics for the repos in scope, computed by the gateway from every PR of the last 24 months (the ap-stats method): " +
+      "time to first response (days: n, mean, median, P90), community size, new contributors, retention and PR closure ratio, " +
+      "for the 12 months to as_of and the 12 months before, plus an optional short period with its newcomers by name. " +
+      "Also says how fresh the data is and whether the history is complete. Read-only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        as_of: str("End of the 12-month window, exclusive: an ISO date in the last 31 days, e.g. 2026-11-13; omit for the start of today (UTC)"),
+        since: str("Start of a short period to report as well, e.g. the day or week the scorecard covers; ISO date before as_of"),
+      },
+    },
+  },
+
   // ---- otto ----
   vimeo_recordings: {
     owner: "otto",

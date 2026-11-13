@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { startSession } from "../src/agents";
 import { tickChanges } from "../src/changes";
+import { syncPrHistory } from "../src/community";
 import { Db } from "../src/db";
 import { dailyCheck, dispatchWakes, triageCheck } from "../src/githubEvents";
 import { cronMatches, localTime, parseCron } from "../src/cron";
@@ -545,6 +546,8 @@ describe("the five-minute cron's database reads", () => {
     await triageCheck(ctx, now);
     await dailyCheck(ctx, now);
     await dispatchWakes(ctx);
+    gh.history["accordproject/concerto"] = [[{ number: 1, state: "OPEN", createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-02T00:00:00Z", closedAt: null, mergedAt: null, author: { login: "a" }, reviews: { nodes: [] }, comments: { nodes: [] } }]];
+    await syncPrHistory(ctx, now);
     await runSchedules({ ...ctx, network: { ...ctx.network, gateway_schedules: [{ name: "x", agent: "mira", cron: "0 13 * * *", task: "triage", prompt: "p", budget_cents: 100 }] } }, now);
     const scans = [...seen]
       .filter((sql) => !BOUNDED.some((b) => sql.includes(b)))

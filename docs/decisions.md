@@ -835,7 +835,6 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   instead of removing it), or taking a unified diff (the gateway would need a patch
   applier, and a diff that doesn't apply is harder to explain to the agent).
 
-
 **75. A review check ends done once its review is posted** · RESOLVED
 
 - Review checks were ending blocked whenever Mira listed a blocker, and nearly every
@@ -854,3 +853,38 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: closing review-check tasks when their PR merges, closes or gets new
   commits. It needs more code and still leaves tasks blocked while a PR waits for
   approval.
+
+**76. Community metrics computed the ap-stats way** · DEFAULT
+
+- Vera's scorecards lacked time to first response, community size, new contributors,
+  retention and closure ratio. Each needs every PR's reviews and comments and a
+  12-month contributor history; reading those one PR at a time through the GitHub MCP
+  server cost more than a scorecard's budget, so she left them out.
+- ap-stats gets the same figures cheaply: one GraphQL query returns 100 PRs with their
+  first 20 reviews and comments, 24 months of PRs are read in bulk, and the metrics are
+  computed in code from that one dataset. The network now does the same.
+- The gateway keeps the PR history in its database (migration 0014): PRs created in
+  the 24 months before the oldest date Vera may ask about (31 days back), and older
+  PRs closed since then, which count only towards the closure ratio. Once a day from
+  04:00 London, the GitHub cron reads each repo in scope by last update, newest first,
+  until it reaches the previous day's read; the first 24-month read spreads over
+  several runs at 10 pages a run. A repo whose read fails is skipped until the next
+  day and logged as a gateway error, which Vera already reports.
+- Vera's new `community_stats` tool computes the five metrics for the 12 months to
+  today and the 12 before, plus a short period with its newcomers by login. It says
+  how fresh the data is and whether the first read has finished. Vera copies the
+  figures, as she does with measured changes; the spec says never to estimate them.
+- Definitions follow ap-stats so the figures reconcile: bots excluded from people
+  metrics; first response over merged or closed PRs from every author, with median
+  and P90 added; community size and retention from PR authors. Differences from
+  ap-stats: only the repos in scope rather than the whole organisation; closure
+  ratio, which ap-stats doesn't report, over human-authored PRs; and the window ends
+  today rather than at the last weekly run.
+- Read-only, with the gateway's existing App token. No new action kinds and no
+  credentials for Vera.
+- Not chosen: giving Vera's sandbox a GitHub token to run the ap-stats scripts (a
+  credential in an agent's sandbox, and the numbers would depend on her run), or
+  fetching on each tool call (24 months of reads won't finish within a Worker's time
+  after the response).
+- Revisit if issues, reviews and comments should count towards community size, as
+  CHAOSS allows: the history would need their authors too.

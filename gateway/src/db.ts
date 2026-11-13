@@ -9,6 +9,27 @@ export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 /** Decision kinds that say nothing about an agent's judgement, left out of approval measures. */
 export const NOT_JUDGEMENT = ["tool.confirm", "github.review", "github.approve_ci", "github.rerun_ci"];
 
+/** One PR in the community-metrics history (decision 76). Times are ISO, as GitHub gives them. */
+export interface PrHistoryRow {
+  repo: string;
+  number: number;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  merged_at: string | null;
+  author: string | null;
+  bot: 0 | 1;
+  first_response_at: string | null;
+}
+
+export interface PrSyncRow {
+  repo: string;
+  synced_from: string | null;
+  run_started: string | null;
+  cursor: string | null;
+}
+
 export interface Decision {
   id: string;
   seq: number;
@@ -1263,6 +1284,51 @@ export class Db {
       ? await this.db.prepare("SELECT * FROM scorecards WHERE period = ?").bind(period).first<{ period: string; body: string }>()
       : await this.db.prepare("SELECT * FROM scorecards ORDER BY created_at DESC LIMIT 1").first<{ period: string; body: string }>();
     return row ? { period: row.period, scorecard: JSON.parse(row.body) } : null;
+  }
+
+  // ---- PR history for community metrics (decision 76) --------------------
+
+  async prSync(repo: string): Promise<PrSyncRow | null> {
+    return this.db.prepare("SELECT * FROM pr_sync WHERE repo = ?").bind(repo).first<PrSyncRow>();
+  }
+
+  async allPrSyncs(): Promise<PrSyncRow[]> {
+    return (await this.db.prepare("SELECT * FROM pr_sync ORDER BY repo").all<PrSyncRow>()).results;
+  }
+
+  async setPrSync(row: PrSyncRow) {
+    await this.db
+      .prepare("INSERT OR REPLACE INTO pr_sync (repo, synced_from, run_started, cursor) VALUES (?, ?, ?, ?)")
+      .bind(row.repo, row.synced_from, row.run_started, row.cursor)
+      .run();
+  }
+
+  /** Inserts or replaces PRs, one statement each in a single batch (D1 allows 100 bound values a statement). */
+  async putPrHistory(rows: PrHistoryRow[]) {
+    if (!rows.length) return;
+    const sql =
+      "INSERT OR REPLACE INTO pr_history (repo, number, state, created_at, updated_at, closed_at, merged_at, author, bot, first_response_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    await this.db.batch(
+      rows.map((r) =>
+        this.db.prepare(sql).bind(r.repo, r.number, r.state, r.created_at, r.updated_at, r.closed_at, r.merged_at, r.author, r.bot, r.first_response_at),
+      ),
+    );
+  }
+
+  /** Drops PRs created and closed (or still open) before `before`. */
+  async prunePrHistory(before: string): Promise<number> {
+    const r = await this.db
+      .prepare("DELETE FROM pr_history WHERE created_at < ? AND (closed_at IS NULL OR closed_at < ?)")
+      .bind(before, before)
+      .run();
+    return r.meta?.changes ?? 0;
+  }
+
+  /** PRs created or closed at or after `from`. */
+  async prHistorySince(from: string): Promise<PrHistoryRow[]> {
+    return (
+      await this.db.prepare("SELECT * FROM pr_history WHERE created_at >= ? OR closed_at >= ?").bind(from, from).all<PrHistoryRow>()
+    ).results;
   }
 
   async putEvaluation(e: { agent: string; week: string; scores: unknown; evidence: string; proposal?: string }) {

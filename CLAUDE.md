@@ -79,7 +79,7 @@ Matt writes British English. Keep messages plain and short.
 | `skills/pr-review/` | Mira's review method (decision 69), written to the shared memory store at deploy; `NOTICE.md` credits its sources |
 | `scripts/compile.ts` | Validates config and writes `gateway/src/generated/network.json` |
 | `scripts/deploy.ts` | Creates or updates agents, vaults, memory stores and deployments; writes `deployed.json` |
-| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `githubEvents.ts` GitHub events (lapsing decisions, merge card refreshes, Mira's wakes, the daily check), `changes.ts` the self-improvement loop's changes (proposal checks, Mandla's tasks, `submit_change`, measuring), `schedules.ts` and `cron.ts` the schedules the gateway runs itself (decision 67) |
+| `gateway/src/` | The Worker: `index.ts` routes, `tools.ts` custom tools (defined in `toolDefs.ts`, input checked by `schema.ts`), `actions.ts` one spec per action kind (check, card, run), `executors.ts` dispatch, `review.ts` PR facts, risk and merge checks, `workflows.ts` workflow safety, `risk.ts` risk levels, `agents.ts` sessions and cards, `sessions.ts` event processing and housekeeping, `followUp.ts` waking Ada about blocked tasks and failed decisions, `githubEvents.ts` GitHub events (lapsing decisions, merge card refreshes, Mira's wakes, the daily check), `changes.ts` the self-improvement loop's changes (proposal checks, Mandla's tasks, `submit_change`, measuring), `schedules.ts` and `cron.ts` the schedules the gateway runs itself (decision 67), `community.ts` the PR history and Vera's community metrics (decision 76) |
 | `gateway/test/` | vitest suite with an in-memory D1 and fakes for every external API |
 
 ## Commands
@@ -119,7 +119,7 @@ only for a fork without the workflow, or when a run fails.
 ## Conventions
 
 - **Tests.** Every behaviour change gets a test in the matching `gateway/test/<area>.test.ts`
-  (actions, changes, channels, decisions, edge, github, review, sessions, tools, vimeo), using
+  (actions, changes, channels, community, decisions, edge, github, review, sessions, tools, vimeo), using
   `makeTestCtx()` from `helpers.ts`. Fakes record calls; never hit real APIs in
   tests.
 - **Fetch binding.** Workers reject `fetch` called with the wrong `this`, so every
@@ -163,6 +163,8 @@ only for a fork without the workflow, or when a run fails.
     request and same-repo workflow events work live; not yet seen are a fork PR's
     `workflow_run` (which names no PR, so the gateway matches its head against the
     open PRs) and the `pull_request_review_thread` event's shape;
+  - the PR history query (`prHistoryPage` in `github.ts`, decision 76), including
+    `__typename` on PR authors, and how long the first 24-month read takes;
   - CI fixes (decision 63): Felix reading failed jobs' logs through the GitHub MCP
     server with an Actions-read token; the re-run endpoint (`rerunFailedJobs`); and
     the App's commit and PR calls for a fix into a PR's branch (`proposeFix`), all in

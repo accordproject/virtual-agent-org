@@ -13,8 +13,13 @@
         "time_to_merge_days": { "$ref": "#/$defs/dist" },
         "community_size": { "type": "integer" },
         "new_contributors": { "type": "integer" },
-        "retention_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
-        "pr_closure_ratio": { "type": "number" },
+        "retention_ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "null when the prior window had no contributors" },
+        "pr_closure_ratio": { "type": ["number", "null"], "description": "null when no PRs were opened in the window" },
+        "community": {
+          "type": "object",
+          "description": "community_stats' prior window and period (with newcomers by login), copied as the tool gives them",
+          "properties": { "prior": { "type": "object" }, "period": { "type": "object" } }
+        },
         "spend_usd_month_to_date": { "type": "number" },
         "spend_usd_forecast_month": { "type": "number" },
         "gateway_errors": {
@@ -110,9 +115,9 @@
       "type": "object",
       "properties": {
         "n": { "type": "integer" },
-        "mean": { "type": "number" },
-        "median": { "type": "number" },
-        "p90": { "type": "number" }
+        "mean": { "type": ["number", "null"] },
+        "median": { "type": ["number", "null"] },
+        "p90": { "type": ["number", "null"] }
       }
     }
   }

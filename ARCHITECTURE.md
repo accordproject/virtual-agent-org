@@ -256,6 +256,12 @@ Definitions follow [CHAOSS](https://chaoss.community/?p=5703). The baseline is
 
 Bots are excluded from people metrics, and medians are reported alongside means.
 
+The gateway computes the community KPIs the way ap-stats does (decision 76): once a day
+it reads every PR of the last 24 months in the repos in scope, 100 at a time with their
+first reviews and comments, into its database. Vera's `community_stats` tool works out
+first response, community size, new contributors, retention and closure ratio from that
+history, and Vera copies the figures into the scorecard.
+
 ## Phases
 
 | Phase | Agents | Gate to the next phase |
