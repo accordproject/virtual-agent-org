@@ -27,6 +27,11 @@ action_kinds:
   github.merge:        { risk: medium, executor: github }
   github.close:        { risk: low,    executor: github }
   github.comment:      { risk: low,    executor: github }   # public comment as the project bot
+  # Mira's first response to a new PR or issue (decision 78). auto: no card once the
+  # gateway's checks pass: the PR or issue is open and nobody from the project has
+  # answered it, the text is finished, mentions no one but the author and says nothing
+  # about the network. The gateway signs it as posted automatically.
+  github.first_response: { risk: low,  executor: github, auto: true }
   github.release:      { risk: high,   executor: github }
   # Approves "waiting for approval" CI runs on a fork PR after the agent's risk review.
   # auto: runs without Matt, but the gateway itself refuses (and queues for Matt
@@ -68,7 +73,7 @@ agents:
     mcp_servers:
       github: { mode: read_plus_triage }   # read, label, assign, request review via her own GitHub App
     builtin_tools: [read, write, edit, glob, web_fetch]
-    requestable: [github.merge, github.close, github.comment, github.release, github.approve_ci, github.rerun_ci, github.docs_pr, discord.ops]
+    requestable: [github.merge, github.close, github.comment, github.first_response, github.release, github.approve_ci, github.rerun_ci, github.docs_pr, discord.ops]
   vera:
     mcp_servers:
       github: { mode: read }

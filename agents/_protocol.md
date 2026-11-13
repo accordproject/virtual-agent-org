@@ -86,4 +86,6 @@ self-congratulation. Numbers with units. Links to the PR, issue or page you mean
 
 Every message an agent drafts for the public is labelled at the end:
 "Drafted by an Accord Project agent, reviewed by a maintainer."
+The exception is a draft the gateway posts without approval (Mira's first responses,
+reviews): leave the label off, and the gateway adds its own.
 Warm, precise, never promising what a maintainer has not agreed.

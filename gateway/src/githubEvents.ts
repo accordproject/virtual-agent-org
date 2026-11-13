@@ -12,7 +12,7 @@ import { parseTarget, type RepoRef } from "./github";
 import { FIRST_TIME, checklist, failed, mergeChecks, prFacts, type PrFacts } from "./review";
 
 /** Decision kinds about one PR or issue that closing it makes pointless. */
-export const ENDED_BY_CLOSE = ["github.merge", "github.close", "github.approve_ci", "github.comment", "github.rerun_ci", "github.fix_pr"];
+export const ENDED_BY_CLOSE = ["github.merge", "github.close", "github.approve_ci", "github.comment", "github.first_response", "github.rerun_ci", "github.fix_pr"];
 /** Decision kinds tied to one head commit (payload.sha). */
 export const TIED_TO_HEAD = ["github.merge", "github.approve_ci", "github.rerun_ci", "github.fix_pr"];
 /** Minutes a failed-CI wake waits, so the head's other runs can finish first. */

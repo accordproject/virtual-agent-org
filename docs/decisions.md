@@ -902,3 +902,32 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   could forge a trailer in the commit message. A change that loosens a safety rule or
   a gateway check says so in the summary, not in the first line of the body.
 - Not chosen: asking for a summary in the spec alone, which Mandla could skip.
+
+**78. First responses post without approval** · RESOLVED
+
+- Mira's first responses to new PRs and issues went to the owner as cards. Over the
+  first two weeks (105 comment cards), the owner's rejections were mostly in the first
+  week, and mostly about whether to close rather than welcome (now in Mira's spec, and
+  closures still need approval). In the second week the review caught one unfinished
+  draft and let through three pairs of duplicates: a draft and its correction were both
+  approved, so both were posted. Approvals also delayed first responses by 20 minutes
+  to three days.
+- A new action kind, `github.first_response`, is `auto`. The gateway posts it at once
+  if the PR or issue is open and has no earlier approved or posted comment from the
+  network, and the text is at least 80 characters, has no draft markers (including a
+  leaked "@-free" note to avoid mentions), doesn't end
+  mid-sentence, @mentions no one but the author and says nothing about the network.
+  Otherwise it refuses and Mira redrafts. It goes to the owner as a card when Mira rates
+  it high risk or a member set the work going. Setting `auto: false` makes every first
+  response a card again.
+- The gateway signs these comments as posted automatically, with a maintainer to
+  follow up, and strips the "reviewed by a maintainer" label from the draft, since
+  nobody reviewed it.
+- A redraft replaces the request it redrafts: a new `github.comment` or
+  `github.first_response` from the same agent on the same PR or issue lapses the older
+  open one, so both can't be approved and posted.
+- Triage stays a separate pass. Folding it into the review was not chosen: the review
+  starts only once CI finishes, a fork PR's CI runs only after triage approves it, and
+  issues get no review.
+- Not chosen: making every `github.comment` auto (closing comments and other replies
+  still need the owner's eye).

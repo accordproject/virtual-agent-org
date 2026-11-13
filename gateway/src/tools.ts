@@ -400,7 +400,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     notes: [
       "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started.",
       "Sessions from before token and model recording began show 0 tokens and model 'unknown'.",
-      "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected, lapsed (closed by the gateway because the PR or issue merged, closed or got new commits first; neither approved nor rejected). Tool confirmations are excluded.",
+      "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected, lapsed (closed by the gateway because the PR or issue merged, closed or got new commits first, or the agent queued a redraft; neither approved nor rejected). Tool confirmations are excluded.",
       "refusals: custom tool calls the gateway refused for bad input. Cite a refusal or denial as audit:<id>.",
       "Public actions run only through decisions: executed_actions lists them with their ids. Check tool_calls for any external tool that writes.",
       "changes: spec changes the gateway measured in this period, the days before going live against as many after (14, or more when tried again for too little data). overlaps names other changes to the same agent, or to the network, that went live within those windows.",
@@ -446,6 +446,16 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   const n = validated(ctx, kind, input.target, input.payload);
   if (ctx.network.action_kinds[kind]?.auto && kind === "github.approve_ci" && declared !== "high" && !member) {
     return autoApproveCi(ctx, agent, sessionId, input, n);
+  }
+  if (kind === "github.first_response") {
+    await checkFirstResponse(ctx, n);
+    // Decision 78: posted without Matt once the checks above pass, unless a member set it going or the agent asks.
+    if (ctx.network.action_kinds[kind]?.auto && declared !== "high" && !member) {
+      const d = await ctx.db.createDecision({ agent, kind, target: n.target, summary: s(input.summary, "summary").slice(0, 200), rationale: s(input.rationale, "rationale"), risk: "low", payload: n.payload, session_id: sessionId });
+      const replaced = await replaceOpen(ctx, d);
+      const r = await runAuto(ctx, d, "posted automatically after the gateway's checks (decision 78)");
+      return `${d.id} ${r.ok ? "done" : "failed"}: ${r.result}${replaced.length ? ` (replaces ${replaced.join(", ")})` : ""}`;
+    }
   }
   let rationale = s(input.rationale, "rationale");
   if (member) rationale = `⚠ Prompted by ${member.name} (member) via ${member.platform}.\n\n${rationale}`;
@@ -517,8 +527,47 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     session_id: sessionId,
   });
   if (reviewId) await ctx.db.linkMerge(reviewId, d.id);
+  const replaced = REPLACEABLE.includes(kind) ? await replaceOpen(ctx, d) : [];
   await postDecision(ctx, d);
-  return `Queued as ${d.id}. Do not wait for it: continue with other work. Check the outcome later with get_decisions.`;
+  const also = replaced.length ? ` It replaces ${replaced.join(", ")}, which won't be posted.` : "";
+  return `Queued as ${d.id}.${also} Do not wait for it: continue with other work. Check the outcome later with get_decisions.`;
+}
+
+/** Kinds where a newer request from the same agent on the same PR or issue is a redraft of the open one. */
+const REPLACEABLE = ["github.comment", "github.first_response"];
+
+/**
+ * A redraft replaces the open request it redrafts, so approving both can't post the
+ * comment twice (pg#1105, pg#1106 and cg#315 got two each). The older one lapses.
+ */
+async function replaceOpen(ctx: Ctx, d: Decision): Promise<string[]> {
+  const older = (await ctx.db.openDecisionsOn(d.target)).filter((o) => o.id !== d.id && o.agent === d.agent && o.kind === d.kind);
+  const done: string[] = [];
+  for (const o of older) {
+    if (!(await ctx.db.lapse(o.id, `replaced by ${d.id}`))) continue;
+    await ctx.db.audit({ agent: o.agent, event_type: "gateway.decision_lapsed", detail: { id: o.id, why: `replaced by ${d.id}` } });
+    await refreshDecisionCard(ctx, o.id);
+    done.push(o.id);
+  }
+  return done;
+}
+
+/**
+ * Decision 78: a first response goes only on an open PR or issue the project hasn't
+ * answered yet, mentions no one but its author, and says nothing about the network.
+ * Fixable problems are refused so the agent redrafts, rather than reaching Matt.
+ */
+async function checkFirstResponse(ctx: Ctx, n: Normalised) {
+  const ref = parseTarget(n.target) as Required<RepoRef>;
+  const earlier = [
+    ...(await ctx.db.decisionsOn(n.target, "github.first_response")),
+    ...(await ctx.db.decisionsOn(n.target, "github.comment")),
+  ].find((d) => ["approved", "executed"].includes(d.status));
+  if (earlier) throw new ToolError(`Not posted: ${earlier.id} (${earlier.kind}, ${earlier.status}) already answers ${n.target}. A first response is for PRs and issues nobody has answered; leave it.`);
+  const { state, author } = await (await ctx.github()).issueState(ref);
+  if (state !== "open") throw new ToolError(`Not posted: ${n.target} is ${state}. Leave it.`);
+  const problems = publicTextProblems(String(n.payload.text), author);
+  if (problems.length) throw new ToolError(`Not posted. Fix the text and call again:\n- payload.text ${problems.join("\n- payload.text ")}`);
 }
 
 /** The request as the gateway will run it, or a ToolError listing every problem. */

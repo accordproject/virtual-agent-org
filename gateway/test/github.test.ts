@@ -905,3 +905,65 @@ describe("Mira's extra triage passes (decision 65)", () => {
     expect((await audits(ctx, "gateway.triage_error"))[0]).toMatchObject({ slot: "13:00", why: expect.stringMatching(/paused/i) });
   });
 });
+
+describe("first responses (decision 78)", () => {
+  const GOOD = "Thank you for this fix, and welcome to the project. Two maintainers have been asked to review it, and CI is running now.";
+  const ask = (text: string, risk = "low", target = PR) => ({ kind: "github.first_response", target, summary: "First response", rationale: "New PR", risk, payload: { text } });
+
+  it("posts at once without a card, signed by the gateway, with the draft's own label removed", async () => {
+    const { ctx, gh, fakes } = setup(fakeGitHub(), { dryRun: false });
+    const out = await handleTool(ctx, "mira", "s", "request_action", ask(`${GOOD}\n\nDrafted by an Accord Project agent, reviewed by a maintainer.`));
+    expect(out).toMatch(/^D-\d+ done: Commented: https:/);
+    expect(gh.comments).toHaveLength(1);
+    expect(gh.comments[0]).not.toContain("reviewed by a maintainer");
+    expect(gh.comments[0]).toContain("Posted automatically by Mira");
+    expect(fakes.sent).toEqual([]);
+    expect((await ctx.db.getDecision(out.match(/D-\d+/)![0]))?.status).toBe("executed");
+  });
+
+  it("answers a PR or issue once: a second first response, or one after a posted comment, is refused", async () => {
+    const { ctx, gh } = setup(fakeGitHub(), { dryRun: false });
+    await handleTool(ctx, "mira", "s", "request_action", ask(GOOD));
+    await expect(handleTool(ctx, "mira", "s", "request_action", ask(GOOD))).rejects.toThrow(/already answers accordproject\/concerto#12/);
+    const other = "accordproject/concerto#13";
+    const old = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: other, summary: "Welcome", rationale: "r", risk: "low", payload: { text: GOOD } });
+    await ctx.db.markExecuted(old.id, true, "Commented");
+    await expect(handleTool(ctx, "mira", "s", "request_action", ask(GOOD, "low", other))).rejects.toThrow(/already answers/);
+    expect(gh.comments).toHaveLength(1);
+  });
+
+  it("refuses unfinished text, other people's @mentions, network talk, and closed targets", async () => {
+    const { ctx, gh } = setup(fakeGitHub({ author: "averif" }), { dryRun: false });
+    const refused = (text: string) => handleTool(ctx, "mira", "s", "request_action", ask(text));
+    await expect(refused("Thanks for this, @averif-free placeholder")).rejects.toThrow(/under 80 characters[\s\S]*looks unfinished \("@averif-free"\)/);
+    await expect(refused(`${GOOD} Ending mid`)).rejects.toThrow(/ends mid-sentence/);
+    await expect(refused(`${GOOD} @dselman's team will look at it.`)).rejects.toThrow(/mentions @dselman/);
+    await expect(refused(`${GOOD} Your \`{{variable}}\` marker is handled, @averif.`)).resolves.toMatch(/done/);
+    gh.pr.state = "CLOSED";
+    await expect(handleTool(ctx, "mira", "s", "request_action", ask(GOOD, "low", "accordproject/concerto#14"))).rejects.toThrow(/is closed\. Leave it/);
+    expect(gh.comments).toHaveLength(1);
+  });
+
+  it("goes to Matt as a card when Mira rates it high or a member set the work going", async () => {
+    const { ctx, gh, fakes } = setup(fakeGitHub(), { dryRun: false });
+    expect(await handleTool(ctx, "mira", "s", "request_action", ask(GOOD, "high"))).toMatch(/^Queued as D-\d+/);
+    expect(gh.comments).toEqual([]);
+    expect(fakes.sent.length).toBe(1);
+    await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", started_by: "member:discord:Ali Khan" });
+    expect(await handleTool(ctx, "mira", "sesn_m", "request_action", ask(GOOD, "low", "accordproject/concerto#13"))).toMatch(/^Queued as D-\d+/);
+    expect(gh.comments).toEqual([]);
+  });
+
+  it("a redraft replaces the open request it redrafts, so approving both can't post twice", async () => {
+    const { ctx } = setup(fakeGitHub(), { dryRun: false });
+    const first = await handleTool(ctx, "mira", "s", "request_action", { kind: "github.comment", target: PR, summary: "Welcome", rationale: "r", risk: "low", payload: { text: "Thanks!" } });
+    const second = await handleTool(ctx, "mira", "s", "request_action", { kind: "github.comment", target: PR, summary: "Welcome (corrected)", rationale: "r", risk: "low", payload: { text: "Thanks again!" } });
+    const [a, b] = [first, second].map((o) => o.match(/D-\d+/)![0]);
+    expect(second).toContain(`It replaces ${a}, which won't be posted.`);
+    expect(await ctx.db.getDecision(a)).toMatchObject({ status: "lapsed", note: `replaced by ${b}` });
+    expect((await ctx.db.getDecision(b))?.status).toBe("open");
+    // Another agent's comment, or another kind, is left alone.
+    await handleTool(ctx, "mira", "s", "request_action", { kind: "github.merge", target: PR, summary: "m", rationale: "r", risk: "low", payload: { sha: HEAD } }).catch(() => undefined);
+    expect((await ctx.db.getDecision(b))?.status).toBe("open");
+  });
+});

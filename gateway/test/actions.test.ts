@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIONS, ActionInvalid, validateAction } from "../src/actions";
+import { ACTIONS, ActionInvalid, firstResponseProblems, validateAction } from "../src/actions";
 import { NETWORK as COMPILED } from "../src/config";
 import type { Ctx } from "../src/context";
 import { executeDecision } from "../src/executors";
@@ -262,5 +262,19 @@ describe("execution checks the stored request again", () => {
     expect(problems(ctx, "github.comment", `${own.toUpperCase()}#1`, { text: "hi" })).toEqual(expect.arrayContaining([expect.stringContaining("is not in the configured repos")]));
     await expect(handleTool(ctx, "mira", "s", "label_pr", { target: `${own}#1`, labels: ["x"] })).rejects.toThrow("is not in the configured repos");
     await expect(handleTool(ctx, "mira", "s", "pr_queue", { repo: own })).rejects.toThrow("is not in the configured repos");
+  });
+});
+
+describe("first response text (decision 78)", () => {
+  const GOOD = "Thank you for this fix, and welcome to the project. Two maintainers have been asked to review it, and CI is running now.";
+
+  it("refuses a leaked note to avoid mentions, in each form it has appeared in", () => {
+    for (const leak of ["The maintainers @-free review requests are in.", "Thanks for this, @averif-free reply.", "Reviewers are @free-requested."]) {
+      expect(firstResponseProblems(`${GOOD} ${leak}`)).toEqual([expect.stringMatching(/looks unfinished \("@[\w-]*-?free-?"\)/)]);
+    }
+  });
+
+  it("allows the words free and lock-free, an email address, and code", () => {
+    expect(firstResponseProblems(`${GOOD} The parser is now lock-free and free of the old cache; mail dev@free-software.example or see \`@free-x\`.`)).toEqual([]);
   });
 });
