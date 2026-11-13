@@ -55,8 +55,9 @@ schedules:
     cron: "0 14 * * 5"          # Fridays 14:00, before Ada's evaluation
     budget_usd: 1.50
     prompt: >
-      Lessons pass: turn the last month of review_findings into review lessons and, where a
-      lesson is ready, propose an update to that repo's AGENTS.md with github.docs_pr.
+      Lessons pass: turn the last month of review_findings, and the last week's maintainer
+      review comments on merged or closed PRs, into review lessons and, where a lesson is
+      ready, propose an update to that repo's AGENTS.md with github.docs_pr.
 
   - name: vera-daily
     agent: vera
