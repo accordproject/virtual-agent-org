@@ -419,6 +419,51 @@ export class Db {
       .then((r) => r.results);
   }
 
+  /**
+   * Writes to GitHub (C-7), one `github.write` row each: who, in which session and task,
+   * on whose authority, and what they touched. `flagged` marks a write with neither a
+   * decision nor a gateway reason.
+   */
+  githubWrites(since: string, until: string, limit = 200) {
+    return this.db
+      .prepare("SELECT id, ts, agent, session_id, tool, detail FROM audit WHERE ts >= ? AND ts < ? AND event_type = 'github.write' ORDER BY id LIMIT ?")
+      .bind(since, until, limit)
+      .all<{ id: number; ts: string; agent: string | null; session_id: string | null; tool: string | null; detail: string | null }>()
+      .then((r) =>
+        r.results.map(({ detail, ...row }) => {
+          let d: Record<string, unknown> = {};
+          try {
+            d = detail ? JSON.parse(detail) : {};
+          } catch {
+            // Shown without its detail rather than dropped.
+          }
+          return {
+            ...row,
+            task_id: (d.task as string | null) ?? null,
+            decision: (d.decision as string | null) ?? null,
+            ...(d.reason ? { reason: d.reason as string } : {}),
+            ...(d.record ? { record: d.record as string } : {}),
+            args: d.args ?? null,
+            ...(d.ok === undefined ? {} : { ok: d.ok as boolean }),
+            ...(d.decision ? {} : { flagged: (d.flagged as string | undefined) ?? "no decision and no gateway reason" }),
+          };
+        }),
+      );
+  }
+
+  /** How many GitHub writes per agent by authority (decision, gateway-internal or none): exact, unlike the capped rows. */
+  githubWriteCounts(since: string, until: string) {
+    return this.db
+      .prepare(
+        "SELECT COALESCE(agent, 'gateway') AS agent, CASE WHEN json_extract(detail, '$.decision') IS NULL THEN 'none' " +
+          "WHEN json_extract(detail, '$.decision') = 'gateway-internal' THEN 'gateway-internal' ELSE 'decision' END AS authority, COUNT(*) AS count FROM audit " +
+          "WHERE ts >= ? AND ts < ? AND event_type = 'github.write' GROUP BY 1, 2 ORDER BY 1, 2",
+      )
+      .bind(since, until)
+      .all<{ agent: string; authority: "decision" | "gateway-internal" | "none"; count: number }>()
+      .then((r) => r.results);
+  }
+
   /** External (built-in and MCP) tool calls, counted by agent, tool and permission. */
   toolCalls(since: string, until: string) {
     return this.db

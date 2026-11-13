@@ -892,11 +892,15 @@ const toolConfirm: ActionSpec = {
   validate(_ctx, target, payload) {
     const f = new Fields(payload);
     const input = f.raw("input");
+    // Set only on an MCP call's confirmation, so its approval can be recorded as a GitHub write (C-7).
+    const hasServer = "mcp_server" in payload;
+    const server = f.raw("mcp_server");
     f.done();
-    return { target, payload: { input: input ?? {} } };
+    return { target, payload: { input: input ?? {}, ...(hasServer ? { mcp_server: typeof server === "string" ? server : null } : {}) } };
   },
   describe(target, p) {
-    return withRest({ lines: [`Tool: ${target}`], blocks: [{ title: "Input", text: JSON.stringify(p.input ?? {}, null, 2) }] }, p, ["input"]);
+    const lines = [`Tool: ${target}`, ...(typeof p.mcp_server === "string" ? [`MCP server: ${p.mcp_server}`] : [])];
+    return withRest({ lines, blocks: [{ title: "Input", text: JSON.stringify(p.input ?? {}, null, 2) }] }, p, ["input", "mcp_server"]);
   },
   async execute(ctx, d) {
     if (!d.session_id || !d.tool_use_id) return { ok: false, result: "Missing session or tool use id" };

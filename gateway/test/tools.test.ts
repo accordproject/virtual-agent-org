@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { messageAgent } from "../src/agents";
 import { handleUpdate } from "../src/commands";
+import { approve, reject } from "../src/controls";
 import { handleInteraction } from "../src/discordInteractions";
 import { schemaProblems } from "../src/schema";
 import { TOOLS, toolsForAgent } from "../src/toolDefs";
+import { processSession } from "../src/sessions";
 import { handleTool } from "../src/tools";
 import { HEAD, fakeGitHub, makeTestCtx } from "./helpers";
 
@@ -390,6 +392,123 @@ describe("read_audit (decision 47)", () => {
     await expect(handleTool(ctx, "vera", "s", "read_audit", { since: "last week" })).rejects.toThrow(/must be an ISO date/);
     await expect(handleTool(ctx, "vera", "s", "read_audit", { since: "2026-01-01", until: "2026-06-01" })).rejects.toThrow(/92 days or fewer/);
     await expect(handleTool(ctx, "vera", "s", "read_audit", { since: "2026-02-01", until: "2026-01-01" })).rejects.toThrow(/before until/);
+  });
+
+  describe("GitHub write attribution (C-7)", () => {
+    const writes = async (ctx: any) => JSON.parse(await handleTool(ctx, "vera", "sv", "read_audit", { since: today() }));
+    const setup = () => {
+      const gh = fakeGitHub();
+      const base = makeTestCtx().ctx.network;
+      return { gh, ...makeTestCtx({ dryRun: false, network: { ...base, review_check_required: true }, github: async () => gh as any }) };
+    };
+
+    it("an agent's write carries its decision, session and task", async () => {
+      const { ctx, gh } = setup();
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      const d = await ctx.db.createDecision({ agent: "mira", kind: "github.comment", target: T, summary: "s", rationale: "r", risk: "low", payload: { text: "Thanks" }, session_id: "sesn_m" });
+      await approve(ctx, d.id);
+      expect(gh.comments).toEqual(["Thanks"]);
+      const r = await writes(ctx);
+      expect(r.github_writes).toHaveLength(1);
+      expect(r.github_writes[0]).toMatchObject({
+        agent: "mira", session_id: "sesn_m", task_id: "T-9", tool: "github.comment", decision: d.id,
+        args: { repo: "accordproject/concerto", number: 12, fields: ["text"] }, ok: true,
+      });
+      expect(r.github_writes[0].flagged).toBeUndefined();
+      expect(r.github_writes[0].reason).toBeUndefined();
+      expect(r.github_write_counts).toEqual([{ agent: "mira", authority: "decision", count: 1 }]);
+    });
+
+    it("a write the gateway makes on its own rules is gateway-internal, with the reason", async () => {
+      const { ctx, fakes, gh } = setup();
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      await handleTool(ctx, "mira", "sesn_m", "label_pr", { target: T, add: ["bug"] });
+      await handleTool(ctx, "mira", "sesn_review", "request_review_check", { target: T, sha: HEAD, findings: [] });
+      const check = Object.keys(fakes.sessions).at(-1)!;
+      await handleTool(ctx, "mira", check, "submit_review", { target: T, summary: "A clear fix with a test. Thank you.", findings: [] });
+      expect(gh.posted).toHaveLength(1);
+      const r = await writes(ctx);
+      expect(r.github_writes.map((w: any) => [w.tool, w.decision, w.reason])).toEqual([
+        ["label_pr", "gateway-internal", "labels through label_pr"],
+        ["github.review", "gateway-internal", "review post"],
+      ]);
+      expect(r.github_writes[0]).toMatchObject({ agent: "mira", session_id: "sesn_m", task_id: "T-9", args: { repo: "accordproject/concerto", number: 12, fields: ["labels"] } });
+      // The auto kind's decision record is kept, but it is not what authorised the post.
+      expect(r.github_writes[1]).toMatchObject({ agent: "mira", session_id: check, record: expect.stringMatching(/^D-\d+$/), args: { repo: "accordproject/concerto", number: 12 }, ok: true });
+      expect(r.github_writes.filter((w: any) => w.flagged)).toEqual([]);
+      expect(r.github_write_counts).toEqual([{ agent: "mira", authority: "gateway-internal", count: 2 }]);
+    });
+
+    it("an agent's own GitHub write with neither a decision nor a gateway reason is flagged", async () => {
+      const { ctx, fakes } = setup();
+      fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      fakes.events.sesn_m = [
+        { id: "e1", type: "agent.mcp_tool_use", name: "update_pull_request", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", pullNumber: 12, reviewers: ["samlee"] } },
+        { id: "e2", type: "agent.mcp_tool_use", name: "pull_request_read", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", pullNumber: 12 } },
+        { id: "e3", type: "agent.mcp_tool_use", name: "mcp__github__add_issue_comment", evaluated_permission: "ask", input: { owner: "accordproject", repo: "concerto", issue_number: 12, body: "Hi" } },
+      ];
+      await processSession(ctx, "sesn_m");
+      const confirm = (await ctx.db.listDecisions({ status: "open" })).find((d) => d.kind === "tool.confirm")!;
+      // The call waiting on Matt isn't a write until he approves it.
+      expect((await writes(ctx)).github_writes).toHaveLength(1);
+      await approve(ctx, confirm.id);
+      const r = await writes(ctx);
+      expect(r.github_writes).toHaveLength(2);
+      expect(r.github_writes[0]).toMatchObject({
+        agent: "mira", session_id: "sesn_m", task_id: "T-9", tool: "update_pull_request", decision: null,
+        args: { repo: "accordproject/concerto", number: 12, fields: ["reviewers"] }, flagged: "no decision and no gateway reason",
+      });
+      // A write that waits on Matt's confirmation is authorised by that decision.
+      expect(r.github_writes[1]).toMatchObject({ tool: "add_issue_comment", session_id: "sesn_m", task_id: "T-9", decision: confirm.id, args: { number: 12, fields: ["body"] } });
+      expect(r.github_writes[1].flagged).toBeUndefined();
+      expect(r.github_write_counts).toEqual([
+        { agent: "mira", authority: "decision", count: 1 },
+        { agent: "mira", authority: "none", count: 1 },
+      ]);
+    });
+
+    it("built-in sandbox tools are not GitHub writes, allowed or confirmed", async () => {
+      const { ctx, fakes } = setup();
+      fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      fakes.events.sesn_m = [
+        { id: "e1", type: "agent.tool_use", name: "bash", evaluated_permission: "allow", input: { command: "git status" } },
+        { id: "e2", type: "agent.tool_use", name: "write", evaluated_permission: "allow", input: { file_path: "/tmp/x", content: "y" } },
+        { id: "e3", type: "agent.tool_use", name: "bash", evaluated_permission: "ask", input: { command: "rm -rf build" } },
+      ];
+      await processSession(ctx, "sesn_m");
+      const confirm = (await ctx.db.listDecisions({ status: "open" })).find((d) => d.kind === "tool.confirm")!;
+      await approve(ctx, confirm.id);
+      const r = await writes(ctx);
+      expect(r.github_writes).toEqual([]);
+      expect(r.github_write_counts).toEqual([]);
+    });
+
+    it("a confirmation the owner rejects is never counted as a write", async () => {
+      const { ctx, fakes } = setup();
+      fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      fakes.events.sesn_m = [
+        { id: "e1", type: "agent.mcp_tool_use", name: "merge_pull_request", mcp_server_name: "github", evaluated_permission: "ask", input: { owner: "accordproject", repo: "concerto", pullNumber: 12 } },
+      ];
+      await processSession(ctx, "sesn_m");
+      const confirm = (await ctx.db.listDecisions({ status: "open" })).find((d) => d.kind === "tool.confirm")!;
+      await reject(ctx, confirm.id, "Not yet");
+      expect((await writes(ctx)).github_writes).toEqual([]);
+    });
+
+    it("label_pr records the attempt when relabelling fails partway", async () => {
+      const { ctx, gh } = setup();
+      gh.pr.labels.push("bug", "stale");
+      gh.removeLabel = async () => {
+        throw new Error("GitHub DELETE /labels/stale: 502");
+      };
+      await expect(handleTool(ctx, "mira", "sesn_m", "label_pr", { target: T, remove: ["stale"] })).rejects.toThrow(/502/);
+      const r = await writes(ctx);
+      expect(r.github_writes).toHaveLength(1);
+      expect(r.github_writes[0]).toMatchObject({ tool: "label_pr", decision: "gateway-internal", args: { fields: ["labels"] }, ok: false });
+    });
   });
 
   it("records the model a session was started on", async () => {
