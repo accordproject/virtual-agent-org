@@ -459,6 +459,12 @@ describe("submit_change", () => {
     gh.failPropose = null;
     expect(await submit(ctx, session)).toContain("/pull/1");
     expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
+    // C-7: the failed attempt may have left a branch and commit, so it is recorded too.
+    const writes = await ctx.db.githubWrites("2000-01-01", "9999-12-31");
+    expect(writes.map((w) => [w.tool, w.args, w.ok])).toEqual([
+      ["submit_change", { repo: "accordproject/virtual-agent-org", number: null, fields: ["branch", "files", "title", "body"] }, false],
+      ["submit_change", { repo: "accordproject/virtual-agent-org", number: 1, fields: ["branch", "files", "title", "body"] }, true],
+    ]);
   });
 
   it("dry run doesn't open a PR, and closes the change so the task ends done", async () => {
