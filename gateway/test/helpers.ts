@@ -5,7 +5,7 @@ import type { DeployedConfig, NetworkConfig } from "../src/config";
 import type { Ctx } from "../src/context";
 import { Db } from "../src/db";
 import type { Env } from "../src/env";
-import type { GitHub, RepoRef } from "../src/github";
+import type { GitHub, PrHistoryNode, RepoRef } from "../src/github";
 import type { DiscordBot } from "../src/discordBot";
 import type { ManagedClient } from "../src/managed";
 import type { Telegram } from "../src/telegram";
@@ -28,7 +28,20 @@ export function memoryD1(seen?: Set<string>): D1Database & { sqlite: Database.Da
       return { meta: { changes: r.changes } };
     },
   });
-  return { prepare: (sql: string) => make(sql), sqlite } as unknown as D1Database & { sqlite: Database.Database };
+  // D1 runs a batch in one transaction.
+  const batch = async (stmts: { run: () => Promise<unknown> }[]) => {
+    sqlite.exec("BEGIN");
+    try {
+      const out = [];
+      for (const st of stmts) out.push(await st.run());
+      sqlite.exec("COMMIT");
+      return out;
+    } catch (err) {
+      sqlite.exec("ROLLBACK");
+      throw err;
+    }
+  };
+  return { prepare: (sql: string) => make(sql), batch, sqlite } as unknown as D1Database & { sqlite: Database.Database };
 }
 
 export const NETWORK: NetworkConfig = {
@@ -236,6 +249,17 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
     merge: async (_r: unknown, method: string, sha?: string) => {
       merged.push({ method, sha });
       return { merged: true, sha: "feedface00" };
+    },
+    /** PR history pages by repo, newest update first; the cursor is the next page's index. Records each read. */
+    history: {} as Record<string, PrHistoryNode[][]>,
+    historyCalls: [] as { repo: string; cursor: string | null }[],
+    failHistory: null as string | null,
+    prHistoryPage: async (r: RepoRef, cursor: string | null) => {
+      gh.historyCalls.push({ repo: `${r.owner}/${r.repo}`, cursor });
+      if (gh.failHistory) throw new Error(gh.failHistory);
+      const pages = gh.history[`${r.owner}/${r.repo}`] ?? [];
+      const i = cursor ? Number(cursor) : 0;
+      return { pageInfo: { hasNextPage: i + 1 < pages.length, endCursor: String(i + 1) }, nodes: pages[i] ?? [] };
     },
     /** The network repo's files on its default branch, by path, for submit_change's edits. */
     repoFiles: {} as Record<string, string>,

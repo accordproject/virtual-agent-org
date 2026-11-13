@@ -1,4 +1,5 @@
 import { tickChanges } from "./changes";
+import { syncPrHistory } from "./community";
 import { handleUpdate } from "./commands";
 import { verifyDiscord } from "./discordBot";
 import { handleInteraction, type Interaction } from "./discordInteractions";
@@ -128,6 +129,8 @@ export default {
             await dailyCheck(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.github_daily_check_error", detail: String(e) }));
             await dispatchWakes(ctx);
           }
+          // Last, so it never takes subrequests from the work above (decision 75).
+          await syncPrHistory(ctx);
         }
       })(),
     );

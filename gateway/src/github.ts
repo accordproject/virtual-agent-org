@@ -149,6 +149,16 @@ export class GitHub {
     return out;
   }
 
+  /**
+   * One page of the repo's PRs, most recently updated first, with the first 20 reviews and
+   * comments of each: the fields ap-stats reads (decision 75).
+   */
+  async prHistoryPage(r: RepoRef, cursor: string | null): Promise<PrHistoryPage> {
+    const d = await this.graphql<{ repository: { pullRequests: PrHistoryPage } | null }>(PR_HISTORY, { owner: r.owner, repo: r.repo, cursor });
+    if (!d.repository) throw new Error(`${r.owner}/${r.repo} not found`);
+    return d.repository.pullRequests;
+  }
+
   /** The repo's open PRs, oldest first (up to 50). */
   async openPulls(r: RepoRef): Promise<OpenPull[]> {
     const d = await this.graphql<{ repository: { pullRequests: { nodes: OpenPull[] } } }>(OPEN_PULLS, { owner: r.owner, repo: r.repo });
@@ -377,6 +387,29 @@ export interface OpenPull {
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 }
 
+/** A login and whether GitHub says it is a bot. */
+export interface Actor {
+  login: string;
+  __typename?: string;
+}
+
+export interface PrHistoryNode {
+  number: number;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+  author: Actor | null;
+  reviews: { nodes: { createdAt: string; author: Actor | null }[] };
+  comments: { nodes: { createdAt: string; author: Actor | null }[] };
+}
+
+export interface PrHistoryPage {
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  nodes: PrHistoryNode[];
+}
+
 export interface WorkflowRun {
   id: number;
   name: string;
@@ -419,6 +452,19 @@ const OPEN_PULLS = `query($owner: String!, $repo: String!) {
       nodes {
         number title isDraft createdAt headRefOid additions deletions authorAssociation author { login } reviewDecision
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}`;
+
+const PR_HISTORY = `query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(first: 100, after: $cursor, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number state createdAt updatedAt closedAt mergedAt author { login __typename }
+        reviews(first: 20) { nodes { createdAt author { login __typename } } }
+        comments(first: 20) { nodes { createdAt author { login __typename } } }
       }
     }
   }

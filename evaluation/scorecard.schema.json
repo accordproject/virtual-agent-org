@@ -15,6 +15,11 @@
         "new_contributors": { "type": "integer" },
         "retention_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
         "pr_closure_ratio": { "type": "number" },
+        "community": {
+          "type": "object",
+          "description": "community_stats' prior window and period (with newcomers by login), copied as the tool gives them",
+          "properties": { "prior": { "type": "object" }, "period": { "type": "object" } }
+        },
         "spend_usd_month_to_date": { "type": "number" },
         "spend_usd_forecast_month": { "type": "number" },
         "gateway_errors": {

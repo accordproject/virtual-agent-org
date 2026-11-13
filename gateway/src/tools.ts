@@ -3,6 +3,7 @@
 
 import { ActionInvalid, DEPENDENCY_FILE, actionRisk, isDependencyBot, safeJson, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, refreshDecisionCard, resendDecisionCard, sendAgentMessage, startSession, taskModel } from "./agents";
+import { addMonths, communityStats, iso } from "./community";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
@@ -279,6 +280,34 @@ const HANDLERS: Record<ToolName, Handler> = {
   },
 
   read_audit: async (ctx, { input }) => readAudit(ctx, input),
+
+  community_stats: async (ctx, { input }) => {
+    const day = (v: unknown, field: string) => {
+      const t = Date.parse(`${s(v, field)}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v)) || Number.isNaN(t)) throw new ToolError(`${field} must be an ISO date such as 2026-11-02`);
+      return new Date(t);
+    };
+    const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    const asOf = input.as_of ? day(input.as_of, "as_of") : today;
+    if (asOf > today || today.getTime() - asOf.getTime() > 31 * 86_400_000) throw new ToolError("as_of must be in the last 31 days: the history goes back 24 months from today");
+    const since = input.since ? day(input.since, "since") : undefined;
+    if (since && since >= asOf) throw new ToolError("since must be before as_of");
+    const [rows, syncs] = await Promise.all([ctx.db.prHistorySince(iso(addMonths(asOf, -24))), ctx.db.allPrSyncs()]);
+    const synced = Object.fromEntries(ctx.network.repos.map((r) => [r, syncs.find((x) => x.repo === r)?.synced_from ?? null]));
+    const complete = Object.values(synced).every((v) => v !== null);
+    return JSON.stringify({
+      as_of: iso(asOf),
+      repos: ctx.network.repos,
+      ...communityStats(rows, asOf, since),
+      data: {
+        complete,
+        // Each repo's last finished refresh; null means its first 24-month read hasn't finished.
+        synced,
+        prs: rows.length,
+        ...(complete ? {} : { warning: "The history is incomplete: some repos haven't finished their first read. Report these figures as provisional." }),
+      },
+    });
+  },
 
   write_scorecard: async (ctx, { input }) => {
     const period = s(input.period, "period");
