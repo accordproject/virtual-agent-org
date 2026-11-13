@@ -7,6 +7,7 @@ import type { ModelChoice } from "./config";
 import type { Ctx } from "./context";
 import { NOT_JUDGEMENT, type Change, type Decision } from "./db";
 import { parseTarget } from "./github";
+import { recordGithubWrite } from "./githubWrites";
 import type { Risk } from "./risk";
 import { ToolError } from "./tools";
 
@@ -274,6 +275,7 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
   const at = new Date().toISOString().slice(0, 19).replace("T", " ");
   await ctx.db.updateChange(change.id, { state: "pr_open", pr_url: pr.html_url, pr_opened_at: at });
   await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.change_pr_opened", detail: { change: change.id, decision: change.decision_id, pr: pr.html_url } });
+  await recordGithubWrite(ctx, { agent, sessionId, taskId: change.task_id, tool: "submit_change", decision: change.decision_id, repo: `${ref.owner}/${ref.repo}`, number: pr.number, fields: ["branch", "files", "title", "body"] });
   return `Opened ${pr.html_url} for ${change.id}. The owner reviews it; call report_status and stop.`;
 }
 

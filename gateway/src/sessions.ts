@@ -6,6 +6,7 @@ import { defaultModel, postDecision, replyToOrigin } from "./agents";
 import { agentByManagedId } from "./config";
 import { cap, outOfSubrequests, type Ctx } from "./context";
 import { wakeAda } from "./followUp";
+import { mcpGithubWrite, recordGithubWrite } from "./githubWrites";
 import { costCents, messageText, sessionAgentId, sessionModel, sessionTokens, type SessionEvent } from "./managed";
 import { ToolDenied, ToolError, handleTool } from "./tools";
 
@@ -175,6 +176,7 @@ async function handleEvent(
         permission: e.evaluated_permission,
         detail: e.input,
       });
+      let decision: string | null = null;
       if (e.evaluated_permission === "ask") {
         const d = await ctx.db.createDecision({
           agent,
@@ -187,8 +189,13 @@ async function handleEvent(
           session_id: sessionId,
           tool_use_id: e.id,
         });
+        decision = d.id;
         await postDecision(ctx, d);
       }
+      // C-7: a GitHub write runs only once its confirmation is approved; one the
+      // permission policy allowed outright has no decision, so its row is flagged.
+      const write = e.evaluated_permission === "deny" ? null : mcpGithubWrite(e);
+      if (write) await recordGithubWrite(ctx, { agent, sessionId, eventId: e.id, decision, ...write });
       return;
     }
 

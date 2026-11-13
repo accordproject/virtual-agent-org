@@ -9,6 +9,7 @@ import type { Change, Decision, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import { ACTIVITY_DAYS, activityLine, requestCiFix } from "./githubEvents";
+import { autoReason, recordGithubWrite } from "./githubWrites";
 import { memberOf } from "./people";
 import {
   GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeCard, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
@@ -323,7 +324,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   }
   // Open-ended: include rows written this very second, which "now" to the second would cut off.
   const until = input.until ? end : "9999-12-31 23:59:59";
-  const [usage, daily, decisions, denials, refusals, toolCalls, changes, blocked, dismissed, gatewayErrors, gatewayErrorCounts] = await Promise.all([
+  const [usage, daily, decisions, denials, refusals, toolCalls, changes, blocked, dismissed, gatewayErrors, gatewayErrorCounts, githubWrites, githubWriteCounts] = await Promise.all([
     ctx.db.sessionUsage(since, until),
     ctx.db.dailySpend(since, until),
     ctx.db.decisionsBetween(since, until),
@@ -335,6 +336,8 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     ctx.db.dismissedFindings(since, until),
     ctx.db.gatewayErrors(since, until),
     ctx.db.gatewayErrorCounts(since, until),
+    ctx.db.githubWrites(since, until),
+    ctx.db.githubWriteCounts(since, until),
   ]);
 
   type Totals = { sessions: number; cost_cents: number } & Record<(typeof TOKEN_FIELDS)[number], number>;
@@ -368,6 +371,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
       "blocked_reports: status reports that listed blockers. Cite one by its id (status:<id>).",
       "dismissed_findings: Mira's review findings dismissed in this period, with the note saying why. Cite one by its id (F-<n>) in the text; it isn't an evidence id.",
       "gateway_errors: failures of the gateway itself (webhooks, schedules, sweeps, GitHub events, follow-ups, Telegram and Discord, tool handlers), oldest first and capped at 200; agent is set only when the failure was in that agent's session. gateway_error_counts gives the exact count per event_type. Cite one as audit:<id>.",
+      "github_writes: every write to GitHub (C-7), oldest first and capped at 200: agent, session_id, task_id, the decision that authorised it or 'gateway-internal' with the reason, and args (repo, number, fields changed). flagged is set on a write with neither, such as an agent's own GitHub tool call; check those. github_write_counts gives exact counts per agent and authority. Cite one as audit:<id>.",
     ],
     agents,
     daily_spend: daily,
@@ -383,6 +387,8 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
     dismissed_findings: dismissed,
     gateway_errors: gatewayErrors,
     gateway_error_counts: gatewayErrorCounts,
+    github_writes: githubWrites,
+    github_write_counts: githubWriteCounts,
   });
 }
 
@@ -539,13 +545,16 @@ async function labelPr(ctx: Ctx, agent: string, sessionId: string, input: Input)
   if (added.length) await gh.addLabels(ref, added);
   const now = [...current.filter((l) => !drop.includes(l)), ...added];
   await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.labelled", detail: { target, added, removed: drop } });
+  if (drop.length || added.length) {
+    await recordGithubWrite(ctx, { agent, sessionId, tool: "label_pr", internal: "labels through label_pr", repo: `${ref.owner}/${ref.repo}`, number: ref.number, fields: ["labels"] });
+  }
   return `${target} labels: ${now.join(", ") || "none"}`;
 }
 
 /** Runs an auto action kind at once, keeping a decision record and an audit entry like any other. */
 async function runAuto(ctx: Ctx, d: Decision, why: string) {
   await ctx.db.decide(d.id, "approved", why);
-  const r = await executeDecision(ctx, { ...d, status: "approved" })
+  const r = await executeDecision(ctx, { ...d, status: "approved" }, autoReason(d.kind))
     .then((x) => (x.manual ? { ok: false, result: `${d.kind} has no executor` } : x))
     .catch((e) => ({ ok: false, result: e instanceof Error ? e.message : String(e) }));
   await ctx.db.markExecuted(d.id, r.ok, r.result);
