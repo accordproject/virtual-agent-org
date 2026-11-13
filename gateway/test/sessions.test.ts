@@ -367,6 +367,28 @@ describe("following up blocked tasks (decision 50)", () => {
     expect(adaWakes(fakes)).toHaveLength(0);
   });
 
+  it("ends a review check done once its review is posted at that head, even if the merge was refused", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    const reviewCheck = async (sid: string, sha7: string) => {
+      const task = await ctx.db.createTask({ agent: "mira", title: "Review check", brief: "b", review: { target: "accordproject/concerto#1", sha: sha7 } });
+      await ctx.db.upsertSession({ id: sid, agent: "mira", origin: "task", task_id: task.id });
+      await ctx.db.setTask(task.id, "running", sid);
+      fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "end_turn" } };
+      fakes.events[sid] = [{ id: `${sid}_e1`, type: "agent.custom_tool_use", name: "report_status", input: { done: [], doing: [], blocked: ["merge not queued: review required"] } }];
+      return task.id as string;
+    };
+    await ctx.db.createReview({ target: "accordproject/concerto#1", sha: "abc1234def5678", risk: "low", verdict: "approve", decision_id: "D-1", url: null, findings: [] });
+    const posted = await reviewCheck("sesn_rc_posted", "abc1234");
+    await processSession(ctx, "sesn_rc_posted");
+    expect((await ctx.db.getTask(posted))?.status).toBe("done");
+    expect((await audit(ctx, "gateway.review_check_done"))[0]).toMatchObject({ task: posted, blockers: ["merge not queued: review required"] });
+    // A review at another head doesn't count: this check never posted its own.
+    const other = await reviewCheck("sesn_rc_other", "fff0000");
+    await processSession(ctx, "sesn_rc_other");
+    expect((await ctx.db.getTask(other))?.status).toBe("blocked");
+    expect(adaWakes(fakes)).toHaveLength(0);
+  });
+
   it("keeps processing the session when waking Ada fails, and audits it", async () => {
     const { ctx, fakes } = makeTestCtx();
     const create = ctx.managed.createSession.bind(ctx.managed);

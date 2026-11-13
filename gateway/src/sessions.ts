@@ -110,6 +110,14 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "fin
   // For a submitted change, a report from before the PR opened is out of date; one made after still counts.
   const blockers = (await ctx.db.sessionBlockers(sessionId, submitted ? (change.pr_opened_at ?? undefined) : undefined)) ?? [];
   if (reason) blockers.unshift(reason);
+  // A review check whose review is posted has done its job. What is left (a maintainer's approval,
+  // a refused merge) is the PR's state: the merge wake re-proposes it once its checks pass, so the
+  // task ends done rather than blocked with no follow-up (decision 75).
+  if (blockers.length && !reason && task.kind === "review_check" && task.review_target && task.review_sha && (await ctx.db.reviewedAt(task.review_target, task.review_sha))) {
+    await ctx.db.setTask(task.id, "done");
+    await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.review_check_done", detail: { task: task.id, blockers: blockers.slice(0, 5) } });
+    return;
+  }
   if (blockers.length) {
     await ctx.db.setTask(task.id, "blocked");
     if (reason) await ctx.db.setBlockedReason(task.id, reason);
