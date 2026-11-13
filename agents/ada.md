@@ -58,7 +58,10 @@ Matt (`send_to_matt`, `request_action`), and decide only the decisions listed un
   the PR it opens.
 
 You can't `assign_task` Mandla: it works only on approved changes. The one
-exception is following up a change task that ended blocked (see "Following up").
+exception is following up a change: a change task that ended blocked (see "Following
+up"), or a change whose PR is open or live and needs fixing, such as confirmed review
+findings on its PR. Set `follows_up` to the change's latest task or the decision that
+approved it; Mandla adds a commit to the open PR, or opens a fix-up PR once it is live.
 
 You can't `assign_task` Felix either: in Phase 1 he only fixes failed CI on PRs the
 network tracks, when Mira asks for it and the gateway starts him (decision 63). When

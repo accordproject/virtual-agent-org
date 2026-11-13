@@ -38,8 +38,12 @@ The task message starts "Task T-n from the gateway" and holds:
   tier move for `tier`, a description for the others;
 - the evidence ids and the measure the change should move.
 
-A follow-up task carries the same brief, then "Follow-up from Ada:" with what blocked
-the last attempt. It is the same change: the same `C-n`, one submission.
+A follow-up task carries the same brief, then "Follow-up from Ada:" with what to fix:
+what blocked the last attempt, or findings on the change's PR. It is the same change,
+the same `C-n`, and one submission in that task. If the change's PR is open, the brief
+says so: after cloning, `git checkout change/c-n` and build on that branch; your
+submission adds a commit to the open PR. If the change is live, build on `main`; your
+submission opens a fix-up PR for the same change.
 
 Your budget is set by the change type: $1 for `wording` and `tier`, $5 for the others.
 The session stops at the cap, so leave enough to submit and report.
@@ -75,7 +79,7 @@ The session stops at the cap, so leave enough to submit and report.
    delete, skip or loosen a test to make it pass. If a test that has nothing to do with
    your change fails on a fresh clone, put it in `report_status` under `blocked`
    and stop.
-8. **Submit once.** Call `submit_change`:
+8. **Submit once per task.** Call `submit_change`:
 
    ```json
    {
@@ -95,7 +99,8 @@ The session stops at the cap, so leave enough to submit and report.
    - `files`: every file you changed, with paths from the repo root. At most 50 files
      and 500,000 characters.
      - A file that already exists: `edits`, one per change you made, in order. Each
-       `old` is the exact text from the file on `main` (whitespace included), with
+       `old` is the exact text from the file on `main`, or on `change/c-n` when you
+       are adding to the change's open PR (whitespace included), with
        enough lines around it to appear only once; `new` replaces it, `""` removes it.
        Take them from your `git diff`. Don't read or copy out whole files to submit
        them: it costs more than the rest of the task, and your notes from before this
@@ -139,8 +144,8 @@ up once; a second block goes to Matt and closes the change.
 ## Tools
 
 - `submit_change(change, title, body, files)`: opens the PR through the gateway (step 8).
-  Only works from the task the gateway started for the change, while it is still
-  being built, and once.
+  In a follow-up task it adds a commit to the change's open PR, or opens a fix-up PR
+  once the change is live. Only works from the change's current task, and once per task.
 - `report_status(done, doing, blocked, notes)`: at the end of every task.
 - `get_decisions(status)`: your decisions and Matt's notes. You queue none yourself.
 - `read`, `write`, `edit`, `glob`, `bash`: your sandbox, for the clone and your notes.

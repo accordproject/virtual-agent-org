@@ -741,14 +741,30 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   const priority = typeof input.priority === "string" ? input.priority : "normal";
   const due = typeof input.due === "string" ? input.due : undefined;
   const followsUp = await followUpOf(ctx, s(input.follows_up, "follows_up", false));
-  // Mandla only works on approved changes: a follow-up of a blocked change task takes the change over.
+  // Mandla only works on approved changes: a follow-up of a change's task, or of the decision
+  // that approved it (C-10), takes the change over.
   const earlier = followsUp?.startsWith("T-") ? await ctx.db.getTask(followsUp) : null;
-  const change = earlier?.kind === "change" ? await ctx.db.changeForTask(earlier.id) : null;
+  const change =
+    earlier?.kind === "change"
+      ? await ctx.db.changeForTask(earlier.id)
+      : followsUp?.startsWith("D-") && agent === "mandla"
+        ? await ctx.db.changeForDecision(followsUp)
+        : null;
   if (agent === "mandla" && !change) throw new ToolError("Mandla only works on approved changes: propose one with spec.change.");
   if (agent === "felix") throw new ToolError("Felix only fixes CI on PRs the network tracks, when the gateway starts him from Mira's request_ci_fix (decision 63). Ask Mira instead.");
   if (change && agent !== "mandla") throw new ToolError(`${earlier!.id} is a change task: only Mandla can follow it up.`);
-  if (change && (earlier!.status !== "blocked" || change.state !== "building")) {
-    throw new ToolError(`${change.id} is ${change.state} and ${earlier!.id} is ${earlier!.status}: there is nothing to follow up.`);
+  // The change's current task: the one a follow-up takes over from.
+  const current = change?.task_id ? (earlier?.id === change.task_id ? earlier : await ctx.db.getTask(change.task_id)) : null;
+  if (change) {
+    // Still building: only once its task is blocked. PR open or live: a follow-up adds to the PR
+    // or opens a fix-up PR (C-10), once the last task for the change has stopped.
+    const followable =
+      change.state === "building"
+        ? current?.status === "blocked"
+        : ["pr_open", "live"].includes(change.state) && !["open", "running"].includes(current?.status ?? "");
+    if (!followable) {
+      throw new ToolError(`${change.id} is ${change.state} and ${current?.id ?? "its task"} is ${current?.status ?? "missing"}: there is nothing to follow up.`);
+    }
   }
   const startedBy = await sessionStartedBy(ctx, parentSessionId);
   const member = memberOf(startedBy);
@@ -771,8 +787,8 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
   ].join("\n");
 
   // Always an ordinary task: only request_review_check makes a review check.
-  // Mandla starts from the approved change's own brief, then Ada's follow-up.
-  const taskBrief = change ? `${earlier!.brief}\n\nFollow-up from Ada:\n${brief}` : brief;
+  // Mandla starts from the approved change's own brief, then where to build, then Ada's follow-up.
+  const taskBrief = change ? `${changeFollowUpBrief(change, current?.brief ?? "")}\n\nFollow-up from Ada:\n${brief}` : brief;
   const task = await ctx.db.createTask({
     agent,
     title,
@@ -797,10 +813,26 @@ async function assignTask(ctx: Ctx, parentSessionId: string, input: Input): Prom
     return `Assigned ${task.id} to ${cap(agent)} (${effort} effort, $${(cents / 100).toFixed(2)} cap).`;
   } catch (e) {
     await ctx.db.setTask(task.id, "failed");
-    if (change) await ctx.db.updateChange(change.id, { task_id: earlier!.id });
+    if (change) await ctx.db.updateChange(change.id, { task_id: current?.id ?? null });
     if (e instanceof AgentUnavailable) throw new ToolError(`${task.id} not started: ${e.message}`);
     throw e;
   }
+}
+
+/**
+ * A change follow-up's brief: the change's own brief (without an earlier follow-up's part)
+ * and, once the change has its PR, what submit_change will do with this task's submission (C-10).
+ */
+function changeFollowUpBrief(change: Change, previous: string): string {
+  const own = previous.split("\n\nFollow-up from Ada:\n")[0];
+  const branch = `change/${change.id.toLowerCase()}`;
+  const where =
+    change.state === "pr_open"
+      ? `${change.id}'s PR is open: ${change.pr_url}. Build on its branch ${branch}, not main: your edits apply to the files on that branch, and submit_change adds one commit to the PR.`
+      : change.state === "live"
+        ? `${change.id} is live: its PR ${change.pr_url} is merged. Build on main: submit_change opens a fix-up PR for ${change.id}.`
+        : "";
+  return where ? `${own}\n\n${where}` : own;
 }
 
 /**

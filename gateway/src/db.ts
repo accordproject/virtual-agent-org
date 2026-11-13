@@ -107,6 +107,15 @@ export interface Change {
   updated_at: string;
 }
 
+/** One submit_change for a change (C-10): its PR opened, a commit added to it, or a fix-up PR. */
+export interface ChangeSubmission {
+  change_id: string;
+  task_id: string;
+  mode: "open" | "push" | "fix_up" | "dry_run";
+  pr_url: string | null;
+  created_at: string;
+}
+
 export interface Review {
   id: string;
   target: string;
@@ -908,6 +917,29 @@ export class Db {
 
   async changeForTask(taskId: string): Promise<Change | null> {
     return this.db.prepare("SELECT * FROM changes WHERE task_id = ?").bind(taskId).first<Change>();
+  }
+
+  /** The change approved by a spec.change decision, if it was recorded. */
+  async changeForDecision(decisionId: string): Promise<Change | null> {
+    return this.db.prepare("SELECT * FROM changes WHERE decision_id = ? ORDER BY seq DESC LIMIT 1").bind(decisionId).first<Change>();
+  }
+
+  /** Records one submit_change against its change (C-10); a task submits at most once. */
+  async recordSubmission(s: { change_id: string; task_id: string; mode: ChangeSubmission["mode"]; pr_url: string | null; at: string }): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO change_submissions (change_id, task_id, mode, pr_url, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(s.change_id, s.task_id, s.mode, s.pr_url, s.at)
+      .run();
+  }
+
+  /** The task's submission, if it made one. */
+  async taskSubmission(taskId: string): Promise<ChangeSubmission | null> {
+    return this.db.prepare("SELECT * FROM change_submissions WHERE task_id = ?").bind(taskId).first<ChangeSubmission>();
+  }
+
+  /** Every submission for a change, oldest first. */
+  async changeSubmissions(changeId: string): Promise<ChangeSubmission[]> {
+    return (await this.db.prepare("SELECT * FROM change_submissions WHERE change_id = ? ORDER BY created_at, rowid").bind(changeId).all<ChangeSubmission>()).results;
   }
 
   async updateChange(id: string, fields: Partial<Omit<Change, "id" | "seq">>): Promise<void> {
