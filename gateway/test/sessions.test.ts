@@ -240,6 +240,9 @@ describe("following up blocked tasks (decision 50)", () => {
     const wakes = adaWakes(fakes);
     expect(wakes).toHaveLength(1);
     expect(wakes[0].args[0].budgetCents).toBe(50);
+    // Gateway-started follow-ups run on Ada's follow_up task model (C-9, decision 268), not her Opus default.
+    expect(wakes[0].args[0].model).toEqual({ id: "claude-sonnet-5-5", effort: "low" });
+    expect((await ctx.db.activeSessions("ada"))[0]).toMatchObject({ model: "claude-sonnet-5-5" });
     expect(wakes[0].args[0].text).toContain(`task ${id} for Mira`);
     expect(wakes[0].args[0].text).toContain("Needs a maintainer on concerto to review #812");
     expect(wakes[0].args[0].text).toContain('"Following up"');

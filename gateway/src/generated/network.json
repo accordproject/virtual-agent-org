@@ -361,6 +361,10 @@
         "evaluation": {
           "model": "claude-opus-5-5",
           "effort": "medium"
+        },
+        "follow_up": {
+          "model": "claude-sonnet-5-5",
+          "effort": "low"
         }
       }
     },

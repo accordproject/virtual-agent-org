@@ -3,7 +3,7 @@
 // spec: hands it to an agent who can fix it, or puts it to Matt as a decision.
 // Ada acts only through her own tools, so a wake adds no side effect of its own.
 
-import { AgentUnavailable, startSession } from "./agents";
+import { AgentUnavailable, startSession, taskModel } from "./agents";
 import { cap, type Ctx } from "./context";
 import type { Decision, StartedBy, Task } from "./db";
 
@@ -42,7 +42,12 @@ export async function wakeAda(ctx: Ctx, s: FollowUpSubject): Promise<"woken" | "
     const from = s.kind === "task" ? s.task.session_id : s.decision.session_id;
     const startedBy: StartedBy = (from && (await ctx.db.getSession(from))?.started_by) || "schedule";
     try {
-      const sessionId = await startSession(ctx, "ada", prompt(s), "follow_up", startedBy, { budgetCents: cfg.budget_cents });
+      // Routine follow-ups run as Ada's follow_up task in models.yaml (C-9, decision 268); without one, her default tier.
+      const model = taskModel(ctx, "ada", "follow_up");
+      const sessionId = await startSession(ctx, "ada", prompt(s), "follow_up", startedBy, {
+        budgetCents: cfg.budget_cents,
+        ...(model ? { model } : {}),
+      });
       await ctx.db.setFollowUp(id, "started", sessionId);
       await ctx.db.audit({ agent: "ada", session_id: sessionId, event_type: "gateway.follow_up_woken", detail: { subject: id, of: agent, started_by: startedBy } });
       return "woken";

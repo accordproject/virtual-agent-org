@@ -81,7 +81,7 @@ export const NETWORK: NetworkConfig = {
     { name: "Ali Khan", roles: ["maintainer"], github: "alikhan", discord: "223456789012345678" },
   ],
   agents: {
-    ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"] },
+    ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"], tasks: { follow_up: { model: "claude-sonnet-5-5", effort: "low" } } },
     mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "github.rerun_ci", "discord.ops", "linkedin.post"],
       model: "claude-sonnet-5-5",
       effort: "medium",
