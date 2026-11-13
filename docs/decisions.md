@@ -888,3 +888,17 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   after the response).
 - Revisit if issues, reviews and comments should count towards community size, as
   CHAOSS allows: the history would need their authors too.
+
+**77. Change PRs open with a plain summary** · RESOLVED
+
+- Mandla's PR descriptions opened with the gateway's ids (change, decision, evidence)
+  and then file-by-file mechanics, so the owner had to work out what a PR was for.
+- `submit_change` now needs a `summary`: one paragraph, at most 600 characters, saying
+  what went wrong or was missing and what the PR does about it. The gateway puts it
+  first in the PR description, above its own header, and in the commit message, so a
+  commit added to an open PR carries one too. Mandla's details follow under "Details".
+- The gateway refuses a summary that is missing, too long, more than one paragraph, or
+  mentions an internal id (C-n, D-n, T-n, Pn-n). A line break is refused because it
+  could forge a trailer in the commit message. A change that loosens a safety rule or
+  a gateway check says so in the summary, not in the first line of the body.
+- Not chosen: asking for a summary in the spec alone, which Mandla could skip.
