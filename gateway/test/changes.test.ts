@@ -622,6 +622,39 @@ describe("Mandla's tasks that end without a PR", () => {
     }
   });
 
+  /** C-1 approved; Mandla reports `before`, submits, maybe reports `after`, then runs out of budget. */
+  async function reportSubmitRunOut(before: string[], after?: string[]) {
+    const r = await approved();
+    const sid = r.task.session_id!;
+    const report = (blocked: string[]) => handleTool(r.ctx, "mandla", sid, "report_status", { done: [], doing: [], blocked });
+    await report(before);
+    // The earlier report was made a minute before the PR opened.
+    await (r.ctx.db as any).db.prepare("UPDATE statuses SET created_at = datetime('now', '-1 minute') WHERE session_id = ?").bind(sid).run();
+    await handleTool(r.ctx, "mandla", sid, "submit_change", {
+      change: "C-1", title: "docs(mira): thank the contributor first", body: "Adds a line.", files: [{ path: "agents/mira.md", content: "# Mira\n" }],
+    });
+    if (after) await report(after);
+    r.fakes.sessions[sid] = { id: sid, agent: { id: "agent_mandla" }, status: "idle", stop_reason: { type: "budget_reached" } };
+    r.fakes.events[sid] = [];
+    await processSession(r.ctx, sid);
+    return r;
+  }
+
+  it("a blocker reported before the PR opened doesn't block a submitted change", async () => {
+    const { ctx, fakes, task } = await reportSubmitRunOut(["npm test fails on a fresh clone"]);
+    expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "done" });
+    expect(wakes(fakes)).toHaveLength(0);
+  });
+
+  it("a blocker reported after the PR opened still blocks the task and wakes Ada", async () => {
+    const { ctx, fakes, task } = await reportSubmitRunOut([], ["CI fails on the PR"]);
+    expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "blocked" });
+    const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
+    expect(audit.results[0].detail).toContain("CI fails on the PR");
+    expect(audit.results[0].detail).not.toContain("Ran out of its session budget");
+    expect(wakes(fakes).length).toBeGreaterThan(0);
+  });
+
   it("a change follow-up gets the change's budget and tier, not Ada's effort", async () => {
     const small = await blocked();
     await follow(small.ctx, "mandla", small.task.id);

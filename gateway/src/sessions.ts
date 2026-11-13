@@ -107,7 +107,8 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "fin
     : submitted
       ? null
       : { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
-  const blockers = (await ctx.db.sessionBlockers(sessionId)) ?? [];
+  // For a submitted change, a report from before the PR opened is out of date; one made after still counts.
+  const blockers = (await ctx.db.sessionBlockers(sessionId, submitted ? (change.pr_opened_at ?? undefined) : undefined)) ?? [];
   if (reason) blockers.unshift(reason);
   if (blockers.length) {
     await ctx.db.setTask(task.id, "blocked");
