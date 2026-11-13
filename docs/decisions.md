@@ -914,7 +914,8 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   to three days.
 - A new action kind, `github.first_response`, is `auto`. The gateway posts it at once
   if the PR or issue is open and has no earlier approved or posted comment from the
-  network, and the text is at least 80 characters, has no draft markers, doesn't end
+  network, and the text is at least 80 characters, has no draft markers (including a
+  leaked "@-free" note to avoid mentions), doesn't end
   mid-sentence, @mentions no one but the author and says nothing about the network.
   Otherwise it refuses and Mira redrafts. It goes to the owner as a card when Mira rates
   it high risk or a member set the work going. Setting `auto: false` makes every first

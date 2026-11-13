@@ -286,8 +286,9 @@ export const FIRST_RESPONSE_FOOTER =
   "<sub>Posted automatically by Mira, an Accord Project agent. A maintainer will follow up; they make the decisions on this.</sub>";
 // Text agents are told to sign public drafts with; untrue on a comment nobody approved.
 const APPROVED_LABEL = /\n*(?:-{3,}\s*)?\n*(?:<sub>)?\s*Drafted by an Accord Project agent, reviewed by a maintainer\.?\s*(?:<\/sub>)?\s*$/i;
-// Signs of an unfinished draft (D-229 posted "Thanks for this, @… placeholder").
-const DRAFT_MARKER = /\b(placeholder|lorem ipsum|TODO|TBD|FIXME|XXX)\b|<(?:[A-Z][A-Z _-]{2,})>|\[(?:insert|add|your|name|link)\b[^\]]*\]/;
+// Signs of an unfinished draft (D-229 posted "Thanks for this, @… placeholder"). "@-free",
+// "@free-" and "@name-free" are Mira's own note to avoid mentions leaking into the text.
+const DRAFT_MARKER = /\b(placeholder|lorem ipsum|TODO|TBD|FIXME|XXX)\b|<(?:[A-Z][A-Z _-]{2,})>|\[(?:insert|add|your|name|link)\b[^\]]*\]|(?<![\w.])@(?:-free\b|free-|[\w-]+-free\b)/;
 const FIRST_RESPONSE_MIN = 80;
 const FIRST_RESPONSE_MAX = 4_000;
 

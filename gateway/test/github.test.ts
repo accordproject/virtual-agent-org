@@ -935,7 +935,7 @@ describe("first responses (decision 78)", () => {
   it("refuses unfinished text, other people's @mentions, network talk, and closed targets", async () => {
     const { ctx, gh } = setup(fakeGitHub({ author: "averif" }), { dryRun: false });
     const refused = (text: string) => handleTool(ctx, "mira", "s", "request_action", ask(text));
-    await expect(refused("Thanks for this, @averif-free placeholder")).rejects.toThrow(/under 80 characters[\s\S]*looks unfinished \("placeholder"\)/);
+    await expect(refused("Thanks for this, @averif-free placeholder")).rejects.toThrow(/under 80 characters[\s\S]*looks unfinished \("@averif-free"\)/);
     await expect(refused(`${GOOD} Ending mid`)).rejects.toThrow(/ends mid-sentence/);
     await expect(refused(`${GOOD} @dselman's team will look at it.`)).rejects.toThrow(/mentions @dselman/);
     await expect(refused(`${GOOD} Your \`{{variable}}\` marker is handled, @averif.`)).resolves.toMatch(/done/);
