@@ -312,7 +312,7 @@ describe("submit_change", () => {
     const files = [...bad.map((path) => ({ path, content: "x" })), { path: "a.md", content: "x" }, { path: "a.md", delete: true }, { path: "b.md" }, { path: "c.md", content: "x", delete: true }];
     const err = await submit(ctx, session, { files }).catch((e) => e);
     expect(err).toBeInstanceOf(ToolError);
-    for (const p of [...bad.slice(0, 4), "files[4] has an empty path", "agents\\mira.md: use /", "a.md more than once", "b.md: give exactly one", "c.md: give exactly one"]) expect(err.message).toContain(p);
+    for (const p of [...bad.slice(0, 4), "files[4] has an empty path", "agents\\mira.md: use /", "a.md more than once", "b.md: give exactly one of content, edits or delete: true", "c.md: give exactly one"]) expect(err.message).toContain(p);
     // Bare directory names, other cases and odd spellings of them are refused too.
     const dirs = [{ path: ".github", delete: true }, { path: ".GITHUB/x", content: "x" }, { path: "./.github/x", content: "x" }, { path: "a//b", content: "x" }, { path: "gateway/src/generated", delete: true }];
     const more = await submit(ctx, session, { files: dirs }).catch((e) => e);
@@ -374,6 +374,72 @@ describe("submit_change", () => {
     const audit = await (ctx.db as any).db.prepare("SELECT agent, detail FROM audit WHERE event_type = 'gateway.change_pr_opened'").all();
     expect(audit.results).toHaveLength(1);
     expect(JSON.parse(audit.results[0].detail)).toEqual({ change: "C-1", decision, pr: change.pr_url });
+  });
+
+  it("submit_change makes edits to the files on the default branch, and builds on the commit it read", async () => {
+    const { ctx, session, gh } = await building();
+    gh.repoFiles["agents/mira.md"] = "# Mira\n\n1. Read the PR.\n2. Review it.\n";
+    gh.repoFiles["gateway/src/x.ts"] = "const a = 1;\nconst b = 2;\n";
+    const out = await submit(ctx, session, {
+      files: [
+        { path: "agents/mira.md", edits: [{ old: "1. Read the PR.\n", new: "1. Thank the contributor.\n2. Read the PR.\n" }, { old: "2. Review it.", new: "3. Review it." }] },
+        { path: "gateway/src/x.ts", edits: [{ old: "const b = 2;\n", new: "" }] },
+        { path: "docs/new.md", content: "New\n" },
+        { path: "old.md", delete: true },
+      ],
+    });
+    expect(out).toContain("/pull/1");
+    const [, p] = gh.proposed[0];
+    expect(p.base).toBe("basecommit1");
+    expect(gh.fileReads).toEqual([{ path: "agents/mira.md", ref: "basecommit1" }, { path: "gateway/src/x.ts", ref: "basecommit1" }]);
+    expect(p.files).toEqual([
+      { path: "agents/mira.md", content: "# Mira\n\n1. Thank the contributor.\n2. Read the PR.\n3. Review it.\n" },
+      { path: "gateway/src/x.ts", content: "const a = 1;\n" },
+      { path: "docs/new.md", content: "New\n" },
+      { path: "old.md", content: null },
+    ]);
+  });
+
+  it("submit_change without edits reads nothing and builds on the current head", async () => {
+    const { ctx, session, gh } = await building();
+    await submit(ctx, session);
+    expect(gh.fileReads).toHaveLength(0);
+    expect(gh.proposed[0][1].base).toBeUndefined();
+  });
+
+  it("submit_change refuses edits that aren't found exactly once, or files that don't exist, and opens nothing", async () => {
+    const { ctx, session, gh } = await building();
+    gh.repoFiles["agents/mira.md"] = "step\nstep\nonce\n";
+    const err = await submit(ctx, session, {
+      files: [
+        { path: "agents/mira.md", edits: [{ old: "missing", new: "x" }, { old: "step", new: "x" }, { old: "once", new: "twice" }] },
+        { path: "agents/nobody.md", edits: [{ old: "a", new: "b" }] },
+      ],
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toMatch(/^Not submitted\. Fix these and call again/);
+    for (const s of ["agents/mira.md: edit 1's old text isn't in the file", "agents/mira.md: edit 2's old text appears more than once", "agents/nobody.md: not on the default branch"]) expect(err.message).toContain(s);
+    expect(err.message).not.toContain("edit 3");
+    expect(gh.proposed).toHaveLength(0);
+    expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
+  });
+
+  it("submit_change checks the shape of edits before calling GitHub", async () => {
+    const { ctx, session, gh } = await building();
+    const err = await submit(ctx, session, {
+      files: [
+        { path: "a.md", edits: [] },
+        { path: "b.md", edits: [{ old: "", new: "x" }, { old: "y", new: "y" }] },
+        { path: "c.md", edits: [{ old: "a", new: "b" }], content: "x" },
+        { path: "d.md", edits: [{ old: "a", new: "b" }], delete: true },
+      ],
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    for (const s of ["a.md: edits needs at least one edit", "b.md: edit 1 needs old", "b.md: edit 2 changes nothing", "c.md: give exactly one of content, edits or delete: true", "d.md: give exactly one of content, edits or delete: true"]) expect(err.message).toContain(s);
+    // The tool's schema refuses an edit without new before the gateway's own checks.
+    await expect(submit(ctx, session, { files: [{ path: "b.md", edits: [{ old: "z" }] }] })).rejects.toThrow("files[0].edits[0].new is required");
+    expect(gh.fileReads).toHaveLength(0);
+    expect(gh.proposed).toHaveLength(0);
   });
 
   it("a change is submitted once", async () => {
@@ -439,6 +505,40 @@ describe("submit_change", () => {
     expect(post("/git/refs")).toEqual({ ref: "refs/heads/change/c-1", sha: "commit2" });
     expect(post("/pulls")).toEqual({ title: "docs: x", head: "change/c-1", base: "main", body: "B" });
   });
+
+  it("GitHub.proposeChange builds on a given base commit, and fileText reads a file at a commit", async () => {
+    const calls: [string, string][] = [];
+    const R = "/repos/accordproject/virtual-agent-org";
+    const text = "café\nline two\n";
+    const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+    const fetchImpl = (async (url: string, init: any) => {
+      const u = new URL(url);
+      calls.push([init.method, u.pathname + u.search]);
+      if (u.pathname === `${R}/contents/agents/gone.md`) return new Response('{"message":"Not Found"}', { status: 404 });
+      const body =
+        u.pathname === R ? { default_branch: "main" }
+        : u.pathname === `${R}/git/ref/heads/main` ? { object: { sha: "head1" } }
+        // GitHub wraps base64 content at 60 characters.
+        : u.pathname === `${R}/contents/agents/mira.md` ? { type: "file", encoding: "base64", content: b64.replace(/(.{8})/g, "$1\n") }
+        : u.pathname === `${R}/git/commits/base0` ? { tree: { sha: "tree0" } }
+        : u.pathname === `${R}/git/trees` ? { sha: "tree2" }
+        : u.pathname === `${R}/git/commits` ? { sha: "commit2" }
+        : u.pathname === `${R}/pulls` ? { html_url: "https://github.com/accordproject/virtual-agent-org/pull/8", number: 8 }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const gh = new GitHub("t", fetchImpl);
+    const r = { owner: "accordproject", repo: "virtual-agent-org" };
+    expect(await gh.defaultHead(r)).toEqual({ branch: "main", sha: "head1" });
+    expect(await gh.fileText(r, "agents/mira.md", "base0")).toBe(text);
+    expect(calls).toContainEqual(["GET", `${R}/contents/agents/mira.md?ref=base0`]);
+    expect(await gh.fileText(r, "agents/gone.md", "base0")).toBeNull();
+
+    calls.length = 0;
+    await gh.proposeChange(r, { branch: "change/c-2", files: [{ path: "a.md", content: "A" }], message: "m", author: { name: "b", email: "b@x" }, title: "t", body: "B", base: "base0" });
+    expect(calls.map((c) => c[1])).not.toContain(`${R}/git/ref/heads/main`);
+    expect(calls).toContainEqual(["GET", `${R}/git/commits/base0`]);
+  });
 });
 
 describe("Mandla's tasks that end without a PR", () => {
@@ -495,6 +595,24 @@ describe("Mandla's tasks that end without a PR", () => {
       expect(audit.results[0].detail).toContain(blocker);
       expect((await ctx.db.getChange("C-1"))?.state).toBe("building");
       expect(wakes(fakes).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("a Mandla session that runs out of budget or is ended after its PR opened leaves the task done, and doesn't wake Ada (decision 73)", async () => {
+    for (const session of [{ status: "idle", stop_reason: { type: "budget_reached" } }, { status: "terminated" }]) {
+      const { ctx, fakes, task } = await approved();
+      const sid = task.session_id!;
+      expect(await handleTool(ctx, "mandla", sid, "submit_change", {
+        change: "C-1", title: "docs(mira): thank the contributor first", body: "Adds a line.", files: [{ path: "agents/mira.md", content: "# Mira\n" }],
+      })).toContain("/pull/1");
+      fakes.sessions[sid] = { id: sid, agent: { id: "agent_mandla" }, ...session };
+      fakes.events[sid] = [];
+      await processSession(ctx, sid);
+      expect(await ctx.db.getTask(task.id)).toMatchObject({ status: "done" });
+      const audit = await (ctx.db as any).db.prepare("SELECT detail FROM audit WHERE event_type = 'gateway.task_blocked'").all();
+      expect(audit.results).toHaveLength(0);
+      expect(wakes(fakes)).toHaveLength(0);
+      expect((await ctx.db.getChange("C-1"))?.state).toBe("pr_open");
     }
   });
 

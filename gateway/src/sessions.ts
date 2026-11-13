@@ -82,7 +82,8 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
  * follow up. A session that ran out of budget or ended in error leaves its task
  * blocked on that, so Ada decides what happens to it (decision 53). A change task
  * whose change is still building never opened its PR, so it is blocked however its
- * session stopped, and a second such block closes the change (decision 55). Runs on
+ * session stopped, and a second such block closes the change (decision 55); one whose PR
+ * is open is done, even if its session ran out of budget afterwards (decision 73). Runs on
  * every pass over an idle session, so it acts only when the status changes.
  */
 /** Why the gateway left a task blocked, as Ada reads it in get_status. */
@@ -98,9 +99,13 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "fin
   if (!task || ["done", "blocked", "failed", "cancelled"].includes(task.status)) return;
   const change = task.kind === "change" ? await ctx.db.changeForTask(task.id) : null;
   const unsubmitted = change?.state === "building";
+  // A change whose PR is open was submitted: its task's work is done, whatever stopped the session after.
+  const submitted = !!change && !unsubmitted && !!change.pr_url;
   const reason = unsubmitted
     ? `${change.id}: no change submitted${{ finished: "", budget: " (budget reached)", ended: " (session ended)" }[end]}`
-    : { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
+    : submitted
+      ? null
+      : { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
   const blockers = (await ctx.db.sessionBlockers(sessionId)) ?? [];
   if (reason) blockers.unshift(reason);
   if (blockers.length) {

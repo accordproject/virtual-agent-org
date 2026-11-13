@@ -402,9 +402,11 @@ export const TOOLS = {
   submit_change: {
     owner: "mandla",
     description:
-      "Submit the finished change once. Give every changed file's whole new content, or delete: true to remove it. The gateway " +
+      "Submit the finished change once. For a file that already exists, give edits: each replaces one exact, unique piece of " +
+      "its text on the default branch. Give whole content only for a new file, and delete: true to remove one. The gateway " +
       "checks the paths (nothing under .github/ or gateway/src/generated/, no '..', no absolute paths; at most 50 files and " +
-      "500,000 characters), commits them to a branch change/c-n and opens one PR on the network's repo for the owner to review.",
+      "500,000 characters), makes the edits, commits the files to a branch change/c-n and opens one PR on the network's repo " +
+      "for the owner to review. If an edit's old text isn't found exactly once, nothing is submitted and the reply says which.",
     input_schema: {
       type: "object",
       properties: {
@@ -418,8 +420,20 @@ export const TOOLS = {
             type: "object",
             properties: {
               path: str("Path from the repo root, e.g. agents/mira.md"),
-              content: str("The file's whole new content"),
-              delete: { type: "boolean", description: "true to delete the file; then omit content" },
+              content: str("A new file's whole content. For an existing file, give edits instead"),
+              edits: {
+                type: "array",
+                description: "Changes to an existing file, made in order: each old must appear exactly once in the file as the earlier edits left it",
+                items: {
+                  type: "object",
+                  properties: {
+                    old: str("The exact text to replace, whitespace included, with enough lines around it to be unique"),
+                    new: str("The text to put in its place; empty to remove it"),
+                  },
+                  required: ["old", "new"],
+                },
+              },
+              delete: { type: "boolean", description: "true to delete the file; then omit content and edits" },
             },
             required: ["path"],
           },

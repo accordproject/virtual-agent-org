@@ -789,3 +789,24 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Not chosen: giving the review to Mandla, who only builds approved changes and starts
   no work of its own (decision 55); or an alert on each error, which can follow if
   weekly proves too slow.
+
+
+**73. Mandla submits edits, and an open PR ends a change task** · RESOLVED
+
+- Two of three architecture changes ran past their $5 session budget. Their sessions
+  showed no error loops; about a quarter of the cost came from `submit_change`, which
+  took every changed file's whole content. A 274-line change meant reading and
+  writing back 188,000 characters across seven files.
+- `submit_change` now takes `edits` for an existing file: each replaces one exact
+  piece of text that appears once in the file. The gateway reads the files at the
+  default branch's head, makes the edits and builds the change on that same commit,
+  so a commit that lands in between isn't undone. If an edit's text isn't found
+  exactly once, nothing is submitted and the reply says which edit. New files still
+  take whole `content`; `delete: true` is unchanged.
+- The budget for large changes stays at $5. Raise it if architecture changes still
+  run over once edits are in use.
+- A change task whose PR is open is done, even if its session runs out of budget or
+  ends afterwards. Before, such a task was marked blocked and Ada was woken for it.
+- Not chosen: raising the budget to $8 and keeping whole files (it pays for the waste
+  instead of removing it), or taking a unified diff (the gateway would need a patch
+  applier, and a diff that doesn't apply is harder to explain to the agent).

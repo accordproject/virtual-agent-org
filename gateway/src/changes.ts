@@ -170,7 +170,39 @@ const GENERATED_CONFIG = "gateway/src/generated/network.json";
 /** The forbidden directory a path is in or names, if any. */
 const forbiddenDir = (path: string) => (path === GENERATED_CONFIG ? undefined : FORBIDDEN.find((dir) => `${path.toLowerCase()}/`.startsWith(dir)));
 
-type ChangeFile = { path: string; content: string | null };
+type Edit = { old: string; new: string };
+/** A file's whole new content, null to delete it, or edits to make to it as it is on the default branch. */
+type ChangeFile = { path: string; content: string | null; edits?: Edit[] };
+
+/** The checked edits for one file, or the problems with them. */
+function editProblems(at: string, raw: unknown): { edits: Edit[]; problems: string[] } {
+  const list = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
+  if (!list.length) return { edits: [], problems: [`${at}: edits needs at least one edit`] };
+  const problems: string[] = [];
+  const edits: Edit[] = [];
+  list.forEach((e, i) => {
+    if (typeof e?.old !== "string" || !e.old) problems.push(`${at}: edit ${i + 1} needs old, the exact text to replace`);
+    else if (typeof e?.new !== "string") problems.push(`${at}: edit ${i + 1} needs new, the replacement text ("" to remove it)`);
+    else if (e.old === e.new) problems.push(`${at}: edit ${i + 1} changes nothing`);
+    else edits.push({ old: e.old, new: e.new });
+  });
+  return { edits, problems };
+}
+
+/**
+ * Makes each edit in turn on `text`. An edit's old text must appear exactly once in the
+ * file as the earlier edits left it; otherwise the problems say which edit and why.
+ */
+export function applyEdits(path: string, text: string, edits: Edit[]): { text: string; problems: string[] } {
+  const problems: string[] = [];
+  edits.forEach((e, i) => {
+    const first = text.indexOf(e.old);
+    if (first < 0) problems.push(`${path}: edit ${i + 1}'s old text isn't in the file on the default branch; copy it exactly, whitespace included`);
+    else if (text.indexOf(e.old, first + 1) >= 0) problems.push(`${path}: edit ${i + 1}'s old text appears more than once; include enough of the lines around it to make it unique`);
+    else text = text.slice(0, first) + e.new + text.slice(first + e.old.length);
+  });
+  return { text, problems };
+}
 
 /** Problems with the files Mandla submitted, one line each; the checked files if none. */
 export function changeFileProblems(input: unknown): { files: ChangeFile[]; problems: string[] } {
@@ -185,18 +217,23 @@ export function changeFileProblems(input: unknown): { files: ChangeFile[]; probl
     const at = path ? path : `files[${i}]`;
     const hasContent = typeof f?.content === "string";
     const del = f?.delete === true;
+    const hasEdits = f?.edits !== undefined && f?.edits !== null;
     if (!path) problems.push(`files[${i}] has an empty path`);
     else if (path.includes("\\")) problems.push(`${at}: use / in paths, not \\`);
     else if (path.startsWith("/")) problems.push(`${at}: give the path from the repo root, not an absolute path`);
     else if (path.includes("..")) problems.push(`${at}: paths may not contain ..`);
     else if (path.split("/").some((seg) => seg === "" || seg === ".")) problems.push(`${at}: give a plain path, without empty or . parts`);
     else if (forbiddenDir(path)) problems.push(`${at}: files under ${forbiddenDir(path)} can't be changed by a submitted change`);
-    if (hasContent === del) problems.push(`${at}: give exactly one of content or delete: true`);
+    if ([hasContent, del, hasEdits].filter(Boolean).length !== 1) problems.push(`${at}: give exactly one of content, edits or delete: true`);
     if (path && seen.has(path)) problems.push(`${path} more than once`);
     seen.add(path);
-    files.push({ path, content: hasContent ? (f.content as string) : null });
+    if (hasEdits && !hasContent && !del) {
+      const checked = editProblems(at, f.edits);
+      problems.push(...checked.problems);
+      files.push({ path, content: null, edits: checked.edits });
+    } else files.push({ path, content: hasContent ? (f.content as string) : null });
   });
-  const chars = files.reduce((n, f) => n + (f.content?.length ?? 0), 0);
+  const chars = files.reduce((n, f) => n + (f.content?.length ?? 0) + (f.edits ?? []).reduce((m, e) => m + e.old.length + e.new.length, 0), 0);
   if (chars > MAX_CHARS) problems.push(`${chars.toLocaleString("en-GB")} characters in all; at most ${MAX_CHARS.toLocaleString("en-GB")}`);
   return { files, problems };
 }
@@ -257,11 +294,33 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
   let pr: { html_url: string; number: number };
   try {
     const gh = await ctx.github();
+    const repo = { owner: ref.owner, repo: ref.repo };
+    // Edits are made to the files at one commit, and the change is built on that commit.
+    let base: string | undefined;
+    const whole: { path: string; content: string | null }[] = [];
+    const unmade: string[] = [];
+    if (files.some((f) => f.edits)) base = (await gh.defaultHead(repo)).sha;
+    for (const f of files) {
+      if (!f.edits) {
+        whole.push({ path: f.path, content: f.content });
+        continue;
+      }
+      const text = await gh.fileText(repo, f.path, base!);
+      if (text === null) {
+        unmade.push(`${f.path}: not on the default branch, so there is nothing to edit; give its whole content instead`);
+        continue;
+      }
+      const done = applyEdits(f.path, text, f.edits);
+      unmade.push(...done.problems);
+      whole.push({ path: f.path, content: done.text });
+    }
+    if (unmade.length) throw new ToolError(`Not submitted. Fix these and call again:\n- ${unmade.join("\n- ")}`);
     pr = await gh.proposeChange(
-      { owner: ref.owner, repo: ref.repo },
+      repo,
       {
         branch: `change/${change.id.toLowerCase()}`,
-        files,
+        files: whole,
+        ...(base ? { base } : {}),
         message: `${title}\n\nChange: ${change.id}\nDecision: ${change.decision_id}\n\nSigned-off-by: ${author.name} <${author.email}>`,
         author,
         title,
@@ -269,6 +328,7 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
       },
     );
   } catch (e) {
+    if (e instanceof ToolError) throw e;
     throw new ToolError(`The PR for ${change.id} wasn't opened: ${e instanceof Error ? e.message : String(e)}. ${change.id} is still building; fix the cause if it is yours and submit again, otherwise report it in report_status.`);
   }
   const at = new Date().toISOString().slice(0, 19).replace("T", " ");
