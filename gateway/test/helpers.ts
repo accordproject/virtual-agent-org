@@ -237,6 +237,15 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
       merged.push({ method, sha });
       return { merged: true, sha: "feedface00" };
     },
+    /** The network repo's files on its default branch, by path, for submit_change's edits. */
+    repoFiles: {} as Record<string, string>,
+    /** Every file read: path and the commit it was read at. */
+    fileReads: [] as { path: string; ref: string }[],
+    defaultHead: async () => ({ branch: "main", sha: "basecommit1" }),
+    fileText: async (_r: RepoRef, path: string, ref: string) => {
+      gh.fileReads.push({ path, ref });
+      return gh.repoFiles[path] ?? null;
+    },
     proposeChange: async (r: RepoRef, change: Parameters<GitHub["proposeChange"]>[1]) => {
       if (gh.failPropose) throw new Error(gh.failPropose);
       proposed.push([r, change]);

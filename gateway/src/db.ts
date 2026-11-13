@@ -1216,11 +1216,12 @@ export class Db {
   }
 
   /** What a session's last report_status listed as blocked, or null if it never reported. */
-  async sessionBlockers(sessionId: string): Promise<string[] | null> {
-    const r = await this.db
-      .prepare("SELECT blocked FROM statuses WHERE session_id = ? ORDER BY id DESC LIMIT 1")
-      .bind(sessionId)
-      .first<{ blocked: string }>();
+  /** The blockers in a session's latest status report, if any; with `since`, only a report made then or later counts. */
+  async sessionBlockers(sessionId: string, since?: string): Promise<string[] | null> {
+    const r = await (since
+      ? this.db.prepare("SELECT blocked FROM statuses WHERE session_id = ? AND created_at >= ? ORDER BY id DESC LIMIT 1").bind(sessionId, since)
+      : this.db.prepare("SELECT blocked FROM statuses WHERE session_id = ? ORDER BY id DESC LIMIT 1").bind(sessionId)
+    ).first<{ blocked: string }>();
     return r ? (JSON.parse(r.blocked) as string[]) : null;
   }
 

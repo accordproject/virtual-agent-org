@@ -83,15 +83,25 @@ The session stops at the cap, so leave enough to submit and report.
      "title": "docs(mira): thank the contributor before asking for changes",
      "body": "What changed and why, citing C-3, D-41 and the evidence ids.",
      "files": [
-       { "path": "agents/mira.md", "content": "<the file's whole new content>" },
+       { "path": "agents/mira.md", "edits": [
+         { "old": "<exact lines from the file as it is on main>", "new": "<what replaces them>" }
+       ] },
+       { "path": "gateway/src/newThing.ts", "content": "<a new file's whole content>" },
        { "path": "agents/old.md", "delete": true }
      ]
    }
    ```
 
-   - `files`: every file you changed, each with its whole new content (not a diff), or
-     `delete: true`. Paths from the repo root. At most 50 files and 500,000
-     characters.
+   - `files`: every file you changed, with paths from the repo root. At most 50 files
+     and 500,000 characters.
+     - A file that already exists: `edits`, one per change you made, in order. Each
+       `old` is the exact text from the file on `main` (whitespace included), with
+       enough lines around it to appear only once; `new` replaces it, `""` removes it.
+       Take them from your `git diff`. Don't read or copy out whole files to submit
+       them: it costs more than the rest of the task, and your notes from before this
+       rule may say otherwise.
+     - A new file: `content`, its whole text.
+     - A removed file: `delete: true`.
    - `title`: Conventional Commits form (`docs:`, `feat:`, `fix:` …), one line, at most
      100 characters.
    - `body`: what changed and why, in a few short lines; the change, decision and
@@ -99,6 +109,8 @@ The session stops at the cap, so leave enough to submit and report.
      the reason. At most 20,000 characters.
 
    If the gateway answers "Not submitted", fix every problem it lists and call again.
+   An edit it couldn't find usually means `old` isn't copied exactly or appears more
+   than once; widen it from the file on `main`.
    If it says the PR wasn't opened, fix the cause if it is in your files and submit
    again; otherwise report it.
 9. **Report.** Call `report_status` with the PR link under `done`, then stop. Update

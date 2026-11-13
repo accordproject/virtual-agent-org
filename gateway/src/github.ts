@@ -248,17 +248,43 @@ export class GitHub {
     });
   }
 
-  /**
-   * Several files in one commit on a new branch from the default branch, then a PR. A null
-   * content deletes the file. A branch left by an earlier failed attempt is moved to the new commit.
-   */
-  async proposeChange(
-    r: RepoRef,
-    p: { branch: string; files: { path: string; content: string | null }[]; message: string; author: { name: string; email: string }; title: string; body: string },
-  ): Promise<{ html_url: string; number: number }> {
+  /** The default branch and the commit at its head. */
+  async defaultHead(r: RepoRef): Promise<{ branch: string; sha: string }> {
     const base = `/repos/${r.owner}/${r.repo}`;
     const repo = await this.call<{ default_branch: string }>("GET", base);
     const head = (await this.call<{ object: { sha: string } }>("GET", `${base}/git/ref/heads/${repo.default_branch}`)).object.sha;
+    return { branch: repo.default_branch, sha: head };
+  }
+
+  /** A text file's content at a commit, or null if there is no such file. */
+  async fileText(r: RepoRef, path: string, ref: string): Promise<string | null> {
+    let f: { type?: string; encoding?: string; content?: string };
+    try {
+      f = await this.call("GET", `/repos/${r.owner}/${r.repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`);
+    } catch (e) {
+      if (/: 404 /.test(String(e))) return null;
+      throw e;
+    }
+    if (f.type !== "file") return null;
+    // Files over 1 MB come back without content; none of the network's files are that large.
+    if (f.encoding !== "base64" || typeof f.content !== "string") throw new Error(`${path} is too large to read through the contents API`);
+    const bin = atob(f.content.replace(/\n/g, ""));
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  }
+
+  /**
+   * Several files in one commit on a new branch from the default branch, then a PR. A null
+   * content deletes the file. A branch left by an earlier failed attempt is moved to the new commit.
+   * `base` builds on that commit instead of the branch's current head: the one the
+   * files were read at, so a commit that lands in between can't be undone by this one.
+   */
+  async proposeChange(
+    r: RepoRef,
+    p: { branch: string; files: { path: string; content: string | null }[]; message: string; author: { name: string; email: string }; title: string; body: string; base?: string },
+  ): Promise<{ html_url: string; number: number }> {
+    const base = `/repos/${r.owner}/${r.repo}`;
+    const repo = await this.call<{ default_branch: string }>("GET", base);
+    const head = p.base ?? (await this.call<{ object: { sha: string } }>("GET", `${base}/git/ref/heads/${repo.default_branch}`)).object.sha;
     const commit = await this.call<{ tree: { sha: string } }>("GET", `${base}/git/commits/${head}`);
     const tree = await this.call<{ sha: string }>("POST", `${base}/git/trees`, {
       base_tree: commit.tree.sha,
