@@ -113,11 +113,11 @@ export class GitHub {
     return items.filter((i) => Date.parse(i.created_at) >= Date.parse(since)).map((i) => ({ number: i.number, pr: !!i.pull_request }));
   }
 
-  /** Whether a PR or issue is open, closed or merged, and which it is; the issues endpoint answers for both. */
-  async issueState(r: Required<RepoRef>): Promise<{ state: "open" | "closed" | "merged"; pr: boolean }> {
-    const i = await this.call<{ state: string; pull_request?: { merged_at: string | null } }>("GET", `/repos/${r.owner}/${r.repo}/issues/${r.number}`);
+  /** Whether a PR or issue is open, closed or merged, which it is, and who opened it; the issues endpoint answers for both. */
+  async issueState(r: Required<RepoRef>): Promise<{ state: "open" | "closed" | "merged"; pr: boolean; author: string | null }> {
+    const i = await this.call<{ state: string; pull_request?: { merged_at: string | null }; user?: { login: string } | null }>("GET", `/repos/${r.owner}/${r.repo}/issues/${r.number}`);
     const state = i.state === "open" ? "open" : i.pull_request?.merged_at ? "merged" : "closed";
-    return { state, pr: !!i.pull_request };
+    return { state, pr: !!i.pull_request, author: i.user?.login ?? null };
   }
 
   async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {

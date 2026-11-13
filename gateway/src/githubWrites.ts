@@ -16,6 +16,7 @@ const AUTO_REASONS: Record<string, string> = {
   "github.review": "review post",
   "github.approve_ci": "CI approval",
   "github.rerun_ci": "CI re-run",
+  "github.first_response": "first response",
 };
 
 export function autoReason(kind: string): string {

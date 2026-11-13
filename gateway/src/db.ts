@@ -2,7 +2,7 @@
 
 import type { Tokens } from "./managed";
 
-/** lapsed: the gateway closed it because GitHub moved on, e.g. the PR merged or got new commits (decision 62). */
+/** lapsed: the gateway closed it because GitHub moved on, e.g. the PR merged or got new commits (decision 62), or the agent redrafted it (decision 78). */
 export type DecisionStatus = "open" | "approved" | "rejected" | "executed" | "failed" | "lapsed";
 export type AgentStatus = "active" | "paused" | "stopped" | "revoked";
 

@@ -281,6 +281,55 @@ const githubComment: ActionSpec = {
   },
 };
 
+/** How the gateway signs a first response it posts without Matt (decision 78). */
+export const FIRST_RESPONSE_FOOTER =
+  "<sub>Posted automatically by Mira, an Accord Project agent. A maintainer will follow up; they make the decisions on this.</sub>";
+// Text agents are told to sign public drafts with; untrue on a comment nobody approved.
+const APPROVED_LABEL = /\n*(?:-{3,}\s*)?\n*(?:<sub>)?\s*Drafted by an Accord Project agent, reviewed by a maintainer\.?\s*(?:<\/sub>)?\s*$/i;
+// Signs of an unfinished draft (D-229 posted "Thanks for this, @… placeholder").
+const DRAFT_MARKER = /\b(placeholder|lorem ipsum|TODO|TBD|FIXME|XXX)\b|<(?:[A-Z][A-Z _-]{2,})>|\[(?:insert|add|your|name|link)\b[^\]]*\]/;
+const FIRST_RESPONSE_MIN = 80;
+const FIRST_RESPONSE_MAX = 4_000;
+
+/** Problems with a first response's text that the gateway can see without GitHub. Code is ignored. */
+export function firstResponseProblems(text: string): string[] {
+  const problems: string[] = [];
+  const prose = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+  if (text.length < FIRST_RESPONSE_MIN) problems.push(`payload.text is under ${FIRST_RESPONSE_MIN} characters: say what happens next, not only thanks`);
+  const marker = prose.match(DRAFT_MARKER);
+  if (marker) problems.push(`payload.text looks unfinished ("${marker[0]}"): finish the draft`);
+  if (/reviewed by a maintainer/i.test(prose)) problems.push("payload.text says a maintainer reviewed it, and nobody does: leave the label off, the gateway signs it");
+  const end = prose.trimEnd().slice(-1);
+  if (end && !/[.!?)\]*_>]/.test(end)) problems.push(`payload.text ends mid-sentence ("…${prose.trimEnd().slice(-30)}"): finish it`);
+  return problems;
+}
+
+/**
+ * Mira's first response to a new PR or issue (decision 78). Auto: posted without a
+ * card once the gateway's checks pass (tools.ts), or queued for Matt like a comment
+ * when they can't apply. The gateway, not the draft, says who wrote it.
+ */
+const githubFirstResponse: ActionSpec = {
+  executor: "github",
+  validate(ctx, target, payload) {
+    const f = new Fields(payload);
+    const ref = repoTarget(ctx, target, f.problems, "required");
+    const text = f.text("text", { required: true, aliases: TEXT_ALIASES.slice(1), max: FIRST_RESPONSE_MAX })?.replace(APPROVED_LABEL, "").trim();
+    if (text !== undefined) f.problems.push(...firstResponseProblems(text));
+    f.done();
+    return { target: refString(ref!), payload: { text } };
+  },
+  describe(target, p) {
+    const text = pick(p, TEXT_ALIASES);
+    return withRest({ lines: [`First response on: ${target}, as the project bot`], blocks: text ? [{ title: "Comment", text }] : [] }, p, pickKey(p, TEXT_ALIASES));
+  },
+  async execute(ctx, d, { target, payload }) {
+    if (ctx.dryRun) return { ok: true, result: `DRY RUN: would ${d.kind} ${target}` };
+    const c = await (await ctx.github()).comment(parseTarget(target) as Required<RepoRef>, `${payload.text as string}\n\n---\n${FIRST_RESPONSE_FOOTER}`);
+    return { ok: true, result: `Commented: ${c.html_url}` };
+  },
+};
+
 const NOTES_ALIASES = ["body", "text", "notes"];
 const COMMITISH_ALIASES = ["commitish", "target_commitish", "target"];
 
@@ -913,6 +962,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
   "github.merge": githubMerge,
   "github.close": githubClose,
   "github.comment": githubComment,
+  "github.first_response": githubFirstResponse,
   "github.release": githubRelease,
   "github.approve_ci": githubApproveCi,
   "github.rerun_ci": githubRerunCi,

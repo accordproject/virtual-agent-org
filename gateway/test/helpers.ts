@@ -54,6 +54,7 @@ export const NETWORK: NetworkConfig = {
   action_kinds: {
     "github.merge": { risk: "medium", executor: "github" },
     "github.comment": { risk: "low", executor: "github" },
+    "github.first_response": { risk: "low", executor: "github", auto: true },
     "discord.announce": { risk: "medium", executor: "discord" },
     "discord.ops": { risk: "low", executor: "discord_ops" },
     "vimeo.publish": { risk: "medium", executor: "vimeo" },
@@ -82,7 +83,7 @@ export const NETWORK: NetworkConfig = {
   ],
   agents: {
     ada: { name: "ada", title: "Chief of Staff", phase: 1, requestable: ["spec.change"], tasks: { follow_up: { model: "claude-sonnet-5-5", effort: "low" } } },
-    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.approve_ci", "github.rerun_ci", "discord.ops", "linkedin.post"],
+    mira: { name: "mira", title: "Maintainer Desk", phase: 1, requestable: ["github.merge", "github.comment", "github.first_response", "github.approve_ci", "github.rerun_ci", "discord.ops", "linkedin.post"],
       model: "claude-sonnet-5-5",
       effort: "medium",
       tasks: {
@@ -206,7 +207,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
       if (gh.failOpened) throw new Error(gh.failOpened);
       return gh.opened[`${r.owner}/${r.repo}`] ?? [];
     },
-    issueState: async () => ({ state: p.state === "OPEN" ? "open" : p.state === "MERGED" ? "merged" : "closed", pr: true }),
+    issueState: async () => ({ state: p.state === "OPEN" ? "open" : p.state === "MERGED" ? "merged" : "closed", pr: true, author: p.author }),
     /** The repo the PR's branch lives in: the base repo for a bot's branch, a fork otherwise. */
     headRepo: "contrib/concerto",
     pull: async () => ({

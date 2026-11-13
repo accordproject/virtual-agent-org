@@ -151,7 +151,8 @@ describe("Ada deciding for Matt (decision 52)", () => {
     await comment(T);
     await comment("accordproject/concerto#13");
     await expect(decide(ctx, "D-1", "rejected")).rejects.toThrow(/no later decision from Mira for accordproject\/concerto#12/);
-    await comment(T);
+    // A second comment would replace D-1 by itself (decision 78), so supersede it with another kind.
+    await ctx.db.createDecision({ agent: "mira", kind: "github.close", target: T, summary: "s", rationale: "r", risk: "low", payload: { text: "t" } });
     expect(await decide(ctx, "D-1", "rejected", "D-3 has the corrected text")).toMatch(/^D-1 rejected/);
     expect(await ctx.db.getDecision("D-1")).toMatchObject({ status: "rejected", note: "Superseded by D-3. Decided by Ada: D-3 has the corrected text" });
     await expect(decide(ctx, "D-3", "rejected")).rejects.toThrow(/isn't superseded/);
