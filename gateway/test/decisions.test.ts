@@ -430,6 +430,57 @@ describe("send_to_matt re-sends decision cards (C-4)", () => {
   });
 });
 
+describe("send_to_matt DMs the weekly update to Matt on Discord as a file (decision 79)", () => {
+  const deck = "---\nmarp: true\n---\n\n# Weekly update\n\n---\n\n# Summary";
+
+  it("sends the text on Telegram, the Markdown file on Discord, and audits it", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_dep", agent: "ada", origin: "deployment" });
+    const out = await handleTool(ctx, "ada", "sesn_dep", "send_to_matt", {
+      text: "Weekly update: summary",
+      document: { filename: "weekly-update-2026-w46.md", content: deck },
+    });
+    expect(out).toBe("Sent the message and weekly-update-2026-w46.md.");
+    expect(fakes.sent.map((m) => m.text)).toEqual(["Weekly update: summary"]);
+    expect(fakes.documents).toEqual([{ user: ctx.ownerDiscordId, filename: "weekly-update-2026-w46.md", file: deck, content: "Ada: weekly-update-2026-w46.md" }]);
+    const row: any = await (ctx.db as any).db.prepare("SELECT agent, detail FROM audit WHERE event_type = 'discord.document_sent'").first();
+    expect(row.agent).toBe("ada");
+    expect(JSON.parse(row.detail)).toEqual({ filename: "weekly-update-2026-w46.md", chars: deck.length });
+  });
+
+  it("sends a file in a conversation, where text is refused", async () => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_chat", agent: "ada", origin: "telegram", chat_id: 42 });
+    const out = await handleTool(ctx, "ada", "sesn_chat", "send_to_matt", { document: { filename: "weekly-update-2026-w46.md", content: deck } });
+    expect(out).toBe("Sent weekly-update-2026-w46.md.");
+    expect(fakes.sent).toHaveLength(0);
+    expect(fakes.documents).toHaveLength(1);
+  });
+
+  it("refuses a file when Matt has no Discord id, before sending the text", async () => {
+    const { ctx, fakes } = makeTestCtx({ ownerDiscordId: undefined });
+    await ctx.db.upsertSession({ id: "sesn_dep", agent: "ada", origin: "deployment" });
+    await expect(
+      handleTool(ctx, "ada", "sesn_dep", "send_to_matt", { text: "Weekly update", document: { filename: "weekly-update-2026-w46.md", content: deck } }),
+    ).rejects.toThrow(/Discord isn't set up/);
+    expect(fakes.sent).toHaveLength(0);
+    expect(fakes.documents).toHaveLength(0);
+  });
+
+  it.each([
+    ["an unsafe file name", { filename: "../secrets.md", content: deck }, /filename must be/],
+    ["a file that isn't Markdown", { filename: "update.html", content: deck }, /filename must be/],
+    ["an upper-case file name", { filename: "weekly-update-2026-W46.md", content: deck }, /filename must be/],
+    ["a deck over the limit", { filename: "weekly-update-2026-w46.md", content: "x".repeat(20001) }, /20001 characters; at most 20000/],
+  ])("refuses %s and sends nothing", async (_, document, error) => {
+    const { ctx, fakes } = makeTestCtx();
+    await ctx.db.upsertSession({ id: "sesn_dep", agent: "ada", origin: "deployment" });
+    await expect(handleTool(ctx, "ada", "sesn_dep", "send_to_matt", { text: "Weekly update", document })).rejects.toThrow(error);
+    expect(fakes.sent).toHaveLength(0);
+    expect(fakes.documents).toHaveLength(0);
+  });
+});
+
 describe("spec.change cards", () => {
   it("the spec.change card shows type, problem, change, evidence and measure", async () => {
     const { ctx } = makeTestCtx({ network: { ...NETWORK, self_improvement: { ...NETWORK.self_improvement!, since: "2026-01-01" } } });

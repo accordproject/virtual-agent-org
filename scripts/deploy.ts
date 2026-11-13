@@ -24,6 +24,11 @@ const ROTATE = process.argv.includes("--rotate-credentials");
 const STATE_PATH = join(ROOT, "gateway/src/generated/deployed.json");
 /** Where evaluation/rubric.md goes in the shared memory store; agents/ada.md names the mounted path. */
 const RUBRIC_PATH = "/reference/rubric.md";
+/** The weekly update's instructions and example in the shared memory store (decision 79); reports/weekly-update.md names the mounted paths. */
+const WEEKLY_UPDATE_FILES: [string, string][] = [
+  ["/reference/weekly-update.md", "reports/weekly-update.md"],
+  ["/reference/weekly-update-example.md", "reports/weekly-update-example.md"],
+];
 /** Where skills/pr-review/SKILL.md goes in the shared memory store; Mira's spec and the review check's brief name the mounted path. */
 const PR_REVIEW_SKILL_PATH = "/reference/skills/pr-review.md";
 
@@ -169,6 +174,11 @@ async function ensureSharedMemory() {
       client.upsertMemory(state.shared_memory_store_id!, RUBRIC_PATH, readText("evaluation/rubric.md")),
     );
     if (rubric) console.log(`  ${rubric.updated ? "updated" : "created"} ${rubric.id}`);
+    // The weekly update's instructions and example, read only on Fridays, for the same reason.
+    for (const [path, file] of WEEKLY_UPDATE_FILES) {
+      const r = await step(`write ${path}`, {}, () => client.upsertMemory(state.shared_memory_store_id!, path, readText(file)));
+      if (r) console.log(`  ${r.updated ? "updated" : "created"} ${r.id}`);
+    }
     // Mira's review method: read at the start of each review, so triage passes don't pay for it.
     const skill = await step(`write ${PR_REVIEW_SKILL_PATH}`, {}, () =>
       client.upsertMemory(state.shared_memory_store_id!, PR_REVIEW_SKILL_PATH, readText("skills/pr-review/SKILL.md")),

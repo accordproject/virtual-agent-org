@@ -30,6 +30,15 @@ schedules:
       Record each evaluation with record_evaluation and raise at most one spec.change
       request per agent, following "Proposing a change" in your instructions.
 
+  - name: ada-weekly-update
+    agent: ada
+    cron: "0 16 * * 2"          # Tuesdays 16:00: the deck is in hand before Wednesday's Tech WG (13:00 London)
+    task: weekly_update         # models.yaml
+    budget_usd: 2.00
+    prompt: >
+      Write and send this week's weekly update deck, following "Weekly update" in your
+      instructions.
+
   - name: mira-triage
     agent: mira
     cron: "0 8 * * *"           # daily; the gateway adds passes when PRs or issues are opened (network.yaml triage_checks)

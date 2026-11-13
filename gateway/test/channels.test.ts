@@ -58,6 +58,29 @@ describe("fetch binding (Workers rejects fetch called with another `this`)", () 
       globalThis.fetch = real;
     }
   });
+
+  it("DMs a file on Discord as a multipart attachment, with no mentions (decision 79)", async () => {
+    const { DiscordBot } = await import("../src/discordBot");
+    const calls: { url: string; init: any }[] = [];
+    const fetchImpl = (async (url: string, init: any) => {
+      calls.push({ url, init });
+      const id = url.endsWith("/users/@me/channels") ? "dm1" : "m9";
+      return new Response(JSON.stringify({ id }));
+    }) as unknown as typeof fetch;
+    const out = await new DiscordBot("tok", "app", fetchImpl).dmFile("111", "weekly-update-2026-w46.md", "# Deck", "Ada: weekly-update-2026-w46.md");
+    expect(out).toEqual({ channelId: "dm1", messageId: "m9" });
+    expect(calls[1].url).toBe("https://discord.com/api/v10/channels/dm1/messages");
+    expect(calls[1].init.headers["content-type"]).toBeUndefined();
+    const form = calls[1].init.body as FormData;
+    expect(JSON.parse(form.get("payload_json") as string)).toEqual({
+      content: "Ada: weekly-update-2026-w46.md",
+      attachments: [{ id: 0, filename: "weekly-update-2026-w46.md" }],
+      allowed_mentions: { parse: [] },
+    });
+    const file = form.get("files[0]") as File;
+    expect(file.name).toBe("weekly-update-2026-w46.md");
+    expect(await file.text()).toBe("# Deck");
+  });
 });
 
 describe("discord announcements", () => {

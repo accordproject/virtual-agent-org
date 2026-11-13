@@ -26,6 +26,14 @@
       "budget_cents": 300
     },
     {
+      "name": "ada-weekly-update",
+      "agent": "ada",
+      "cron": "0 16 * * 2",
+      "task": "weekly_update",
+      "prompt": "Write and send this week's weekly update deck, following \"Weekly update\" in your instructions.",
+      "budget_cents": 200
+    },
+    {
       "name": "mira-triage",
       "agent": "mira",
       "cron": "0 8 * * *",
@@ -365,6 +373,10 @@
       "tasks": {
         "evaluation": {
           "model": "claude-opus-5-5",
+          "effort": "medium"
+        },
+        "weekly_update": {
+          "model": "claude-sonnet-5-5",
           "effort": "medium"
         },
         "follow_up": {

@@ -295,6 +295,7 @@ export function fakeGitHub(pr: Partial<FakePr> = {}) {
 
 export interface Fakes {
   sent: { chatId: number; text: string; opts?: unknown }[];
+  documents: { user: string; filename: string; file: string; content: string }[];
   discord: string[];
   ops: { text: string; ids: string[] }[];
   dms: { user: string; content: string; buttons?: unknown[]; embeds?: { title?: string; description: string }[] }[];
@@ -306,11 +307,15 @@ export interface Fakes {
 }
 
 export function makeTestCtx(overrides: Partial<Ctx> = {}): { ctx: Ctx; fakes: Fakes } {
-  const fakes: Fakes = { sent: [], discord: [], ops: [], dms: [], dcEdits: [], originals: [], calls: [], events: {}, sessions: {} };
+  const fakes: Fakes = { sent: [], documents: [], discord: [], ops: [], dms: [], dcEdits: [], originals: [], calls: [], events: {}, sessions: {} };
   let dmId = 0;
   const dc = {
     dm: async (user: string, p: { content: string; buttons?: unknown[]; embeds?: any[] }) => {
       fakes.dms.push({ user, ...p });
+      return { channelId: `dm-${user}`, messageId: `m${++dmId}` };
+    },
+    dmFile: async (user: string, filename: string, file: string, content: string) => {
+      fakes.documents.push({ user, filename, file, content });
       return { channelId: `dm-${user}`, messageId: `m${++dmId}` };
     },
     edit: async (channelId: string, messageId: string, p: { content: string; buttons?: unknown[] }) => {

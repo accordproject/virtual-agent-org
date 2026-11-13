@@ -89,6 +89,26 @@ export class DiscordBot {
     return { channelId, messageId };
   }
 
+  /** DMs a text file as an attachment, with a short message and no mentions. Returns where it landed. */
+  async dmFile(userId: string, filename: string, file: string, content: string): Promise<{ channelId: string; messageId: string }> {
+    const channelId = await this.dmChannel(userId);
+    const form = new FormData();
+    form.append(
+      "payload_json",
+      JSON.stringify({ content: content.slice(0, LIMIT), attachments: [{ id: 0, filename }], allowed_mentions: { parse: [] } }),
+    );
+    form.append("files[0]", new Blob([file], { type: "text/markdown" }), filename);
+    // Multipart, so no JSON content-type: fetch sets the boundary itself.
+    const res = await this.fetchImpl(`${API}/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: { authorization: `Bot ${this.token}`, "user-agent": "DiscordBot (https://github.com/accordproject/virtual-agent-org, 1)" },
+      body: form,
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Discord POST /channels/${channelId}/messages: ${res.status} ${text.slice(0, 200)}`);
+    return { channelId, messageId: (JSON.parse(text) as { id: string }).id };
+  }
+
   /** Posts an agent's approved message to a channel. Returns how many messages were sent. */
   async post(channelId: string, text: string, mentionIds: string[] = []): Promise<number> {
     const { chunks, allowed_mentions } = composePost(text, mentionIds);

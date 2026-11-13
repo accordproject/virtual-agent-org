@@ -17,7 +17,7 @@ import {
 } from "./review";
 import { maxRisk, toRisk, type Risk } from "./risk";
 import { schemaProblems } from "./schema";
-import { MAX_RESENT_CARDS, READS_ALL_DECISIONS, TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
+import { MAX_DOCUMENT_CHARS, MAX_RESENT_CARDS, READS_ALL_DECISIONS, TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
 import { isTechWg } from "./vimeo";
 
 export class ToolError extends Error {}
@@ -224,8 +224,20 @@ const HANDLERS: Record<ToolName, Handler> = {
   send_to_matt: async (ctx, { agent, sessionId, input }) => {
     const text = s(input.text, "text", false);
     const ids = [...new Set(list(input.decision_ids).map((id) => id.trim().toUpperCase()))];
-    if (!text && !ids.length) throw new ToolError("text is required, unless you give decision_ids");
+    const doc = input.document as { filename?: unknown; content?: unknown } | undefined;
+    const document = doc ? { filename: s(doc.filename, "document.filename"), content: s(doc.content, "document.content") } : null;
+    if (!text && !ids.length && !document) throw new ToolError("text is required, unless you give decision_ids or a document");
     if (ids.length > MAX_RESENT_CARDS) throw new ToolError(`At most ${MAX_RESENT_CARDS} decision_ids per call; you gave ${ids.length}.`);
+    if (document) {
+      if (!/^[a-z0-9][a-z0-9-]{0,79}\.md$/.test(document.filename)) {
+        throw new ToolError("Nothing sent. document.filename must be lower-case letters, digits and hyphens, ending .md, e.g. weekly-update-2026-11-18.md.");
+      }
+      if (document.content.length > MAX_DOCUMENT_CHARS) {
+        throw new ToolError(`Nothing sent. document.content is ${document.content.length} characters; at most ${MAX_DOCUMENT_CHARS}. Cut slides rather than splitting it.`);
+      }
+      // The file goes to Matt's Discord DMs (decision 79): refuse before anything is sent.
+      if (!ctx.dc || !ctx.ownerDiscordId) throw new ToolError("Nothing sent. Discord isn't set up for Matt (OWNER_DISCORD_ID), so the document can't go out; tell him in a message.");
+    }
     const row = await ctx.db.getSession(sessionId);
     if (text && (row?.chat_id || row?.discord_user)) {
       // Matt is already in this conversation and gets her reply: sending as well duplicates it.
@@ -245,9 +257,17 @@ const HANDLERS: Record<ToolName, Handler> = {
     if (problems.length) throw new ToolError(`Nothing sent. Only open decisions can be re-sent:\n- ${problems.join("\n- ")}`);
     // Recorded, so replying to it in Telegram reaches this session.
     if (text) await sendAgentMessage(ctx, { telegram: ctx.ownerChatId }, { agent, sessionId }, text);
+    // A file in Matt's Discord DMs, not a message: a deck doesn't fit a message's limit.
+    if (document) {
+      const name = agent.charAt(0).toUpperCase() + agent.slice(1);
+      await ctx.dc!.dmFile(ctx.ownerDiscordId!, document.filename, document.content, `${name}: ${document.filename}`);
+      await ctx.db.audit({ agent, event_type: "discord.document_sent", detail: { filename: document.filename, chars: document.content.length } });
+    }
     // The same card and buttons as the original; answering either decides the same decision.
     for (const d of cards) await resendDecisionCard(ctx, d);
-    return cards.length ? `Sent${text ? " the message and" : ""} ${cards.length} card${cards.length === 1 ? "" : "s"}: ${cards.map((d) => d.id).join(", ")}.` : "Sent.";
+    const sent = [text && "the message", document && document.filename].filter(Boolean).join(" and ");
+    if (cards.length) return `Sent${sent ? ` ${sent} and` : ""} ${cards.length} card${cards.length === 1 ? "" : "s"}: ${cards.map((d) => d.id).join(", ")}.`;
+    return document ? `Sent ${sent}.` : "Sent.";
   },
 
   vimeo_recordings: async (ctx, { input }) => {
