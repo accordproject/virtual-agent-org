@@ -163,6 +163,10 @@ const MAX_FILES = 50;
 const MAX_CHARS = 500_000;
 const MAX_TITLE = 100;
 const MAX_BODY = 20_000;
+/** The plain summary that opens each change PR: a short paragraph for a reader who knows none of the network's ids. */
+const MAX_SUMMARY = 600;
+/** The network's internal ids (C-3, D-41, T-115, P5-80), which a plain summary leaves to the details. */
+const INTERNAL_ID = /\b(?:[CDT]|P\d+)-\d+\b/;
 const CONVENTIONAL = /^(feat|fix|docs|chore|test|refactor|perf|build|ci|style|revert)(\([\w.\/-]+\))?!?: \S/;
 /** Paths Mandla may never write: CI and the deploy run, and files compile.ts generates. */
 const FORBIDDEN = [".github/", "gateway/src/generated/"];
@@ -239,11 +243,19 @@ export function changeFileProblems(input: unknown): { files: ChangeFile[]; probl
   return { files, problems };
 }
 
-/** The PR description: the gateway's header, then Mandla's own body. A fix-up PR names the PR it fixes. */
-function prBody(change: Change, decision: Decision | null, body: string, fixUpOf?: string): string {
+/**
+ * The PR description: Mandla's plain summary first, so the owner reads what the PR is for
+ * before any ids, then the gateway's header, then Mandla's detailed body. A fix-up PR
+ * names the PR it fixes.
+ */
+function prBody(change: Change, decision: Decision | null, summary: string, body: string, fixUpOf?: string): string {
   const p = safeJson(decision?.payload);
   const evidence = Array.isArray(p.evidence) ? p.evidence.join(", ") : "none recorded";
   return [
+    summary,
+    "",
+    "---",
+    "",
     `Change: ${change.id}`,
     `Decision: ${change.decision_id}`,
     `Evidence: ${evidence}`,
@@ -252,10 +264,26 @@ function prBody(change: Change, decision: Decision | null, body: string, fixUpOf
     "",
     "Built by Mandla; needs the owner's review like any other PR.",
     "",
-    "## Change",
+    "## Details",
     "",
     body,
   ].join("\n");
+}
+
+/**
+ * What's wrong with a change's plain summary: it is required, one paragraph (a line break
+ * could also forge trailers in the commit message), short, and free of internal ids.
+ */
+export function summaryProblems(raw: unknown): string[] {
+  const text = typeof raw === "string" ? raw : "";
+  const summary = text.trim();
+  if (!summary) return ["summary is required: one short paragraph in plain words saying what problem this fixes and what the PR does about it"];
+  const problems: string[] = [];
+  if (/[\u0000-\u001f\u007f]/.test(text)) problems.push("summary must be one paragraph, without line breaks or control characters");
+  if (summary.length > MAX_SUMMARY) problems.push(`summary is ${summary.length} characters; at most ${MAX_SUMMARY}`);
+  const id = summary.match(INTERNAL_ID)?.[0];
+  if (id) problems.push(`summary mentions ${id}: write it for someone who knows none of the network's ids, and put ids in body`);
+  return problems;
 }
 
 /** What a submission does in each state of its change (C-10); none in the others. */
@@ -284,12 +312,14 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
   if (mode !== "open" && !change.pr_url) throw new ToolError(`${change.id} has no PR on record to follow up. Report it in report_status.`);
 
   const title = String(input.title ?? "").trim();
+  const summary = String(input.summary ?? "").trim();
   const body = String(input.body ?? "").trim();
   const { files, problems } = changeFileProblems(input.files);
   // Checked on the raw input: a newline would let the title forge trailers in the commit message.
   if (/[\u0000-\u001f\u007f]/.test(String(input.title ?? ""))) problems.unshift("title must be one line, without control characters");
   else if (!CONVENTIONAL.test(title)) problems.unshift("title must be in Conventional Commits form, e.g. docs(mira): thank the contributor first");
   if (title.length > MAX_TITLE) problems.unshift(`title is ${title.length} characters; at most ${MAX_TITLE}`);
+  problems.push(...summaryProblems(input.summary));
   if (!body) problems.push("body is required");
   if (body.length > MAX_BODY) problems.push(`body is ${body.length.toLocaleString("en-GB")} characters; at most ${MAX_BODY.toLocaleString("en-GB")}`);
   if (problems.length) throw new ToolError(`Not submitted. Fix these and call again:\n- ${problems.join("\n- ")}`);
@@ -346,7 +376,7 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
     }
     if (unmade.length) throw new ToolError(`Not submitted. Fix these and call again:\n- ${unmade.join("\n- ")}`);
     const followsUp = task.follows_up ? `\nFollows up: ${task.follows_up}` : "";
-    const message = `${title}\n\nChange: ${change.id}\nDecision: ${change.decision_id}${followsUp}\n\nSigned-off-by: ${author.name} <${author.email}>`;
+    const message = `${title}\n\n${summary}\n\nChange: ${change.id}\nDecision: ${change.decision_id}${followsUp}\n\nSigned-off-by: ${author.name} <${author.email}>`;
     if (mode === "push") {
       commit = (await gh.commitToBranch(repo, { branch, base: base!, files: whole, message, author })).sha;
       pr = { html_url: change.pr_url!, number: prNumber(change.pr_url) };
@@ -358,7 +388,7 @@ export async function submitChange(ctx: Ctx, agent: string, sessionId: string, i
         message,
         author,
         title,
-        body: prBody(change, decision, body, mode === "fix_up" ? (change.pr_url ?? undefined) : undefined),
+        body: prBody(change, decision, summary, body, mode === "fix_up" ? (change.pr_url ?? undefined) : undefined),
       });
     }
   } catch (e) {

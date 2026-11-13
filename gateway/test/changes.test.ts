@@ -32,6 +32,8 @@ const run = (ctx: Ctx, q: string, ...args: unknown[]) => (ctx.db as any).db.prep
 /** Moves a decision's request back `days`, out of the one-proposal-a-week window. */
 const backdate = (ctx: Ctx, id: string, days = 8) => run(ctx, "UPDATE decisions SET created_at = datetime('now', ?) WHERE id = ?", `-${days} days`, id);
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+/** A plain summary for submit_change: what went wrong, then what the PR does. */
+const SUMMARY = "Mira asked new contributors for changes before thanking them. This has her thank them first.";
 
 /** A test network with the loop switched on at `since`, and Mandla deployed. */
 function loopCtx(since: string | null = isoDay(Date.now() - 30 * DAY), overrides: Partial<Ctx> = {}) {
@@ -292,6 +294,7 @@ describe("submit_change", () => {
   const INPUT = {
     change: "C-1",
     title: "docs(mira): thank the contributor first",
+    summary: SUMMARY,
     body: "Adds a line to step 3 of Mira's spec.",
     files: [{ path: "agents/mira.md", content: "# Mira\n" }],
   };
@@ -342,6 +345,22 @@ describe("submit_change", () => {
     }
   });
 
+  it("submit_change needs a short plain summary, without ids or line breaks", async () => {
+    const { ctx, session, gh } = await building();
+    for (const summary of [undefined, "", "   "]) await expect(submit(ctx, session, { summary })).rejects.toThrow(/summary is required/);
+    await expect(submit(ctx, session, { summary: "x".repeat(601) })).rejects.toThrow(/summary is 601 characters; at most 600/);
+    for (const [summary, id] of [["Fixes what C-7 left.", "C-7"], ["As D-267 approved.", "D-267"], ["T-115 ran out of budget.", "T-115"], ["See P5-80.", "P5-80"]]) {
+      await expect(submit(ctx, session, { summary })).rejects.toThrow(`summary mentions ${id}`);
+    }
+    // One paragraph: a line break could forge a trailer in the commit message.
+    for (const summary of ["Fixes it.\n\nSigned-off-by: Someone Else <a@b>", "Fixes it.\rmore", "Fixes\tit."]) {
+      await expect(submit(ctx, session, { summary })).rejects.toThrow(/summary must be one paragraph/);
+    }
+    // Words that only look like ids pass.
+    expect(await submit(ctx, session, { summary: "Uses UTF-8 and covers COVID-19 wording." })).toContain("/pull/1");
+    expect(gh.proposed).toHaveLength(1);
+  });
+
   it("submit_change refuses more than 50 files or 500,000 characters", async () => {
     const { ctx, session, gh } = await building();
     const many = Array.from({ length: 51 }, (_, i) => ({ path: `docs/${i}.md`, content: "x" }));
@@ -363,10 +382,12 @@ describe("submit_change", () => {
     expect(p.files).toEqual([{ path: "agents/mira.md", content: "# Mira\n" }, { path: "old.md", content: null }]);
     const author = NETWORK.self_improvement!.commit_author;
     expect(p.author).toEqual(author);
-    expect(p.message).toBe(`${INPUT.title}\n\nChange: C-1\nDecision: ${decision}\n\nSigned-off-by: ${author.name} <${author.email}>`);
+    expect(p.message).toBe(`${INPUT.title}\n\n${SUMMARY}\n\nChange: C-1\nDecision: ${decision}\n\nSigned-off-by: ${author.name} <${author.email}>`);
     expect(p.title).toBe(INPUT.title);
-    for (const s of [decision, "D-1, D-2", "approval_rate", "Built by Mandla; needs the owner's review like any other PR.", "## Change", INPUT.body]) expect(p.body).toContain(s);
+    for (const s of [decision, "D-1, D-2", "approval_rate", "Built by Mandla; needs the owner's review like any other PR.", "## Details", INPUT.body]) expect(p.body).toContain(s);
     expect(p.body.split("\n")).toContain("Change: C-1");
+    // The plain summary opens the description, above the gateway's ids and Mandla's details.
+    expect(p.body.startsWith(`${SUMMARY}\n\n---\n\nChange: C-1\n`)).toBe(true);
 
     const change = (await ctx.db.getChange("C-1"))!;
     expect(change).toMatchObject({ state: "pr_open", pr_url: "https://github.com/accordproject/virtual-agent-org/pull/1" });
@@ -609,7 +630,7 @@ describe("Mandla's tasks that end without a PR", () => {
       const { ctx, fakes, task } = await approved();
       const sid = task.session_id!;
       expect(await handleTool(ctx, "mandla", sid, "submit_change", {
-        change: "C-1", title: "docs(mira): thank the contributor first", body: "Adds a line.", files: [{ path: "agents/mira.md", content: "# Mira\n" }],
+        change: "C-1", title: "docs(mira): thank the contributor first", summary: SUMMARY, body: "Adds a line.", files: [{ path: "agents/mira.md", content: "# Mira\n" }],
       })).toContain("/pull/1");
       fakes.sessions[sid] = { id: sid, agent: { id: "agent_mandla" }, ...session };
       fakes.events[sid] = [];
@@ -631,7 +652,7 @@ describe("Mandla's tasks that end without a PR", () => {
     // The earlier report was made a minute before the PR opened.
     await (r.ctx.db as any).db.prepare("UPDATE statuses SET created_at = datetime('now', '-1 minute') WHERE session_id = ?").bind(sid).run();
     await handleTool(r.ctx, "mandla", sid, "submit_change", {
-      change: "C-1", title: "docs(mira): thank the contributor first", body: "Adds a line.", files: [{ path: "agents/mira.md", content: "# Mira\n" }],
+      change: "C-1", title: "docs(mira): thank the contributor first", summary: SUMMARY, body: "Adds a line.", files: [{ path: "agents/mira.md", content: "# Mira\n" }],
     });
     if (after) await report(after);
     r.fakes.sessions[sid] = { id: sid, agent: { id: "agent_mandla" }, status: "idle", stop_reason: { type: "budget_reached" } };
@@ -689,7 +710,7 @@ describe("Mandla's tasks that end without a PR", () => {
     expect((await ctx.db.getChange("C-1"))?.task_id).toBe(next.id);
 
     const out = await handleTool(ctx, "mandla", next.session_id!, "submit_change", {
-      change: "C-1", title: "docs(mira): thank first", body: "b", files: [{ path: "agents/mira.md", content: "x" }],
+      change: "C-1", title: "docs(mira): thank first", summary: SUMMARY, body: "b", files: [{ path: "agents/mira.md", content: "x" }],
     });
     expect(out).toContain("/pull/1");
     expect(gh.proposed).toHaveLength(1);
@@ -745,7 +766,7 @@ describe("Mandla's tasks that end without a PR", () => {
 describe("follow-ups of a change that has its PR (C-10)", () => {
   const FILES = [{ path: "agents/mira.md", edits: [{ old: "Step 3.", new: "Step 3, thanking first." }] }];
   const submit = (ctx: Ctx, sid: string, input: object = {}) =>
-    handleTool(ctx, "mandla", sid, "submit_change", { change: "C-1", title: "fix(mira): thank first", body: "Fixes the review findings.", files: FILES, ...input });
+    handleTool(ctx, "mandla", sid, "submit_change", { change: "C-1", title: "fix(mira): thank first", summary: SUMMARY, body: "Fixes the review findings.", files: FILES, ...input });
   const end = async (ctx: Ctx, fakes: any, sid: string) => {
     fakes.sessions[sid] = { id: sid, status: "idle", agent: { id: "agent_mandla" }, stop_reason: { type: "end_turn" } };
     fakes.events[sid] = [];

@@ -430,7 +430,11 @@ export const TOOLS = {
       properties: {
         change: str("The change id from your brief, e.g. C-3"),
         title: str("PR title and commit subject in Conventional Commits form, at most 100 characters, e.g. docs(mira): thank the contributor first"),
-        body: str("What changed and why, citing the decision and evidence ids; at most 20,000 characters"),
+        summary: str(
+          "Opens the PR description, before any ids, for Matt to read first: one short paragraph in plain words saying what " +
+            "problem this fixes and what the PR does about it. No ids (C-3, D-41, T-9), file names or internal state names; at most 600 characters",
+        ),
+        body: str("The details: what changed in each file and why, citing the decision and evidence ids; at most 20,000 characters"),
         files: {
           type: "array",
           description: "Every file the change touches, as a path from the repo root",
@@ -457,7 +461,7 @@ export const TOOLS = {
           },
         },
       },
-      required: ["change", "title", "body", "files"],
+      required: ["change", "title", "summary", "body", "files"],
     },
   },
 } satisfies Record<string, ToolSpec>;
