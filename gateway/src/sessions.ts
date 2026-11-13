@@ -83,7 +83,7 @@ export async function processSession(ctx: Ctx, sessionId: string): Promise<void>
  * blocked on that, so Ada decides what happens to it (decision 53). A change task
  * whose change is still building never opened its PR, so it is blocked however its
  * session stopped, and a second such block closes the change (decision 55); one whose PR
- * is open is done, even if its session ran out of budget afterwards (decision 73). Runs on
+ * is open is done, even if its session ran out of budget afterwards (decision 74). Runs on
  * every pass over an idle session, so it acts only when the status changes.
  */
 /** Why the gateway left a task blocked, as Ada reads it in get_status. */

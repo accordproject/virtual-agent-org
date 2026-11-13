@@ -598,7 +598,7 @@ describe("Mandla's tasks that end without a PR", () => {
     }
   });
 
-  it("a Mandla session that runs out of budget or is ended after its PR opened leaves the task done, and doesn't wake Ada (decision 73)", async () => {
+  it("a Mandla session that runs out of budget or is ended after its PR opened leaves the task done, and doesn't wake Ada (decision 74)", async () => {
     for (const session of [{ status: "idle", stop_reason: { type: "budget_reached" } }, { status: "terminated" }]) {
       const { ctx, fakes, task } = await approved();
       const sid = task.session_id!;
