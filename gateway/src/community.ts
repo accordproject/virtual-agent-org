@@ -1,4 +1,4 @@
-// Community metrics for Vera (decision 75), copied from the ap-stats method
+// Community metrics for Vera (decision 76), copied from the ap-stats method
 // (github.com/mttrbrts/ap-stats): read every PR of the last 24 months in bulk, with the
 // first 20 reviews and comments of each, then compute the metrics in code from that one
 // dataset. Vera copies the figures; she doesn't read PRs one by one.
@@ -15,6 +15,8 @@ import { localClock } from "./githubEvents";
 export const PR_HISTORY = {
   /** How far back the history goes: the current 12-month window and the prior one. */
   months: 24,
+  /** How far back community_stats' as_of may go; the history keeps enough for the oldest one. */
+  asOfDays: 31,
   /** GraphQL pages (100 PRs each) one cron run may read, across all repos. */
   pagesPerRun: 10,
   /** Local time after which the day's refresh starts: before Vera's daily scorecard at 06:00. */
@@ -35,6 +37,21 @@ export function isBotActor(a: Actor | null): boolean {
 export const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
 
 /** `d` moved by whole calendar months in UTC, the day clamped to the month's length. */
+/** Midnight UTC at the start of `d`'s day. */
+export const startOfDay = (d: Date) => new Date(`${d.toISOString().slice(0, 10)}T00:00:00Z`);
+
+/**
+ * The oldest time the history keeps: 24 months before the oldest as_of community_stats
+ * accepts, at midnight, so every supported window is whole.
+ */
+export function historyStart(now: Date): string {
+  return iso(addMonths(new Date(startOfDay(now).getTime() - PR_HISTORY.asOfDays * 86_400_000), -PR_HISTORY.months));
+}
+
+/** Whether a PR belongs in the history: created since its start, or closed since then (for closure counts). */
+export const inHistory = (n: { createdAt: string; closedAt: string | null }, start: string) =>
+  n.createdAt >= start || (!!n.closedAt && n.closedAt >= start);
+
 export function addMonths(d: Date, months: number): Date {
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + months;
@@ -75,7 +92,7 @@ export async function syncPrHistory(ctx: Ctx, now = new Date()) {
   try {
     const { date, minutes } = localClock(ctx.network.timezone, now);
     if (minutes < PR_HISTORY.startsAt) return;
-    const cutoff = iso(addMonths(now, -PR_HISTORY.months));
+    const cutoff = historyStart(now);
     let pages = PR_HISTORY.pagesPerRun;
     let gh: GitHub | null = null;
     const read: Record<string, number> = {};
@@ -97,7 +114,7 @@ export async function syncPrHistory(ctx: Ctx, now = new Date()) {
         while (pages > 0) {
           pages--;
           const page = await gh.prHistoryPage(ref, state.cursor);
-          await ctx.db.putPrHistory(page.nodes.filter((n) => n.createdAt >= cutoff).map((n) => historyRow(repo, n)));
+          await ctx.db.putPrHistory(page.nodes.filter((n) => inHistory(n, cutoff)).map((n) => historyRow(repo, n)));
           read[repo] = (read[repo] ?? 0) + page.nodes.length;
           const oldest = page.nodes.at(-1)?.updatedAt;
           if (!page.pageInfo.hasNextPage || !oldest || oldest < stopAt) {
@@ -193,7 +210,8 @@ export function communityStats(rows: PrHistoryRow[], asOf: Date, since?: Date) {
   const start = iso(addMonths(asOf, -12));
   const priorStart = iso(addMonths(asOf, -24));
   const firstSeen = new Map<string, PrHistoryRow>();
-  for (const r of [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+  // Older PRs are kept only for their closures; contributors count from the 24 months.
+  for (const r of [...rows].filter((r) => r.created_at >= priorStart).sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     if (!r.bot && r.author && !firstSeen.has(r.author)) firstSeen.set(r.author, r);
   }
   const current = windowStats(rows, start, end);

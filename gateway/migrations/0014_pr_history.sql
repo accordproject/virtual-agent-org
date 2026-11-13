@@ -1,5 +1,6 @@
--- Pull request history for Vera's community metrics (decision 75), copied from the
--- ap-stats method: one row per PR in the repos in scope, created in the last 24 months.
+-- Pull request history for Vera's community metrics (decision 76), copied from the
+-- ap-stats method: one row per PR in the repos in scope created in the last 24 months, and
+-- older PRs closed since then (for closure counts).
 -- The cron refreshes it once a day; community_stats computes the metrics from it.
 
 CREATE TABLE pr_history (
@@ -16,6 +17,7 @@ CREATE TABLE pr_history (
   PRIMARY KEY (repo, number)
 );
 CREATE INDEX pr_history_created ON pr_history(created_at);
+CREATE INDEX pr_history_closed ON pr_history(closed_at);
 
 -- Where each repo's refresh stands. A pass reads PRs by last update, newest first, and
 -- stops at the previous pass's start; a pass longer than one cron run resumes at cursor.

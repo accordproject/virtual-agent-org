@@ -102,13 +102,27 @@ async function finishTask(ctx: Ctx, taskId: string, sessionId: string, end: "fin
   const unsubmitted = change?.state === "building";
   // A change whose PR is open was submitted: its task's work is done, whatever stopped the session after.
   const submitted = !!change && !unsubmitted && !!change.pr_url;
-  const reason = unsubmitted
+  let reason = unsubmitted
     ? `${change.id}: no change submitted${{ finished: "", budget: " (budget reached)", ended: " (session ended)" }[end]}`
     : submitted
       ? null
       : { finished: null, budget: STOPPED.budget, ended: STOPPED.ended }[end];
   // For a submitted change, a report from before the PR opened is out of date; one made after still counts.
   const blockers = (await ctx.db.sessionBlockers(sessionId, submitted ? (change.pr_opened_at ?? undefined) : undefined)) ?? [];
+  // A review check that finished is judged by whether its review was posted at its head, not by its
+  // report (decision 75). Posted: what is left (a maintainer's approval, a refused merge) is the PR's
+  // state, and the merge wake re-proposes it once its checks pass, so the task is done. Not posted:
+  // it is blocked, whatever the report said.
+  if (!reason && task.kind === "review_check" && task.review_target && task.review_sha) {
+    if (await ctx.db.reviewedAt(task.review_target, task.review_sha)) {
+      await ctx.db.setTask(task.id, "done");
+      if (blockers.length) {
+        await ctx.db.audit({ agent: task.agent, session_id: sessionId, event_type: "gateway.review_check_done", detail: { task: task.id, blockers: blockers.slice(0, 5) } });
+      }
+      return;
+    }
+    reason = `No review posted at ${task.review_sha}`;
+  }
   if (reason) blockers.unshift(reason);
   if (blockers.length) {
     await ctx.db.setTask(task.id, "blocked");

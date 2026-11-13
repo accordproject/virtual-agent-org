@@ -835,7 +835,26 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   instead of removing it), or taking a unified diff (the gateway would need a patch
   applier, and a diff that doesn't apply is harder to explain to the agent).
 
-**75. Community metrics computed the ap-stats way** · DEFAULT
+**75. A review check ends done once its review is posted** · RESOLVED
+
+- Review checks were ending blocked whenever Mira listed a blocker, and nearly every
+  blocker was the gateway refusing a merge because no maintainer had approved yet.
+  The gateway never follows up a review check (decision 50), and nothing closed these
+  tasks later, so they piled up in the status views even after their PRs merged.
+- A review check whose session finished its turn now ends done when a review was
+  posted on the PR at that check's head, whatever it listed as blocked. The blockers
+  go to the audit log as `gateway.review_check_done`. The merge wake still proposes
+  the merge once the PR's checks pass, since it follows the review, not the task.
+- A review check stays blocked when no review was posted at its head, whatever its
+  report says (even an empty one, or none), or when its session ran out of budget or
+  ended in error.
+- A question that needs a maintainer, such as closing a PR, goes to the owner as a
+  `request_action` card, not as a blocked task.
+- Not chosen: closing review-check tasks when their PR merges, closes or gets new
+  commits. It needs more code and still leaves tasks blocked while a PR waits for
+  approval.
+
+**76. Community metrics computed the ap-stats way** · DEFAULT
 
 - Vera's scorecards lacked time to first response, community size, new contributors,
   retention and closure ratio. Each needs every PR's reviews and comments and a
@@ -844,7 +863,9 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - ap-stats gets the same figures cheaply: one GraphQL query returns 100 PRs with their
   first 20 reviews and comments, 24 months of PRs are read in bulk, and the metrics are
   computed in code from that one dataset. The network now does the same.
-- The gateway keeps the PR history in its database (migration 0014). Once a day from
+- The gateway keeps the PR history in its database (migration 0014): PRs created in
+  the 24 months before the oldest date Vera may ask about (31 days back), and older
+  PRs closed since then, which count only towards the closure ratio. Once a day from
   04:00 London, the GitHub cron reads each repo in scope by last update, newest first,
   until it reaches the previous day's read; the first 24-month read spreads over
   several runs at 10 pages a run. A repo whose read fails is skipped until the next

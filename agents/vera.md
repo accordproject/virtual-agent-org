@@ -43,6 +43,8 @@ never measure themselves; you measure everyone, including Ada.
    the day before; for the weekly, the Monday the week starts. Omit `as_of`.
 2. Copy `current` into the scorecard's `network`: `time_to_first_response_days`,
    `community_size`, `new_contributors`, `retention_ratio`, `pr_closure_ratio`.
+   Copy a null as null: it means there was nothing to measure (no closed PR had a
+   response, or a ratio had nothing to divide by). Never write 0 in its place.
 3. Put `prior` and `period` (with its newcomers by login) under
    `network.community` as they come, so Ada can compare and welcome newcomers.
 4. If `data.complete` is false, report the figures as provisional and say which repos

@@ -151,7 +151,7 @@ export class GitHub {
 
   /**
    * One page of the repo's PRs, most recently updated first, with the first 20 reviews and
-   * comments of each: the fields ap-stats reads (decision 75).
+   * comments of each: the fields ap-stats reads (decision 76).
    */
   async prHistoryPage(r: RepoRef, cursor: string | null): Promise<PrHistoryPage> {
     const d = await this.graphql<{ repository: { pullRequests: PrHistoryPage } | null }>(PR_HISTORY, { owner: r.owner, repo: r.repo, cursor });

@@ -3,7 +3,7 @@
 
 import { ActionInvalid, DEPENDENCY_FILE, actionRisk, isDependencyBot, safeJson, validateAction, type Normalised } from "./actions";
 import { AgentUnavailable, postDecision, refreshDecisionCard, resendDecisionCard, sendAgentMessage, startSession, taskModel } from "./agents";
-import { addMonths, communityStats, iso } from "./community";
+import { PR_HISTORY, addMonths, communityStats, iso, startOfDay } from "./community";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
 import type { Change, Decision, StartedBy } from "./db";
@@ -287,12 +287,19 @@ const HANDLERS: Record<ToolName, Handler> = {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v)) || Number.isNaN(t)) throw new ToolError(`${field} must be an ISO date such as 2026-11-02`);
       return new Date(t);
     };
-    const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    const today = startOfDay(new Date());
     const asOf = input.as_of ? day(input.as_of, "as_of") : today;
-    if (asOf > today || today.getTime() - asOf.getTime() > 31 * 86_400_000) throw new ToolError("as_of must be in the last 31 days: the history goes back 24 months from today");
+    if (asOf > today || today.getTime() - asOf.getTime() > PR_HISTORY.asOfDays * 86_400_000) {
+      throw new ToolError(`as_of must be in the last ${PR_HISTORY.asOfDays} days: the history goes back 24 months from then`);
+    }
+    const historyFrom = addMonths(asOf, -PR_HISTORY.months);
     const since = input.since ? day(input.since, "since") : undefined;
     if (since && since >= asOf) throw new ToolError("since must be before as_of");
-    const [rows, syncs] = await Promise.all([ctx.db.prHistorySince(iso(addMonths(asOf, -24))), ctx.db.allPrSyncs()]);
+    if (since && since < historyFrom) throw new ToolError(`since must be on or after ${iso(historyFrom).slice(0, 10)}: the history covers 24 months before as_of`);
+    // Only the repos in scope: a repo removed from the network keeps its rows until they age out.
+    const inScopeRepos = new Set(ctx.network.repos);
+    const [all, syncs] = await Promise.all([ctx.db.prHistorySince(iso(historyFrom)), ctx.db.allPrSyncs()]);
+    const rows = all.filter((r) => inScopeRepos.has(r.repo));
     const synced = Object.fromEntries(ctx.network.repos.map((r) => [r, syncs.find((x) => x.repo === r)?.synced_from ?? null]));
     const complete = Object.values(synced).every((v) => v !== null);
     return JSON.stringify({

@@ -129,7 +129,7 @@ export default {
             await dailyCheck(ctx).catch((e) => ctx.db.audit({ event_type: "gateway.github_daily_check_error", detail: String(e) }));
             await dispatchWakes(ctx);
           }
-          // Last, so it never takes subrequests from the work above (decision 75).
+          // Last, so it never takes subrequests from the work above (decision 76).
           await syncPrHistory(ctx);
         }
       })(),
