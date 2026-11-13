@@ -1125,6 +1125,15 @@ export class Db {
     return this.db.prepare(sql).bind(...args).first<Review>();
   }
 
+  /** Whether a review was posted on the PR at a head, given in full or as a prefix (a review check's sha7). */
+  async reviewedAt(target: string, shaPrefix: string): Promise<boolean> {
+    const r = await this.db
+      .prepare("SELECT 1 AS x FROM reviews WHERE target = ? AND substr(sha, 1, ?) = ? LIMIT 1")
+      .bind(target.toLowerCase(), shaPrefix.length, shaPrefix)
+      .first();
+    return !!r;
+  }
+
   /** "owner/repo#12@sha" for every review in a repo. */
   async reviewedHeads(repo: string): Promise<Set<string>> {
     const { results } = await this.db
