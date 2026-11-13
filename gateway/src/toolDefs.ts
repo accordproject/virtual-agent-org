@@ -221,7 +221,7 @@ export const TOOLS = {
           type: "object",
           description: `A Markdown file sent to Matt's Discord DMs, for the weekly update only. Allowed in a conversation too.`,
           properties: {
-            filename: str("e.g. weekly-update-2026-w46.md: lower-case letters, digits and hyphens, ending .md"),
+            filename: str("e.g. weekly-update-2026-11-18.md: lower-case letters, digits and hyphens, ending .md"),
             content: str(`The file's Markdown, at most ${MAX_DOCUMENT_CHARS} characters`),
           },
           required: ["filename", "content"],

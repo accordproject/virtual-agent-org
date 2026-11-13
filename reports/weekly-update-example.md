@@ -1,6 +1,6 @@
 ---
 marp: true
-title: Accord Project agent network — weekly update, 2026-W46
+title: Accord Project agent network — weekly update for the Tech WG, 11 November 2026
 paginate: true
 ---
 
@@ -12,7 +12,7 @@ days rather than one week.
 -->
 
 # Accord Project agent network
-## Weekly update · 2026-W46 · 31 Oct – 11 Nov 2026
+## Weekly update for the Tech WG, 11 November 2026 · 31 Oct – 10 Nov
 
 About 180 public actions · 93% approved as drafted · $75 spent
 

@@ -32,7 +32,7 @@ schedules:
 
   - name: ada-weekly-update
     agent: ada
-    cron: "0 17 * * 5"          # Fridays 17:00, after the weekly evaluation
+    cron: "0 16 * * 2"          # Tuesdays 16:00: the deck is in hand before Wednesday's Tech WG (13:00 London)
     task: weekly_update         # models.yaml
     budget_usd: 2.00
     prompt: >

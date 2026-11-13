@@ -937,8 +937,11 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - The owner asked for a weekly slide deck on the network, modelled on the progress deck
   shown to the Tech WG on 11 November 2026: key decisions, changes, feedback, the
   effect on the KPIs and anything interesting, in at most 10 slides.
-- Ada writes it on Fridays at 17:00, after Vera's weekly scorecard and her own
-  evaluation, from the scorecard, the decision queue and the agents' status reports.
+- Ada writes it on Tuesdays at 16:00, so the owner has it before the Tech WG call on
+  Wednesday at 13:00 London time. It covers the week since the last call, from that
+  morning's daily scorecard, the previous Friday's weekly scorecard, the decision queue
+  and the agents' status reports. Not chosen: Friday after the weekly evaluation, which
+  has the freshest evidence but leaves the deck five days old by the call.
   It runs as a gateway schedule on the standard tier at medium effort, capped at $2 a run.
 - Its instructions and an example deck live in `reports/` and are written to the shared
   memory store at deploy, like the rubric, so Ada's other sessions don't pay for them.

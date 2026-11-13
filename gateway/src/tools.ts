@@ -230,7 +230,7 @@ const HANDLERS: Record<ToolName, Handler> = {
     if (ids.length > MAX_RESENT_CARDS) throw new ToolError(`At most ${MAX_RESENT_CARDS} decision_ids per call; you gave ${ids.length}.`);
     if (document) {
       if (!/^[a-z0-9][a-z0-9-]{0,79}\.md$/.test(document.filename)) {
-        throw new ToolError("Nothing sent. document.filename must be lower-case letters, digits and hyphens, ending .md, e.g. weekly-update-2026-w46.md.");
+        throw new ToolError("Nothing sent. document.filename must be lower-case letters, digits and hyphens, ending .md, e.g. weekly-update-2026-11-18.md.");
       }
       if (document.content.length > MAX_DOCUMENT_CHARS) {
         throw new ToolError(`Nothing sent. document.content is ${document.content.length} characters; at most ${MAX_DOCUMENT_CHARS}. Cut slides rather than splitting it.`);

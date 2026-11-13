@@ -28,7 +28,7 @@
     {
       "name": "ada-weekly-update",
       "agent": "ada",
-      "cron": "0 17 * * 5",
+      "cron": "0 16 * * 2",
       "task": "weekly_update",
       "prompt": "Write and send this week's weekly update deck, following \"Weekly update\" in your instructions.",
       "budget_cents": 200
