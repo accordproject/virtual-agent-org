@@ -96,6 +96,24 @@ export function mcpGithubWrite(e: { name?: string; input?: Record<string, unknow
   return { tool, repo, number: Number.isInteger(n) && n > 0 ? n : null, fields: Object.keys(input).filter((k) => !WHERE.has(k)) };
 }
 
+/**
+ * The GitHub write a `tool.confirm` decision lets through, or null when it confirms a
+ * built-in tool or a read. Only an MCP call's decision carries `mcp_server` (null when
+ * the event named none), so a built-in tool held for confirmation is never counted.
+ */
+export function confirmedGithubWrite(d: Pick<Decision, "kind" | "target" | "payload">): Pick<GithubWrite, "tool" | "repo" | "number" | "fields"> | null {
+  if (d.kind !== "tool.confirm") return null;
+  let p: Record<string, unknown> | null = null;
+  try {
+    p = typeof d.payload === "string" ? JSON.parse(d.payload) : (d.payload as Record<string, unknown> | null);
+  } catch {
+    return null;
+  }
+  if (!p || typeof p !== "object" || !("mcp_server" in p)) return null;
+  const input = p.input && typeof p.input === "object" ? (p.input as Record<string, unknown>) : {};
+  return mcpGithubWrite({ name: d.target, input, ...(typeof p.mcp_server === "string" ? { mcp_server_name: p.mcp_server } : {}) });
+}
+
 /** The repo, number and payload fields of a decision, for its write row. */
 export function decisionArgs(d: Pick<Decision, "target" | "payload">): Pick<GithubWrite, "repo" | "number" | "fields"> {
   const ref = parseTarget(d.target);

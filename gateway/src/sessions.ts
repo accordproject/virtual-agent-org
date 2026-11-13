@@ -176,7 +176,7 @@ async function handleEvent(
         permission: e.evaluated_permission,
         detail: e.input,
       });
-      let decision: string | null = null;
+      const mcp = e.type === "agent.mcp_tool_use";
       if (e.evaluated_permission === "ask") {
         const d = await ctx.db.createDecision({
           agent,
@@ -185,17 +185,20 @@ async function handleEvent(
           summary: `${cap(agent)} wants to run ${e.name}`,
           rationale: "This tool is set to always ask. The session is paused until you decide; the agent's other work is unaffected.",
           risk: "high",
-          payload: { input: e.input },
+          // An MCP call keeps its server, so approving it can record a GitHub write (C-7).
+          payload: mcp ? { input: e.input, mcp_server: typeof e.mcp_server_name === "string" ? e.mcp_server_name : null } : { input: e.input },
           session_id: sessionId,
           tool_use_id: e.id,
         });
-        decision = d.id;
         await postDecision(ctx, d);
+        return;
       }
-      // C-7: a GitHub write runs only once its confirmation is approved; one the
-      // permission policy allowed outright has no decision, so its row is flagged.
-      const write = e.evaluated_permission === "deny" ? null : mcpGithubWrite(e);
-      if (write) await recordGithubWrite(ctx, { agent, sessionId, eventId: e.id, decision, ...write });
+      // C-7: only an agent's own GitHub MCP calls are writes; built-in sandbox tools
+      // (bash, read, write …) are not. One the permission policy allowed outright has
+      // no decision, so its row is flagged. One held for confirmation is recorded when
+      // the owner approves it (executeDecision), so a rejected call is never counted.
+      const write = mcp && e.evaluated_permission !== "deny" ? mcpGithubWrite(e) : null;
+      if (write) await recordGithubWrite(ctx, { agent, sessionId, eventId: e.id, decision: null, ...write });
       return;
     }
 

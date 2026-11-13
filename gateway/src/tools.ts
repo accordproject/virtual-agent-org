@@ -540,14 +540,20 @@ async function labelPr(ctx: Ctx, agent: string, sessionId: string, input: Input)
 
   const current = await gh.labels(ref);
   const drop = current.filter((l) => remove.includes(l) || (kinds.length && l.startsWith("ai/kind:") && !kinds.includes(l)));
-  for (const l of drop) await gh.removeLabel(ref, l);
   const added = add.filter((l) => !current.includes(l));
-  if (added.length) await gh.addLabels(ref, added);
+  // Recorded whether or not it all succeeds: a failure partway still leaves labels changed (C-7).
+  let ok = false;
+  try {
+    for (const l of drop) await gh.removeLabel(ref, l);
+    if (added.length) await gh.addLabels(ref, added);
+    ok = true;
+  } finally {
+    if (drop.length || added.length) {
+      await recordGithubWrite(ctx, { agent, sessionId, tool: "label_pr", internal: "labels through label_pr", repo: `${ref.owner}/${ref.repo}`, number: ref.number, fields: ["labels"], ok });
+    }
+  }
   const now = [...current.filter((l) => !drop.includes(l)), ...added];
   await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.labelled", detail: { target, added, removed: drop } });
-  if (drop.length || added.length) {
-    await recordGithubWrite(ctx, { agent, sessionId, tool: "label_pr", internal: "labels through label_pr", repo: `${ref.owner}/${ref.repo}`, number: ref.number, fields: ["labels"] });
-  }
   return `${target} labels: ${now.join(", ") || "none"}`;
 }
 

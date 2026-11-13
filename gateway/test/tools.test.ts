@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { messageAgent } from "../src/agents";
 import { handleUpdate } from "../src/commands";
-import { approve } from "../src/controls";
+import { approve, reject } from "../src/controls";
 import { handleInteraction } from "../src/discordInteractions";
 import { schemaProblems } from "../src/schema";
 import { TOOLS, toolsForAgent } from "../src/toolDefs";
@@ -450,6 +450,9 @@ describe("read_audit (decision 47)", () => {
       ];
       await processSession(ctx, "sesn_m");
       const confirm = (await ctx.db.listDecisions({ status: "open" })).find((d) => d.kind === "tool.confirm")!;
+      // The call waiting on Matt isn't a write until he approves it.
+      expect((await writes(ctx)).github_writes).toHaveLength(1);
+      await approve(ctx, confirm.id);
       const r = await writes(ctx);
       expect(r.github_writes).toHaveLength(2);
       expect(r.github_writes[0]).toMatchObject({
@@ -457,12 +460,54 @@ describe("read_audit (decision 47)", () => {
         args: { repo: "accordproject/concerto", number: 12, fields: ["reviewers"] }, flagged: "no decision and no gateway reason",
       });
       // A write that waits on Matt's confirmation is authorised by that decision.
-      expect(r.github_writes[1]).toMatchObject({ tool: "add_issue_comment", decision: confirm.id, args: { number: 12, fields: ["body"] } });
+      expect(r.github_writes[1]).toMatchObject({ tool: "add_issue_comment", session_id: "sesn_m", task_id: "T-9", decision: confirm.id, args: { number: 12, fields: ["body"] } });
       expect(r.github_writes[1].flagged).toBeUndefined();
       expect(r.github_write_counts).toEqual([
         { agent: "mira", authority: "decision", count: 1 },
         { agent: "mira", authority: "none", count: 1 },
       ]);
+    });
+
+    it("built-in sandbox tools are not GitHub writes, allowed or confirmed", async () => {
+      const { ctx, fakes } = setup();
+      fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      fakes.events.sesn_m = [
+        { id: "e1", type: "agent.tool_use", name: "bash", evaluated_permission: "allow", input: { command: "git status" } },
+        { id: "e2", type: "agent.tool_use", name: "write", evaluated_permission: "allow", input: { file_path: "/tmp/x", content: "y" } },
+        { id: "e3", type: "agent.tool_use", name: "bash", evaluated_permission: "ask", input: { command: "rm -rf build" } },
+      ];
+      await processSession(ctx, "sesn_m");
+      const confirm = (await ctx.db.listDecisions({ status: "open" })).find((d) => d.kind === "tool.confirm")!;
+      await approve(ctx, confirm.id);
+      const r = await writes(ctx);
+      expect(r.github_writes).toEqual([]);
+      expect(r.github_write_counts).toEqual([]);
+    });
+
+    it("a confirmation the owner rejects is never counted as a write", async () => {
+      const { ctx, fakes } = setup();
+      fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      fakes.events.sesn_m = [
+        { id: "e1", type: "agent.mcp_tool_use", name: "merge_pull_request", mcp_server_name: "github", evaluated_permission: "ask", input: { owner: "accordproject", repo: "concerto", pullNumber: 12 } },
+      ];
+      await processSession(ctx, "sesn_m");
+      const confirm = (await ctx.db.listDecisions({ status: "open" })).find((d) => d.kind === "tool.confirm")!;
+      await reject(ctx, confirm.id, "Not yet");
+      expect((await writes(ctx)).github_writes).toEqual([]);
+    });
+
+    it("label_pr records the attempt when relabelling fails partway", async () => {
+      const { ctx, gh } = setup();
+      gh.pr.labels.push("bug", "stale");
+      gh.removeLabel = async () => {
+        throw new Error("GitHub DELETE /labels/stale: 502");
+      };
+      await expect(handleTool(ctx, "mira", "sesn_m", "label_pr", { target: T, remove: ["stale"] })).rejects.toThrow(/502/);
+      const r = await writes(ctx);
+      expect(r.github_writes).toHaveLength(1);
+      expect(r.github_writes[0]).toMatchObject({ tool: "label_pr", decision: "gateway-internal", args: { fields: ["labels"] }, ok: false });
     });
   });
 

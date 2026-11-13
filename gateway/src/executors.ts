@@ -4,7 +4,7 @@
 import { executeAction, type ExecResult } from "./actions";
 import type { Ctx } from "./context";
 import type { Decision } from "./db";
-import { decisionArgs, recordGithubWrite } from "./githubWrites";
+import { confirmedGithubWrite, decisionArgs, recordGithubWrite } from "./githubWrites";
 
 export { inScope, isGuidanceFile, type ExecResult } from "./actions";
 export { ciSensitivePaths } from "./review";
@@ -16,12 +16,18 @@ export { ciSensitivePaths } from "./review";
  */
 export async function executeDecision(ctx: Ctx, d: Decision, internal?: string): Promise<ExecResult> {
   const writes = !ctx.dryRun && ctx.network.action_kinds[d.kind]?.executor === "github";
+  // An approved confirmation of an agent's GitHub MCP call: the write is the agent's,
+  // authorised by this decision, and only once the call is let through.
+  const confirmed = ctx.dryRun ? null : confirmedGithubWrite(d);
   let ok = false;
   try {
     const r = await executeAction(ctx, d);
     ok = r.ok;
     return r;
   } finally {
+    if (confirmed && ok) {
+      await recordGithubWrite(ctx, { agent: d.agent, sessionId: d.session_id, eventId: d.tool_use_id ?? undefined, decision: d.id, ...confirmed });
+    }
     if (writes) {
       await recordGithubWrite(ctx, {
         agent: d.agent,
