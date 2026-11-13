@@ -15,9 +15,10 @@ tiers:
 agents:
   ada:
     default: deep
-    effort: low                                # check-ins, chat and follow-ups
+    effort: low                                # check-ins and chat with Matt
     tasks:
       evaluation: { tier: deep, effort: medium }
+      follow_up: { tier: standard, effort: low }   # gateway-started sessions: task blocked, approved decision failed (decision 268)
   mira:
     default: standard
     effort: medium                             # chat, tasks, merge proposals, lessons
