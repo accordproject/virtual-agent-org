@@ -98,6 +98,18 @@ export function mcpGithubWrite(e: { name?: string; input?: Record<string, unknow
 }
 
 /**
+ * The gateway rule that lets an agent make a GitHub write without a decision, or
+ * undefined when none does. A reviewer request (`update_pull_request` changing only
+ * `reviewers`) is triage the network allows outright (C-7, D-240); any other change in
+ * the same call, or any other allowed write such as a comment, has no rule and stays
+ * flagged.
+ */
+export function standingReason(w: Pick<GithubWrite, "tool" | "fields">): string | undefined {
+  if (w.tool === "update_pull_request" && w.fields.length === 1 && w.fields[0] === "reviewers") return "reviewer request";
+  return undefined;
+}
+
+/**
  * The GitHub write a `tool.confirm` decision lets through, or null when it confirms a
  * built-in tool or a read. Only an MCP call's decision carries `mcp_server` (null when
  * the event named none), so a built-in tool held for confirmation is never counted.
