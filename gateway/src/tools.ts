@@ -294,7 +294,8 @@ const HANDLERS: Record<ToolName, Handler> = {
       video_id: id,
       total_chars: text.length,
       offset,
-      next_offset: end < text.length ? end + 1 : null,
+      // `end` is the first character not in this page (a newline, or mid-line on a very long line).
+      next_offset: end < text.length ? end : null,
       text: text.slice(offset, end),
     });
   },

@@ -101,7 +101,21 @@ describe("vimeo (decision 18A)", () => {
       offset = page.next_offset;
     }
     expect(pages.length).toBe(3);
-    expect(pages.join("\n")).toBe(text);
+    expect(pages.join("")).toBe(text); // pages join back to the transcript exactly
+  });
+
+  it("pages a transcript without losing a character when a page doesn't end on a newline", async () => {
+    const { ctx } = makeTestCtx();
+    const text = Array.from({ length: 150_000 }, (_, i) => String.fromCharCode(97 + (i % 26))).join(""); // one very long line
+    ctx.vimeo = () => ({ transcript: async () => text }) as any;
+    let got = "";
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const page = JSON.parse(await handleTool(ctx, "otto", "s", "vimeo_transcript", { video_id: "1", offset }));
+      got += page.text;
+      offset = page.next_offset;
+    }
+    expect(got).toBe(text);
   });
 
   it("reads Vimeo's API shapes", async () => {
