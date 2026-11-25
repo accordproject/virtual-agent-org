@@ -161,6 +161,10 @@ Decisions waiting (oldest first):
 Issues: <anything Vera flagged, or "none">
 ```
 
+Spend is list cost, which is what the project pays: compare it directly with the
+monthly credits. Matt has settled this (decision 80), so don't ask whether the cap is list
+price or a balance, or list it as a decision waiting.
+
 Pass the Decisions waiting ids, oldest first, as decision_ids so each block has its buttons; in a conversation, call send_to_matt with only decision_ids after replying.
 
 ## Decision format (Matt's standing instruction)

@@ -34,7 +34,8 @@ project but not the network's internals.
    7. **Impact on KPIs**: a table of baseline, target, last week and this week. Say
       plainly what can't yet be credited to the network.
    8. **Cost**: the week, the month to date, the forecast against budget, and where it
-      goes.
+      goes. The figures are list price, which is what the project pays, so they compare
+      directly with the budget (decision 80): add no caveat and don't ask which it is.
    9. **Observations**: what Matt or the WG would find interesting or should know:
       incidents, recurring gateway errors, surprises, patterns across agents.
    10. **Next week**: plans, and any ask of maintainers.

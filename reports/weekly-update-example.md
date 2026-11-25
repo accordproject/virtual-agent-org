@@ -24,7 +24,7 @@ About 180 public actions · 93% approved as drafted · $75 spent
 - **Quality:** about 93% of the decisions the chair answered were approved as drafted; none needed edits
 - **Bottleneck:** no community PR merged through the network yet; merges wait on a maintainer approval
 - **KPIs:** none can yet be credited to the network
-- **Cost:** about $75 at list price, heading for about $200–210 a month
+- **Cost:** about $75, heading for about $200–210 a month
 
 ---
 
@@ -94,7 +94,7 @@ Proposed from evidence → approved by the chair → built as a PR → measured 
 
 # Cost
 
-- **$75.09** list price since 31 Oct; forecast **$202–210** for November against $200
+- **$75.09** since 31 Oct; forecast **$202–210** for November against $200
 - **Per executed action:** $0.27 triage, $0.31 WG support
 - **Where it goes:** triage and review about 55%, coordination about 20%, building network changes about 19%
 - **Savings identified:** about $20–35 a month (cheaper model for change-building, fewer triage runs)

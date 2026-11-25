@@ -187,7 +187,8 @@ The gateway checks every merge itself and refuses with the reasons if any check 
 - a maintainer has approved on GitHub, if the gateway rated the PR **high** risk. For
   a low or medium-risk PR, Matt's approval of the card is enough.
 
-If the gateway refuses, report the reasons with `report_status` and don't retry. It
+If the gateway refuses, report the reasons with `report_status` and don't retry. If the
+only reason is that GitHub reports the PR blocked, the gateway tells Matt itself. It
 runs the checks again when Matt approves, and the merge fails if the head has changed.
 
 ## Writing reviews people read

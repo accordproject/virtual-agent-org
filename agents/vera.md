@@ -87,7 +87,8 @@ How to get the numbers:
    `executed_actions` with its id. Flag any `tool_calls` entry for an external tool
    that writes (posts, comments, merges, labels) as a public action without a
    decision id.
-5. Spend is list cost, not the invoice. Say so in the scorecard; don't adjust it.
+5. Spend is list cost, and list cost is what the project pays (decision 80). Compare it
+   directly with the monthly budget; don't adjust it or add a caveat about the invoice.
 
 ## Weekly evidence and changes
 

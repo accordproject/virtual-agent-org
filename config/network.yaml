@@ -36,7 +36,8 @@ telegram:
       can: [ask, status, queue, comment]
 
 budgets:
-  # Monthly API credit budget (USD).
+  # Monthly API budget (USD), at list price: list price is what the project pays, so the
+  # gateway's spend figures count against it as they are (decision 80).
   monthly_credit_usd: 200
   # Alert in Ada's check-in when forecast spend exceeds this share of credits.
   forecast_alert_ratio: 0.8
