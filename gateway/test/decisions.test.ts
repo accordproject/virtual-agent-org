@@ -499,3 +499,24 @@ describe("spec.change cards", () => {
     expect(card).not.toContain("Other payload fields");
   });
 });
+
+describe("listing past 200 rows", () => {
+  it("returns the newest decisions and findings, oldest first, not the oldest", async () => {
+    const { ctx } = makeTestCtx();
+    for (let i = 0; i < 205; i++) await ctx.db.createDecision({ agent: "mira", kind: "other", target: "x", summary: "s", rationale: "r", risk: "low" });
+    const mine = JSON.parse(await handleTool(ctx, "mira", "s", "get_decisions", { status: "all" })) as { id: string }[];
+    expect(mine).toHaveLength(200);
+    expect(mine[0].id).toBe("D-6");
+    expect(mine.at(-1)!.id).toBe("D-205");
+
+    const review = await ctx.db.createReview({
+      target: "accordproject/concerto#1", sha: "a".repeat(40), risk: "low", verdict: "comment", decision_id: "D-1", url: null,
+      findings: Array.from({ length: 205 }, () => ({ path: null, line: null, severity: "nit", area: "docs", summary: "s" })),
+    });
+    expect(review.id).toBeTruthy();
+    const found = await ctx.db.listFindings({ open: true });
+    expect(found).toHaveLength(200);
+    expect(found[0].id).toBe("F-6");
+    expect(found.at(-1)!.id).toBe("F-205");
+  });
+});

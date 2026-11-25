@@ -5,7 +5,8 @@ import { parse } from "yaml";
 export const ROOT = join(import.meta.dirname, "..");
 
 export const readYaml = <T>(rel: string): T => parse(readFileSync(join(ROOT, rel), "utf8")) as T;
-export const readText = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
+/** A file's text with LF line endings, so a Windows checkout (core.autocrlf) reads the same as Linux. */
+export const readText = (rel: string) => readFileSync(join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 
 export interface Spec {
   name: string;
@@ -16,7 +17,7 @@ export interface Spec {
 }
 
 export function parseSpec(text: string): Spec {
-  const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!m) throw new Error("spec is missing frontmatter");
   const fm = parse(m[1]) as Omit<Spec, "body">;
   return { ...fm, body: m[2].trim() };
@@ -26,7 +27,7 @@ export function loadSpecs(): Record<string, Spec> {
   const dir = join(ROOT, "agents");
   const out: Record<string, Spec> = {};
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".md") && !f.startsWith("_"))) {
-    const spec = parseSpec(readFileSync(join(dir, f), "utf8"));
+    const spec = parseSpec(readText(`agents/${f}`));
     if (`${spec.name}.md` !== f) throw new Error(`${f}: name "${spec.name}" does not match file name`);
     out[spec.name] = spec;
   }

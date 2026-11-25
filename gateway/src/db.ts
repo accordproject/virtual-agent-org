@@ -776,8 +776,9 @@ export class Db {
       where.push("agent = ?");
       args.push(filter.agent);
     }
+    // The newest 200, oldest first: past 200 rows, a plain ASC LIMIT would show only the oldest.
     const sql =
-      "SELECT * FROM decisions" + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + " ORDER BY seq ASC LIMIT 200";
+      "SELECT * FROM (SELECT * FROM decisions" + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + " ORDER BY seq DESC LIMIT 200) ORDER BY seq ASC";
     return (await this.db.prepare(sql).bind(...args).all<Decision>()).results;
   }
 
@@ -1229,7 +1230,8 @@ export class Db {
       where.push("created_at >= datetime('now', ?)");
       args.push(`-${f.days} days`);
     }
-    const sql = "SELECT * FROM review_findings" + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + " ORDER BY seq ASC LIMIT 200";
+    // The newest 200, oldest first (see listDecisions).
+    const sql = "SELECT * FROM (SELECT * FROM review_findings" + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + " ORDER BY seq DESC LIMIT 200) ORDER BY seq ASC";
     return (await this.db.prepare(sql).bind(...args).all<Finding>()).results;
   }
 

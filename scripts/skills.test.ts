@@ -26,3 +26,10 @@ test("every area the skill names is a review area", () => {
   const areas = readText("config/review.yaml").match(/^areas:\n((?: {2}\w+:.*\n)+)/m)![1].match(/^ {2}(\w+):/gm)!.map((l) => l.trim().slice(0, -1));
   assert.deepEqual(named.sort(), areas.sort());
 });
+
+test("a spec reads the same with LF or CRLF line endings", async () => {
+  const { parseSpec } = await import("./lib");
+  const lf = "---\nname: x\ntitle: X\nphase: 1\nreports_to: ada\n---\nBody line.\n";
+  assert.deepEqual(parseSpec(lf.replace(/\n/g, "\r\n")), { ...parseSpec(lf), body: "Body line." });
+  assert.equal(parseSpec(lf).name, "x");
+});
