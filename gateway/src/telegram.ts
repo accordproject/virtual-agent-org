@@ -64,11 +64,17 @@ export class Telegram {
     return last;
   }
 
+  /**
+   * Edits a message. A long card is sent in pieces with its buttons on the last one, and
+   * that's the message we're given, so a long text is edited down to its last piece:
+   * where a decision's Status and Result lines are.
+   */
   async edit(chatId: number, messageId: number, text: string, buttons?: InlineButton[][]) {
+    const pieces = splitText(text || "(empty)");
     await this.call("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
-      text: text.length > LIMIT ? `${text.slice(0, LIMIT - 20)}\n… (cut short)` : text,
+      text: pieces[pieces.length - 1],
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: buttons ?? [] },
     });

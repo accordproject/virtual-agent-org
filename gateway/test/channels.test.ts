@@ -759,3 +759,27 @@ describe("replying to an agent's message", () => {
     expect(res).toEqual({ channelId: "ch1", messageId: `m${bodies.length}` });
   });
 });
+
+describe("editing a long Telegram card", () => {
+  it("edits the last piece, which holds the buttons and the Status line", async () => {
+    const { Telegram, splitText } = await import("../src/telegram");
+    const bodies: any[] = [];
+    const fake = (async (_url: string, init: any) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ ok: true, result: { message_id: bodies.length } }));
+    }) as unknown as typeof fetch;
+    const tg = new Telegram("t", fake);
+    const card = Array.from({ length: 300 }, (_, i) => `finding ${i}`.padEnd(30, ".")).join("\n");
+    const sent = await tg.send(1, card, { buttons: [[{ text: "Approve", callback_data: "a:D-1" }]] });
+    expect(sent).toBe(bodies.length); // the id we're given is the last piece's
+    expect(bodies.length).toBeGreaterThan(1);
+
+    const done = `${card}\n\nStatus: approved\nResult: merged`;
+    bodies.length = 0;
+    await tg.edit(1, sent, done, []);
+    const pieces = splitText(done);
+    expect(bodies[0].text).toBe(pieces[pieces.length - 1]);
+    expect(bodies[0].text).toContain("Result: merged");
+    expect(bodies[0].text).not.toContain("finding 0.");
+  });
+});
