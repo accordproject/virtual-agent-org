@@ -137,7 +137,8 @@ export function vttToLines(vtt: string): string {
     const text = lines
       .slice(i + 1)
       .join(" ")
-      .replace(/<[^>]+>/g, "")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
       .replace(/\s+/g, " ")
       .trim();
     if (!text || text === last) continue;
