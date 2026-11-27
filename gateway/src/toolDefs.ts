@@ -233,12 +233,14 @@ export const TOOLS = {
   // ---- vera ----
   write_scorecard: {
     owner: "vera",
-    description: "Store a scorecard. JSON must follow the Scorecard schema in your system prompt.",
+    description:
+      "Store a scorecard. JSON must follow the Scorecard schema in your system prompt. " +
+      "Pass scorecard as a JSON object, not a string containing JSON.",
     input_schema: {
       type: "object",
       properties: {
         period: str("e.g. 2026-11-02 for daily or 2026-W45 for weekly"),
-        scorecard: { type: "object", description: "The scorecard object" },
+        scorecard: { type: "object", description: "The scorecard object. Pass scorecard as a JSON object, not a string containing JSON." },
       },
       required: ["period", "scorecard"],
     },
