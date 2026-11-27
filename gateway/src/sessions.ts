@@ -6,7 +6,7 @@ import { defaultModel, postDecision, replyToOrigin } from "./agents";
 import { agentByManagedId } from "./config";
 import { cap, outOfSubrequests, type Ctx } from "./context";
 import { wakeAda } from "./followUp";
-import { mcpGithubWrite, recordGithubWrite } from "./githubWrites";
+import { mcpGithubWrite, recordGithubWrite, standingReason } from "./githubWrites";
 import { costCents, messageText, sessionAgentId, sessionModel, sessionTokens, type SessionEvent } from "./managed";
 import { ToolDenied, ToolError, handleTool } from "./tools";
 
@@ -218,10 +218,11 @@ async function handleEvent(
       }
       // C-7: only an agent's own GitHub MCP calls are writes; built-in sandbox tools
       // (bash, read, write …) are not. One the permission policy allowed outright has
-      // no decision, so its row is flagged. One held for confirmation is recorded when
-      // the owner approves it (executeDecision), so a rejected call is never counted.
+      // no decision: a reviewer request is gateway-internal with that reason, and any
+      // other is flagged. One held for confirmation is recorded when the owner
+      // approves it (executeDecision), so a rejected call is never counted.
       const write = mcp && e.evaluated_permission !== "deny" ? mcpGithubWrite(e) : null;
-      if (write) await recordGithubWrite(ctx, { agent, sessionId, eventId: e.id, decision: null, ...write });
+      if (write) await recordGithubWrite(ctx, { agent, sessionId, eventId: e.id, decision: null, internal: standingReason(write), ...write });
       return;
     }
 

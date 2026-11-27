@@ -445,7 +445,7 @@ describe("read_audit (decision 47)", () => {
       fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
       await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
       fakes.events.sesn_m = [
-        { id: "e1", type: "agent.mcp_tool_use", name: "update_pull_request", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", pullNumber: 12, reviewers: ["samlee"] } },
+        { id: "e1", type: "agent.mcp_tool_use", name: "add_issue_comment", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", issue_number: 12, body: "Thanks!" } },
         { id: "e2", type: "agent.mcp_tool_use", name: "pull_request_read", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", pullNumber: 12 } },
         { id: "e3", type: "agent.mcp_tool_use", name: "mcp__github__add_issue_comment", evaluated_permission: "ask", input: { owner: "accordproject", repo: "concerto", issue_number: 12, body: "Hi" } },
       ];
@@ -457,14 +457,39 @@ describe("read_audit (decision 47)", () => {
       const r = await writes(ctx);
       expect(r.github_writes).toHaveLength(2);
       expect(r.github_writes[0]).toMatchObject({
-        agent: "mira", session_id: "sesn_m", task_id: "T-9", tool: "update_pull_request", decision: null,
-        args: { repo: "accordproject/concerto", number: 12, fields: ["reviewers"] }, flagged: "no decision and no gateway reason",
+        agent: "mira", session_id: "sesn_m", task_id: "T-9", tool: "add_issue_comment", decision: null,
+        args: { repo: "accordproject/concerto", number: 12, fields: ["body"] }, flagged: "no decision and no gateway reason",
       });
+      expect(r.github_writes[0].reason).toBeUndefined();
       // A write that waits on Matt's confirmation is authorised by that decision.
       expect(r.github_writes[1]).toMatchObject({ tool: "add_issue_comment", session_id: "sesn_m", task_id: "T-9", decision: confirm.id, args: { number: 12, fields: ["body"] } });
       expect(r.github_writes[1].flagged).toBeUndefined();
       expect(r.github_write_counts).toEqual([
         { agent: "mira", authority: "decision", count: 1 },
+        { agent: "mira", authority: "none", count: 1 },
+      ]);
+    });
+
+    it("an agent's reviewer request is gateway-internal; the same call changing more is flagged", async () => {
+      const { ctx, fakes } = setup();
+      fakes.sessions.sesn_m = { id: "sesn_m", status: "idle", agent: { id: "agent_mira" }, stop_reason: { type: "requires_action" } };
+      await ctx.db.upsertSession({ id: "sesn_m", agent: "mira", origin: "task", task_id: "T-9" });
+      fakes.events.sesn_m = [
+        { id: "e1", type: "agent.mcp_tool_use", name: "update_pull_request", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", pullNumber: 12, reviewers: ["samlee"] } },
+        { id: "e2", type: "agent.mcp_tool_use", name: "update_pull_request", mcp_server_name: "github", evaluated_permission: "allow", input: { owner: "accordproject", repo: "concerto", pullNumber: 12, reviewers: ["samlee"], title: "New title" } },
+      ];
+      await processSession(ctx, "sesn_m");
+      const r = await writes(ctx);
+      expect(r.github_writes).toHaveLength(2);
+      expect(r.github_writes[0]).toMatchObject({
+        agent: "mira", session_id: "sesn_m", task_id: "T-9", tool: "update_pull_request", decision: "gateway-internal", reason: "reviewer request",
+        args: { repo: "accordproject/concerto", number: 12, fields: ["reviewers"] },
+      });
+      expect(r.github_writes[0].flagged).toBeUndefined();
+      expect(r.github_writes[1]).toMatchObject({ tool: "update_pull_request", decision: null, args: { fields: ["reviewers", "title"] }, flagged: "no decision and no gateway reason" });
+      expect(r.github_writes[1].reason).toBeUndefined();
+      expect(r.github_write_counts).toEqual([
+        { agent: "mira", authority: "gateway-internal", count: 1 },
         { agent: "mira", authority: "none", count: 1 },
       ]);
     });
