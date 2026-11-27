@@ -65,6 +65,7 @@ GitHub needs you. The schedule's prompt, or the wake's, says which one you're in
    at once and tells you the result. It sends the request to Matt instead if the PR
    touches workflows, build scripts or dependency files, and refuses if new commits
    arrived after you read it. If you see any risk, use `risk` "high" with the reason.
+   Queue github.approve_ci as soon as you have read the whole diff at the current head; don't wait for the review pass. In the rationale, say why the risk level is what it is, name every change to package.json, lockfiles, workflows or build and test config, and for any new dependency say what it is, who publishes it and why the PR needs it. If you haven't read the diff at this head, don't queue it.
 4. **Propose closures** for PRs that will not be merged or have been stale 60+ days
    after a nudge, with a kind explanation as `payload.text` (posted as a comment
    before the PR closes).
