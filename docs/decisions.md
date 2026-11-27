@@ -978,3 +978,23 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
   main blocker once approvals arrive.
 - Not chosen: letting the gateway's App bypass the approval rule, which weakens each
   repo's protection; chasing maintainers by hand.
+
+**82. Deploy runs plan at once, and only the newest asks for approval** · RESOLVED (amends 49)
+
+- The deploy lock covered the whole run, so a run took it as soon as its plan started
+  and kept it while waiting for the owner's approval. Newer runs queued behind it, so
+  the owner had to reject the older run before approving the newer one, though the
+  newer run deploys everything the older one would: it compares with the last
+  successful deploy.
+- The lock now covers only the deploy job. Plans have no side effects, so every run
+  plans at once.
+- On each push to `main`, the `deploy-supersede` workflow cancels older runs whose
+  deploy job is waiting for approval. A cancelled run doesn't count as a successful
+  deploy, so its changes stay in the next run's plan.
+- A run that reaches its deploy job after a newer commit has deployed stops without
+  deploying, so older code never replaces newer. A deploy waits for earlier runs to
+  finish recording new resource ids, so no agent is created twice.
+- Deploys still run one at a time, and none is cancelled once its deploy job has
+  started. The cancelling workflow holds no deploy secrets.
+- Not chosen: `cancel-in-progress`, which would also cancel a deploy half-way; deploys
+  running side by side, which could create Managed Agents resources twice.

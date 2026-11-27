@@ -148,6 +148,11 @@ deploy creates resources, it deploys the gateway again and opens a
 `chore(deploy): record deployed resource ids` PR. Merge it before the next agent
 deploy; until then the workflow refuses to deploy agents, so nothing is created twice.
 Running the workflow by hand deploys everything, as a dry run unless you untick it.
+Every run plans at once, and only the deploy job takes turns. Only the newest push
+waits for your approval: when another push arrives, the `deploy-supersede` workflow
+cancels older runs still waiting, since the newest run deploys their changes too
+(decision 82). A run that has started deploying is never cancelled, and one approved
+after a newer commit has deployed stops without deploying.
 
 Set up its `production` environment once. Only runs from `main` may use it, each run
 waits for your approval, and admins can't skip that:

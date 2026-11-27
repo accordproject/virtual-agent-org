@@ -20,10 +20,8 @@ on:
 permissions:
   contents: read
 
-# One deploy at a time, in push order; never cancel one half-way.
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+# The deploy job holds the lock, not the whole run: plan has no side effects, so every
+# run plans at once (decision 82). See the deploy job's concurrency.
 
 jobs:
   plan:
@@ -86,9 +84,16 @@ jobs:
     if: ${{ needs.plan.outputs.any == 'true' }}
     runs-on: ubuntu-latest
     environment: production
+    # One deploy at a time; never cancel one half-way. A newer run's deploy replaces an
+    # older one still queued for the lock, and deploy-supersede.yml cancels one waiting
+    # for approval: the newer run's plan covers its changes (decision 82).
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     outputs:
       ids_changed: ${{ steps.ids.outputs.changed }}
     env:
@@ -99,11 +104,53 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+
+      # Plans run outside the lock, so an older run can reach here after a newer one
+      # has deployed, for example when it is approved late. Deploying it would put
+      # older code over newer, so it stops. It fails rather than succeeds, so the next
+      # plan doesn't take its commit as deployed.
+      - name: Not older than the last deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main \
+            --event push --status success --limit 1 --json headSha --jq '.[0].headSha // ""')
+          if [ -n "$last" ] && git cat-file -e "${last}^{commit}" 2>/dev/null \
+            && ! git merge-base --is-ancestor "$last" "$GITHUB_SHA"; then
+            echo "::error::A newer commit ($last) has already deployed, and it includes this one. Nothing to do."
+            exit 1
+          fi
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - run: npm ci && npm ci --prefix gateway
       - run: npm test
+
+      # The lock covers this job only, so an earlier run's propose-ids job may still be
+      # pushing new resource ids to deploy/resource-ids. Wait for it, or the check below
+      # misses them and the agents are created twice.
+      - name: Wait for earlier runs' resource ids
+        if: ${{ needs.plan.outputs.agents == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mine=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          for attempt in $(seq 1 60); do
+            waiting=""
+            for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?per_page=30" \
+              --jq ".workflow_runs[] | select(.status != \"completed\" and .created_at < \"$mine\") | .id"); do
+              # Its deploy job is done but the run isn't: propose-ids may be running.
+              done_deploy=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" \
+                --jq '[.jobs[] | select(.name == "deploy" and .status == "completed")] | length')
+              [ "$done_deploy" -gt 0 ] && waiting="$waiting $id"
+            done
+            [ -z "$waiting" ] && exit 0
+            echo "Waiting for run(s)$waiting to finish recording resource ids"
+            sleep 10
+          done
+          echo "::error::An earlier deploy run hasn't finished recording resource ids after 10 minutes. Check it, then re-run this deploy."
+          exit 1
 
       # deploy.ts reads resource ids from deployed.json. While the ids on the
       # deploy/resource-ids branch are unmerged, main doesn't have them, and deploying

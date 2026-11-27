@@ -1,0 +1,58 @@
+name: deploy-supersede
+# A newer push's deploy run deploys everything an older one would: its plan compares
+# with the last successful deploy (decision 82). On each push to main this cancels older
+# deploy runs whose deploy job is waiting for the owner's approval, so only the newest
+# one asks, and an old one can't hold the deploy lock while it waits.
+#
+# It never cancels a run whose deploy job has started: a deploy is never stopped
+# half-way. It holds no deploy secrets, and doesn't take the deploy lock.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+
+jobs:
+  supersede:
+    if: ${{ github.repository_owner == 'accordproject' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Cancel older deploy runs waiting for approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mine=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          deploy_job() { gh api "repos/$REPO/actions/runs/$1/jobs" --jq '[.jobs[] | select(.name == "deploy")][0].status // "none"'; }
+
+          # An older run still in its plan job can reach the approval gate after a first
+          # look, so look again until none is left planning (about 20 seconds each).
+          for attempt in $(seq 1 40); do
+            # Runs for earlier pushes: created before this run, for another commit.
+            older=$(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=30" \
+              --jq ".workflow_runs[] | select(.status == \"in_progress\" or .status == \"waiting\")
+                    | select(.created_at < \"$mine\" and .head_sha != \"$SHA\") | .id")
+            planning=0
+            for id in $older; do
+              case "$(deploy_job "$id")" in
+                waiting)
+                  # Look once more right before cancelling: a run approved since has
+                  # only begun installing, minutes before its first deploy step.
+                  if [ "$(deploy_job "$id")" = waiting ]; then
+                    gh run cancel "$id" --repo "$REPO"
+                    echo "Cancelled deploy run $id: it was waiting for approval, and the run for $SHA deploys its changes too." | tee -a "$GITHUB_STEP_SUMMARY"
+                  fi ;;
+                none) planning=1 ;; # still planning; its deploy job doesn't exist yet
+                # in_progress or completed: deploying or done; never cancel it. Queued
+                # for the lock: GitHub replaces it with the newer run's deploy job.
+                *) ;;
+              esac
+            done
+            [ "$planning" = 0 ] && exit 0
+            sleep 15
+          done
+          echo "::warning::An older deploy run was still planning after 10 minutes; it wasn't cancelled."
