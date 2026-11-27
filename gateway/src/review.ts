@@ -291,6 +291,26 @@ export function mergeChecks(f: PrFacts, reviewedSha: string, review: Review | nu
 export const failed = (checks: Check[]) => checks.filter((c) => !c.ok);
 export const checklist = (checks: Check[]) => checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`).join("\n");
 
+/** True when the only check that fails is GitHub reporting a conflict-free PR as BLOCKED (decision 81). */
+export function blockedOnly(f: PrFacts, checks: Check[]): boolean {
+  const bad = failed(checks);
+  return bad.length === 1 && bad[0].name === "mergeable" && f.mergeable === "MERGEABLE" && f.merge_state === "BLOCKED";
+}
+
+/** What the owner is told about such a PR. GitHub doesn't say why it blocks, so the note gives its review status. */
+export function blockedNote(f: PrFacts, review: Review | null, title: string): string {
+  const [repo, number] = f.target.split("#");
+  return [
+    `Ready, but blocked on GitHub: ${f.target} at ${f.sha.slice(0, 7)}`,
+    `"${title}" by ${f.author ?? "unknown"} · ${f.risk} risk · ${review ? `${review.id}, nothing blocking` : "no review"} · CI ${f.ci}`,
+    `https://github.com/${repo}/pull/${number}`,
+    `GitHub's review status: ${f.review_decision ?? "none reported"}`,
+    f.review_decision === "REVIEW_REQUIRED"
+      ? "It needs a maintainer's approval on GitHub. Once every merge check passes, Mira proposes the merge and you get a card."
+      : "GitHub doesn't give the reason; check the PR's merge box. Once every merge check passes, Mira proposes the merge and you get a card.",
+  ].join("\n");
+}
+
 const FINDING_CARD_MAX = 400;
 
 /**

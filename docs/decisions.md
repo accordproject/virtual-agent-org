@@ -954,3 +954,27 @@ asks to revisit it), **OPEN**, **SUPERSEDED**.
 - Ada still holds no new tool and no side effect beyond messaging the owner.
 - Not chosen: the gateway rendering and hosting the slides itself, which would need
   a public page or a login for one report a week.
+
+**80. Whether the monthly budget is list price or a real balance** · RESOLVED: they are the same
+
+- The gateway's spend figures are Managed Agents list cost, and the scorecards and weekly
+  update marked them as list price rather than the invoice, leaving open which of the two
+  the $200 monthly budget meant.
+- The owner answered: the list price is what the project pays. Spend counts against
+  `monthly_credit_usd` as it is, with no adjustment and no caveat.
+- Vera's spec, the `read_audit` notes and the weekly update's instructions say so.
+
+**81. Clean PRs that GitHub blocks** · RESOLVED (amends 35): the gateway tells the owner
+
+- The gateway refused 26 merge requests on 16–20 November 2026. GitHub reported 24 of
+  those PRs blocked, and for 14 that was the only failed check, so the owner never saw a
+  card, though his approval of one stands in for a maintainer's on a medium-risk PR.
+  A missing approval is the likely reason; GitHub doesn't give one.
+- When a blocked state is the only failed check, the gateway tells the owner, once per
+  head, with the PR link and GitHub's review status. There is nothing to approve: the
+  merge is still refused, and once every check passes Mira proposes it (decision 62).
+- Threads: the check stays as it is, including for threads Mira's own findings open. They
+  were in 10 of the 26 refusals but never the only reason. Revisit if they become the
+  main blocker once approvals arrive.
+- Not chosen: letting the gateway's App bypass the approval rule, which weakens each
+  repo's protection; chasing maintainers by hand.

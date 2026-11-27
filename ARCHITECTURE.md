@@ -121,7 +121,9 @@ review with nothing blocking, green CI, mergeable, no changes requested, no unre
 threads, and, for a high-risk PR, a maintainer's approval on GitHub. For a low or
 medium-risk PR, the owner's approval of the card stands in for it (C-6). The
 card lists the checks, with the files and lines changed, the review's findings by
-severity, the CI runs and links to the PR and diff.
+severity, the CI runs and links to the PR and diff. If the only failed check is that
+GitHub reports the PR blocked, the gateway tells the owner once per head, with the link;
+an approval on GitHub then leads to a merge proposal (decision 81).
 
 ## Safety rules
 

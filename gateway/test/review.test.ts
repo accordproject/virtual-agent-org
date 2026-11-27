@@ -380,6 +380,56 @@ describe("merge checks (decision 35)", () => {
     await expect(merge(ctx, await reviewed(ctx, fakes))).rejects.toThrow(why);
   });
 
+  describe("a PR blocked only by GitHub (decision 81)", () => {
+    const blocked = { mergeState: "BLOCKED", reviews: [] };
+    const notes = (fakes: any) => [...fakes.dms.map((m: any) => m.content), ...fakes.sent.map((m: any) => m.text)].filter((t: string) => t.includes("Ready, but blocked on GitHub"));
+
+    it("is refused, and the owner is told once per head, with nothing to approve", async () => {
+      const { ctx, fakes, gh } = setup(blocked);
+      ctx.network.approvals_app = "discord";
+      const sid = await reviewed(ctx, fakes);
+      await expect(merge(ctx, sid)).rejects.toThrow(/✗ mergeable: GitHub reports BLOCKED[^]*Matt has been told/);
+      await expect(merge(ctx, sid)).rejects.toThrow(/GitHub reports BLOCKED/);
+      expect(notes(fakes)).toHaveLength(1);
+      expect(notes(fakes)[0]).toContain("https://github.com/accordproject/concerto/pull/12");
+      expect(notes(fakes)[0]).toContain("GitHub's review status: REVIEW_REQUIRED");
+      expect(notes(fakes)[0]).toContain("maintainer's approval");
+      expect(await ctx.db.listDecisions({ status: "open" })).toEqual([]);
+      expect(gh.merged).toEqual([]);
+    });
+
+    it("doesn't claim an approval is missing when GitHub doesn't say so", async () => {
+      const { ctx, fakes } = setup({ mergeState: "BLOCKED" });
+      await expect(merge(ctx, await reviewed(ctx, fakes))).rejects.toThrow(/BLOCKED/);
+      expect(notes(fakes)[0]).toContain("GitHub's review status: APPROVED");
+      expect(notes(fakes)[0]).not.toContain("needs a maintainer's approval");
+    });
+
+    it.each([
+      ["a thread is unresolved", { ...blocked, unresolved: 1 }],
+      ["it conflicts", { mergeable: "CONFLICTING" as const, mergeState: "DIRTY", reviews: [] }],
+      ["it is behind its base", { mergeState: "BEHIND", reviews: [] }],
+      ["it is high risk", { ...blocked, additions: 300, deletions: 200 }],
+    ])("sends nothing when %s", async (_why, pr) => {
+      const { ctx, fakes } = setup(pr);
+      await expect(merge(ctx, await reviewed(ctx, fakes))).rejects.toThrow(/can't go ahead yet/);
+      expect(notes(fakes)).toEqual([]);
+    });
+
+    it("goes to Telegram when Discord fails, and a failed send can be tried again", async () => {
+      const { ctx, fakes } = setup(blocked);
+      const sid = await reviewed(ctx, fakes);
+      ctx.network.approvals_app = "discord";
+      (ctx.dc as any).dm = async () => Promise.reject(new Error("Discord is down"));
+      const send = ctx.tg.send.bind(ctx.tg);
+      (ctx.tg as any).send = async () => Promise.reject(new Error("Telegram is down"));
+      await expect(merge(ctx, sid)).rejects.toThrow(/Not queued/);
+      (ctx.tg as any).send = send;
+      await expect(merge(ctx, sid)).rejects.toThrow(/Matt has been told/);
+      expect(fakes.sent.filter((m) => m.text.includes("Ready, but blocked on GitHub"))).toHaveLength(1);
+    });
+  });
+
   it("raises PRs that change workflows to high risk, so the card stays on Telegram", async () => {
     const { ctx, fakes } = setup({ files: ["src/parser.ts", ".github/workflows/ci.yml"] });
     expect(await merge(ctx, await reviewed(ctx, fakes))).toMatch(/Queued as D-2/);

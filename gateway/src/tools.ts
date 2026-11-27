@@ -6,17 +6,18 @@ import { AgentUnavailable, postDecision, refreshDecisionCard, resendDecisionCard
 import { PR_HISTORY, addMonths, communityStats, iso, startOfDay } from "./community";
 import { changeBudget, missingEvidence, proposalGuard, repeatEvidence, submitChange } from "./changes";
 import { cap, type Ctx } from "./context";
-import type { Change, Decision, StartedBy } from "./db";
+import type { Change, Decision, Review, StartedBy } from "./db";
 import { ciSensitivePaths, executeDecision, inScope } from "./executors";
 import { parseTarget, type RepoRef } from "./github";
 import { ACTIVITY_DAYS, activityLine, requestCiFix } from "./githubEvents";
 import { autoReason, recordGithubWrite } from "./githubWrites";
 import { memberOf } from "./people";
 import {
-  GATEWAY_LABEL, KIND_LABELS, checklist, ciApprovalRisks, failed, mergeCard, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
+  GATEWAY_LABEL, KIND_LABELS, blockedNote, blockedOnly, checklist, ciApprovalRisks, failed, mergeCard, mergeChecks, parseFindings, prFacts, publicTextProblems, queueFrom, renderReview, reviewConfig, reviewLabels, type PrFacts, type ReviewFinding,
 } from "./review";
 import { maxRisk, toRisk, type Risk } from "./risk";
 import { schemaProblems } from "./schema";
+import { discordSafe } from "./status";
 import { MAX_DOCUMENT_CHARS, MAX_RESENT_CARDS, READS_ALL_DECISIONS, TOOLS, isToolName, type ToolName, type ToolSpec } from "./toolDefs";
 import { isTechWg } from "./vimeo";
 
@@ -419,7 +420,7 @@ async function readAudit(ctx: Ctx, input: Input): Promise<string> {
   return JSON.stringify({
     period: { since, until: end, timezone: "UTC" },
     notes: [
-      "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started.",
+      "Spend is list cost in US cents from Managed Agents session usage, counted on the day each session started. List cost is what the project pays, and the monthly budget is in the same terms (decision 80).",
       "Sessions from before token and model recording began show 0 tokens and model 'unknown'.",
       "Decision statuses: open, approved (not yet run), executed, failed (approved but the action failed), rejected, lapsed (closed by the gateway because the PR or issue merged, closed or got new commits first, or the agent queued a redraft; neither approved nor rejected). Tool confirmations are excluded.",
       "refusals: custom tool calls the gateway refused for bad input. Cite a refusal or denial as audit:<id>.",
@@ -491,7 +492,8 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
     const review = await ctx.db.latestReview(f.target, f.sha);
     const checks = mergeChecks(f, sha, review);
     if (failed(checks).length) {
-      throw new ToolError(`Not queued. The merge can't go ahead yet:\n${checklist(failed(checks))}\nDon't retry in this session; report it.`);
+      const told = blockedOnly(f, checks) && (await tellBlocked(ctx, agent, sessionId, f, review));
+      throw new ToolError(`Not queued. The merge can't go ahead yet:\n${checklist(failed(checks))}\nDon't retry in this session; report it.${told ? " Matt has been told the PR is ready but blocked on GitHub." : ""}`);
     }
     risk = maxRisk(risk, f.risk === "high" ? "high" : "medium");
     // C-6: the card carries what Matt needs to check the merge from the card alone.
@@ -552,6 +554,36 @@ async function requestAction(ctx: Ctx, agent: string, sessionId: string, input: 
   await postDecision(ctx, d);
   const also = replaced.length ? ` It replaces ${replaced.join(", ")}, which won't be posted.` : "";
   return `Queued as ${d.id}.${also} Do not wait for it: continue with other work. Check the outcome later with get_decisions.`;
+}
+
+/**
+ * Decision 81: tells the owner, once per head, that a PR is ready except that GitHub
+ * blocks it. Nothing to approve here: an approval on GitHub wakes Mira to propose the
+ * merge (decision 62). Sent where his cards go; Telegram if Discord can't take it.
+ * Returns whether he has been told. A failure is audited and never changes the refusal.
+ */
+async function tellBlocked(ctx: Ctx, agent: string, sessionId: string, f: PrFacts, review: Review | null): Promise<boolean> {
+  const claim = `merge_blocked:${f.target.toLowerCase()}@${f.sha}`;
+  if (!(await ctx.db.claimEvent(claim))) return true;
+  try {
+    const app = ctx.network.approvals_app ?? "both";
+    let onDiscord = false;
+    if (app !== "telegram" && ctx.dc && ctx.ownerDiscordId) {
+      try {
+        await ctx.dc.dm(ctx.ownerDiscordId, { content: blockedNote(f, review, discordSafe(f.title)) });
+        onDiscord = true;
+      } catch (e) {
+        await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.discord_error", detail: { target: f.target, error: String(e) } });
+      }
+    }
+    if (!onDiscord || app !== "discord") await ctx.tg.send(ctx.ownerChatId, blockedNote(f, review, f.title));
+    await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.merge_blocked_notice", detail: { target: f.target, sha: f.sha, review_decision: f.review_decision } });
+    return true;
+  } catch (e) {
+    await ctx.db.releaseEvent(claim);
+    await ctx.db.audit({ agent, session_id: sessionId, event_type: "gateway.telegram_error", detail: { target: f.target, error: String(e) } });
+    return false;
+  }
 }
 
 /** Kinds where a newer request from the same agent on the same PR or issue is a redraft of the open one. */

@@ -319,6 +319,7 @@ describe("read_audit (decision 47)", () => {
     expect(r.rejected).toEqual([{ id: no.id, agent: "mira", kind: "github.merge", target: T, note: "tests are thin" }]);
     expect(r.executed_actions.map((a: { id: string }) => a.id)).toEqual([merge.id]);
     expect(r.denials.map((d: { tool: string }) => d.tool)).toEqual(["bash", "read_audit"]);
+    expect(r.notes[0]).toContain("List cost is what the project pays"); // decision 80
     expect(r.tool_calls).toHaveLength(2);
   });
 
